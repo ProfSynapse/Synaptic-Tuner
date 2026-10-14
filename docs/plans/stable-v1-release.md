@@ -31,26 +31,26 @@ The Python API is a library contract, not a deployed HTTP/MCP service.
 ## Current release status — 2026-10-14
 
 The source distribution is still **1.1.0 / Beta**, not a stable release. At this
-checkpoint, main is `35a11c03` through merged [#245](https://github.com/ProfSynapse/Synaptic-Tuner/pull/245).
+checkpoint, main is `b56efba7` through merged [#246](https://github.com/ProfSynapse/Synaptic-Tuner/pull/246).
 HF publication [#238](https://github.com/ProfSynapse/Synaptic-Tuner/pull/238),
 launcher closure [#239](https://github.com/ProfSynapse/Synaptic-Tuner/pull/239),
 cold HF cancellation [#240](https://github.com/ProfSynapse/Synaptic-Tuner/pull/240),
 native GRPO publication [#241](https://github.com/ProfSynapse/Synaptic-Tuner/pull/241),
 HF material preparation [#242](https://github.com/ProfSynapse/Synaptic-Tuner/pull/242),
 Modal capture diagnostics #243, configured Modal lifecycle #244 and finite
-CPU-parent diagnostics #245 each passed all 18 checks on their accepted
+CPU-parent diagnostics #245 and orphaned-cancel observation #246 each passed all 18 checks on their accepted
 heads; each merged tree matches its reviewed head. No stable version,
 tag or package publication has been selected. The dated log below retains exact
 source/wheel hashes, failures and evidence limits; older unavailable/baseline
 summaries are historical rather than current backend verdicts. Counts below are
 overlapping installed lane totals, not a cumulative unique-test count.
 
-The remaining candidate stack [#246](https://github.com/ProfSynapse/Synaptic-Tuner/pull/246)
-through [#247](https://github.com/ProfSynapse/Synaptic-Tuner/pull/247) is separate
-from merged main: CI and merge remain pending at this checkpoint. It adds
-orphaned-cancel observation and same-model nontraining comparison. The merged
-#244/#245 implementations retain their provider-free scope; they do not qualify
-live cancellation or establish earlier attempt causes. Independent source review and
+The remaining candidate [#247](https://github.com/ProfSynapse/Synaptic-Tuner/pull/247)
+at `cf049501` is separate from merged main: CI and merge remain pending at this
+checkpoint. It adds same-model nontraining comparison and optional consumer
+reasoning-effort configuration. The merged #244–#246 implementations retain their
+provider-free scope; they do not qualify live cancellation or establish earlier
+attempt causes. Independent source review and
 local installed acceptance do not substitute for exact-head CI or live qualification.
 
 | Supported preparation/composition | Current accepted evidence | Remaining release work |
@@ -113,7 +113,7 @@ is still necessary. This does not retrospectively establish E's cause.
 The merged #244 Modal lifecycle implementation joins recipe opt-in and current
 caller permission to the existing public cancellation/reconciliation operations. Acknowledgment is
 distinct from an independent provider terminal observation. If an acknowledged
-cancel loses its Foundation receipt before persistence, candidate #246 retains
+cancel loses its Foundation receipt before persistence, merged #246 retains
 the consumed effect and permits known-run reads through the original authenticated
 `FOUND` submit. Pending preserves `CANCEL_INTENT_RECORDED`; independent terminal
 observations preserve the unadvanced cancel intent without inventing a receipt,
@@ -122,7 +122,7 @@ five artifacts. Cancel/reconcile for that orphaned intent remain refused even
 after terminal observation; physical quiescence is not established. Do not claim
 arbitrary crash recovery or live cancellation qualification from the local tests.
 
-Candidate #246 at `9ea8a004` passed **178 installed coordinator/Docker controls**
+Merged #246, accepted source `9ea8a004`, passed **178 installed coordinator/Docker controls**
 and **426 installed native custody controls**, with one portable SFT control
 deselected in the real-seal Python 3.14 lane. Source, wheel and installed production
 bytes matched on wheel
