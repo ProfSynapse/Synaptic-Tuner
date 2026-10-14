@@ -1,0 +1,57 @@
+name: sft-final-cf-completion
+target: cloud
+method: sft
+provider: modal
+job:
+  runtime_profile: qwen35-sft-v1
+  accelerator: L40S
+  accelerator_count: 1
+  timeout_seconds: 900
+  maximum_cost_minor_units: 100
+run:
+  method: sft
+  dry_run: false
+model:
+  name: Qwen/Qwen3.5-4B
+  revision: 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a
+  max_seq_length: 256
+  load_in_4bit: false
+dataset:
+  local_file: .synaptic/tracking/datasets/dataset-58f367d391782375b2fb04c31c5b7c50fec804b35e4a7a54c668433d9018971d/dataset.jsonl
+  schema_version: syntunia-sft-row/v2
+  format: messages
+  use_preassigned_splits: true
+  split_dataset: false
+  expected_digest: 58f367d391782375b2fb04c31c5b7c50fec804b35e4a7a54c668433d9018971d
+  expected_split_counts:
+    train: 6
+    validation: 2
+training:
+  batch_size: 1
+  gradient_accumulation: 1
+  learning_rate: 0.0001
+  max_steps: 2
+  packing: false
+  completion_only_loss: true
+  assistant_only_loss: false
+  prompt_render: prompt_completion
+  require_memory_efficient_loss: true
+  save_steps: 10
+  chat_template_kwargs:
+    enable_thinking: false
+  save_total_limit: 2
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.0
+  target_modules:
+  - q_proj
+  - v_proj
+artifacts:
+  required_kinds:
+  - workload_record
+  - training_lineage
+  - training_metrics
+  - final_model
+  - tokenizer
+  retain_checkpoints: false
