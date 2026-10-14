@@ -900,3 +900,19 @@ machinery. Production capability flags remain disabled, and acknowledgment does
 not establish physical termination. The two cases passed against the accepted
 PR212 installed wheel; this change adds tests and permanent installed CI coverage
 without changing production code.
+
+### Packaged GRPO material admission
+
+The existing host material boundary now selects the exact GRPO core and packaged
+wrapper from the original resolved configuration and retained runtime context.
+It rechecks the public declaration, prepared input, artifact policy and execution
+binding. Retained readback uses that same context; SFT compilation and canonical
+bytes remain unchanged. This does not add an ordinary GRPO recipe or dispatch.
+
+A fresh sdist-built wheel passed the base-only consumer and 247 installed public
+GRPO/declaration/preparation/material controls (1.65 seconds). Its SHA-256 is
+`bb4f08da70da6ee449d23d3c14995da2b5b6aae588b71ff93ce76818a02357d1`.
+Both changed production files matched reviewed bytes; all six source lock checks
+remain current without additional refresh. Explicit test-package imports keep
+the combined installed test collection independent of pytest's import order.
+Independent source and CI review passed; provider/model qualification is open.
