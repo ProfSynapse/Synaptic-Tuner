@@ -427,6 +427,10 @@ class DurablePublicationStoreV1:
     def close(self):
         if self._closed:
             return
+        # Foreign callers must not release the owning thread's active lock.
+        # Only the owner may close retained FDs after a custody-check failure.
+        if self._pid != os.getpid() or self._thread != threading.get_ident():
+            raise _conflict()
         try:
             self._check()
         finally:

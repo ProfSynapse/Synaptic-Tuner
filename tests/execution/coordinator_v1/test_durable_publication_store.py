@@ -376,3 +376,34 @@ def test_private_custody_mutations_refuse(roots, mutation):
         with pytest.raises(PublicationErrorV1):
             store.close()
         assert store._closed and not store._anchors and not store._owned
+
+
+def test_wrong_thread_close_keeps_real_competing_opener_active(roots):
+    private, locks = roots
+    initial = PublicationRecordV1.claim(command(), STAMP)
+    with SQLiteDurableStoreV1(private / "db") as records:
+        with DurablePublicationStoreV1(records, locks) as owner:
+            owner.claim(initial)
+            admission = owner.begin_transfer(
+                initial.command.publication_id, initial.record_digest, STAMP
+            )
+            failures = []
+
+            def foreign_close():
+                try:
+                    owner.close()
+                except Exception as error:
+                    failures.append(type(error))
+
+            thread = threading.Thread(target=foreign_close)
+            thread.start()
+            thread.join(timeout=5)
+            assert not thread.is_alive() and failures == [PublicationErrorV1]
+            assert not owner._closed and owner._owned
+            active = subprocess.run(
+                child_command("active", private), capture_output=True, timeout=15
+            )
+            assert active.returncode == 0, active.stderr.decode()
+            retained = owner.get(initial.command.publication_id)
+            assert retained == admission.record and not retained.recovery_permits
+            assert len(retained.ownership_history) == 1
