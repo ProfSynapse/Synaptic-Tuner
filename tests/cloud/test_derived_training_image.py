@@ -856,7 +856,7 @@ def test_same_version_derived_install_restores_exact_wheel_provenance(tmp_path):
     assert (Path(purelib) / "synaptic_provenance_fixture.py").read_bytes() == members["synaptic_provenance_fixture.py"]
 
 
-@pytest.mark.parametrize("change", ["populate", "replace"])
+@pytest.mark.parametrize("change", ["populate", "replace", "binary"])
 def test_linux_build_preserves_original_docker_config_authority(tmp_path, monkeypatch, change):
     monkeypatch.setattr(derived_image, "_WINDOWS", False)
     profile = _profile(tmp_path / "profile.yaml")
@@ -871,9 +871,11 @@ def test_linux_build_preserves_original_docker_config_authority(tmp_path, monkey
         (operational / ".token_seed").write_bytes(b"synthetic-state")
         if change == "populate":
             (original / "changed").write_bytes(b"changed")
-        else:
+        elif change == "replace":
             original.rename(tmp_path / "original-retained")
             original.mkdir()
+        else:
+            docker.write_bytes(b"replacement-docker")
         return CommandResult()
 
     output = tmp_path / "receipt.json"
