@@ -180,7 +180,7 @@ class ModalJobConfigHandler(BaseHandler):
         return True
 
     def handle(self) -> int:
-        from tuner.training.modal_recipe import load_modal_sft_recipe, plan_modal_sft_recipe
+        from tuner.training.modal_recipe import load_modal_recipe, plan_modal_recipe, ModalGRPORecipePlanV1, ModalGRPORecipeV1
         import yaml
 
         requested = getattr(self.args, "job_config", None)
@@ -214,25 +214,31 @@ class ModalJobConfigHandler(BaseHandler):
             if getattr(self.args, "quote", False):
                 # Billing-rate observation needs only the declared resource,
                 # never the Windows-mounted dataset or build intent.
-                recipe = load_modal_sft_recipe(recipe_path, profiles_root=profiles_root)
+                recipe = load_modal_recipe(recipe_path, profiles_root=profiles_root)
+                if type(recipe) is ModalGRPORecipeV1:
+                    self.output_error("Modal GRPO provider operations are not supported", code="MODAL_GRPO_DISPATCH_UNSUPPORTED")
+                    return 2
                 return self._quote({
                     "accelerator": recipe.accelerator,
                     "accelerator_count": recipe.accelerator_count,
                     "timeout_seconds": recipe.timeout_seconds,
                 })
-            plan = plan_modal_sft_recipe(
+            plan = plan_modal_recipe(
                 recipe_path, project_root=self.project_root,
                 profiles_root=profiles_root, source_root=self.engine_root,
             )
+            if type(plan) is ModalGRPORecipePlanV1 and (attempt is not None or execute_admission is not None):
+                self.output_error("Modal GRPO metrics qualification is not supported", code="MODAL_GRPO_DISPATCH_UNSUPPORTED")
+                return 2
             if getattr(self.args, "plan", False):
                 document = plan.to_dict()
                 from tuner.training.modal_local_preparation import local_readiness
-                from tuner.training.modal_recipe import resolve_modal_sft_build
+                from tuner.training.modal_recipe import resolve_modal_recipe_build
                 from tuner.runtime_profiles import load_runtime_profile
                 selected = load_runtime_profile(
                     plan.recipe.runtime_profile, profiles_root,
-                ).resolve(model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision, method="sft")
-                profile_path, _ = resolve_modal_sft_build(selected, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision, prepared_format=plan.recipe.prepared_format, source_root=self.engine_root)
+                ).resolve(model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision, method="grpo" if type(plan) is ModalGRPORecipePlanV1 else "sft")
+                profile_path, _ = resolve_modal_recipe_build(selected, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision, prepared_format=plan.recipe.prepared_format, source_root=self.engine_root, method="grpo" if type(plan) is ModalGRPORecipePlanV1 else "sft")
                 document["local_readiness"] = local_readiness(profile_path)
                 if attempt is not None:
                     from tuner.training.modal_metrics_qualification import candidate_admission, current_clean_commit, write_candidate
@@ -256,6 +262,9 @@ class ModalJobConfigHandler(BaseHandler):
                     }
                 self.output(document)
                 return 0
+            if type(plan) is ModalGRPORecipePlanV1 and not getattr(self.args, "prepare_local", False):
+                self.output_error("Modal GRPO provider dispatch is not supported", code="MODAL_GRPO_DISPATCH_UNSUPPORTED")
+                return 2
             if getattr(self.args, "qualify", False):
                 return self._qualify(plan)
             if getattr(self.args, "prepare_local", False):

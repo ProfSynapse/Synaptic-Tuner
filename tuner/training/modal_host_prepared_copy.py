@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from copy import deepcopy
 from dataclasses import dataclass
 import stat
 
@@ -111,7 +112,7 @@ def modal_copied_preparation_ports(*, private_root, identity, train_rows=None, v
     return _CopiedPublicationNormalizer(private_root, verifier), _CopiedPublicationConfig(identity), verifier
 
 
-def inspect_mounted_prepared_dataset(source: Path, *, prepared_format="syntunia-sft-row/v2"):
+def inspect_mounted_prepared_dataset(source: Path, *, prepared_format="syntunia-sft-row/v2", snapshot_validator=None):
     """Read-only byte validation, without asserting private-root admission."""
     if os.name != "posix" or type(source) is not type(Path()) or not source.is_absolute():
         raise ModalPreparedCopyUnavailable("modal_source_inspection_unavailable")
@@ -131,6 +132,10 @@ def inspect_mounted_prepared_dataset(source: Path, *, prepared_format="syntunia-
         manifest = _read_member(fd, "manifest.json", manifest_bound)
         dataset = _read_member(fd, "dataset.jsonl", dataset_bound)
         verified = parser(directory, manifest, dataset)
+        if snapshot_validator is not None:
+            if not callable(snapshot_validator):
+                raise TypeError("snapshot validator must be callable")
+            snapshot_validator(deepcopy(verified), dataset)
         if (_read_member(fd, "manifest.json", manifest_bound) != manifest
                 or _read_member(fd, "dataset.jsonl", dataset_bound) != dataset
                 or os.fstat(fd).st_ino != opened.st_ino):

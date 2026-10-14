@@ -71,6 +71,9 @@ class ModalPackagedRequestsV1:
         self._request = prepared_request
         self._run = run
         self._recipes = default_recipe_registry()
+        if TrainingInputV1.from_json(prepared_request.canonical_json).method.value == "grpo":
+            from tuner.training.methods.grpo import GRPORecipe
+            self._recipes.register(GRPORecipe())
         self._service = create_execution_training_service(
             context=context, resolver=_FixedPackagedResolver(components),
             recipes=self._recipes,

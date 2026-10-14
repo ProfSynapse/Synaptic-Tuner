@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import difflib
 import os
+import re
 from pathlib import Path
 from types import MappingProxyType
 
@@ -306,3 +307,182 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
          if "observation_capture" in cfg else None),
         prepared_format,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ModalGRPORecipeV1:
+    """Internal candidate recipe, not a public execution capability."""
+    name: str
+    dataset_locator: str
+    dataset_digest: str
+    row_count: int
+    runtime_profile: str
+    declaration: TrainingInputV1
+    accelerator: str
+    accelerator_count: int
+    timeout_seconds: int
+    maximum_cost_minor_units: int | None
+    child_max_seconds: int
+    prepared_format: str = "synaptic-grpo-prompts/v1"
+
+    @property
+    def model(self):
+        return self.declaration.model
+
+    def training_input(self, dataset_ref):
+        if dataset_ref != self.declaration.dataset.ref:
+            raise ValueError("GRPO prepared ref differs from recipe")
+        return TrainingInputV1.from_dict(self.declaration.to_dict())
+
+    def artifact_policy(self):
+        return ArtifactPolicy(self.declaration.artifacts.required_kinds,
+                              self.declaration.artifacts.retain_checkpoints)
+
+    def packaged_config(self, identity):
+        from tuner.training.grpo_compilation import compile_grpo_input
+        if (type(identity) is not PreparedTrainingInputIdentity
+                or identity.format != self.prepared_format or identity.revision != self.dataset_digest):
+            raise ValueError("GRPO prepared identity differs from recipe")
+        core = compile_grpo_input(self.training_input(identity.ref), identity)
+        return CanonicalDocument.from_mapping({
+            "schema_version": "synaptic-packaged-grpo-config/v1", "method": "grpo",
+            "execution": {"mode": "packaged_runtime"}, "core_workload": core.document,
+            "limits": {"child_max_seconds": self.child_max_seconds},
+        })
+
+
+@dataclass(frozen=True, slots=True)
+class ModalGRPORecipePlanV1:
+    """Core-only preplan; a final workload needs an actual qualified release."""
+    recipe: ModalGRPORecipeV1
+    prepared_identity: PreparedTrainingInputIdentity
+    profile_sha256: str
+    profile_base_image: str
+    runtime_material_intent_digest: str
+    core_workload_digest: str
+
+    def to_dict(self):
+        return {
+            "schema_version": "synaptic-modal-grpo-recipe-plan/v1", "method": "grpo",
+            "runtime_profile": self.recipe.runtime_profile, "profile_sha256": self.profile_sha256,
+            "profile_base_image": self.profile_base_image,
+            "runtime_material_intent_digest": self.runtime_material_intent_digest,
+            "training_input": self.recipe.declaration.to_dict(),
+            "prepared_dataset": self.prepared_identity.to_dict(), "row_count": self.recipe.row_count,
+            "core_workload_digest": self.core_workload_digest,
+            "limits": {"child_max_seconds": self.recipe.child_max_seconds},
+            "execution_status": "unsupported-until-provider-dispatch-integration",
+            "resource_request": {"accelerator": self.recipe.accelerator,
+                "accelerator_count": self.recipe.accelerator_count, "timeout_seconds": self.recipe.timeout_seconds},
+            "operator_maximum_cost": None if self.recipe.maximum_cost_minor_units is None else {
+                "currency": "USD", "minor_units": self.recipe.maximum_cost_minor_units,
+                "semantics": "operator-maximum-not-provider-billing-cap"},
+        }
+
+
+def load_modal_grpo_recipe(path: Path, *, profiles_root: Path) -> ModalGRPORecipeV1:
+    """Consume exact existing public GRPO fields; no reward directory fallback."""
+    cfg = _section(load_recipe(path, "cloud"), {
+        "name", "description", "target", "provider", "method", "job", "run",
+        "dataset", "training_input", "limits",
+    }, "GRPO recipe")
+    run = _section(cfg.get("run"), {"method", "dry_run"}, "GRPO run")
+    if (cfg.get("target") != "cloud" or cfg.get("provider") != "modal" or cfg.get("method") != "grpo"
+            or set(run) != {"method", "dry_run"} or run["method"] != "grpo" or run["dry_run"] is not False):
+        raise ValueError("GRPO requires an explicit real optimization declaration")
+    public = TrainingInputV1.from_dict(cfg.get("training_input"))
+    if public.method is not TrainingMethodV1.GRPO:
+        raise ValueError("GRPO recipe and public method differ")
+    if set(public.artifacts.required_kinds) != set(_ROLES) or public.artifacts.retain_checkpoints:
+        raise ValueError("GRPO requires the complete five native artifacts without checkpoints")
+    dataset = _section(cfg.get("dataset"), {
+        "local_file", "schema_version", "expected_digest", "expected_row_count",
+    }, "GRPO dataset")
+    locator = dataset.get("local_file")
+    digest, rows = dataset.get("expected_digest"), dataset.get("expected_row_count")
+    if (dataset.get("schema_version") != "synaptic-grpo-prompts/v1"
+            or type(locator) is not str or not locator or Path(locator).is_absolute() or ".." in Path(locator).parts
+            or public.dataset.ref != "prepared://sha256/" + str(digest)
+            or type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or type(rows) is not int or not 1 <= rows <= 128):
+        raise ValueError("GRPO publication assertion differs")
+    limits = _section(cfg.get("limits"), {"child_max_seconds"}, "GRPO limits")
+    child_limit = limits.get("child_max_seconds")
+    if type(child_limit) is not int or not 1 <= child_limit <= 86400:
+        raise ValueError("GRPO child budget differs")
+    job = _section(cfg.get("job"), {
+        "runtime_profile", "accelerator", "accelerator_count", "timeout_seconds", "maximum_cost_minor_units",
+    }, "GRPO job")
+    if (type(job.get("runtime_profile")) is not str or type(job.get("accelerator")) is not str
+            or job.get("accelerator") not in MODAL_SFT_ACCELERATOR_RATE_KEYS
+            or type(job.get("accelerator_count")) is not int or job["accelerator_count"] != 1
+            or type(job.get("timeout_seconds")) is not int or not 1 <= job["timeout_seconds"] <= 86400):
+        raise ValueError("GRPO requires a named profile and bounded existing resource")
+    maximum = job.get("maximum_cost_minor_units")
+    if maximum is not None and (type(maximum) is not int or maximum < 1):
+        raise ValueError("operator maximum cost must be positive USD minor units")
+    load_runtime_profile(job["runtime_profile"], profiles_root).resolve(
+        model=public.model.ref, model_revision=public.model.revision, method="grpo")
+    return ModalGRPORecipeV1(cfg.get("name", path.stem), locator, digest, rows, job["runtime_profile"],
+        public, job["accelerator"], job["accelerator_count"], job["timeout_seconds"], maximum, child_limit)
+
+
+def load_modal_recipe(path, *, profiles_root):
+    method = load_recipe(path, "cloud").get("method")
+    if method == "grpo":
+        return load_modal_grpo_recipe(path, profiles_root=profiles_root)
+    return load_modal_sft_recipe(path, profiles_root=profiles_root)
+
+
+def resolve_modal_recipe_build(profile, profiles_root, model, revision, *, method="sft",
+                               prepared_format="syntunia-sft-row/v2", source_root=None):
+    if method == "sft":
+        return resolve_modal_sft_build(profile, profiles_root, model, revision,
+            prepared_format=prepared_format, source_root=source_root)
+    if method != "grpo" or prepared_format != "synaptic-grpo-prompts/v1":
+        raise ValueError("unsupported Modal recipe method or format")
+    from tuner.cloud.derived_training_image import load_profile
+    from tuner.execution.providers.modal.runtime_build import plan_modal_build_material
+    profile.resolve(model=model, model_revision=revision, method="grpo")
+    path = profile.modal_build_profile_path(profiles_root.parent / "image_profiles")
+    intent = plan_modal_build_material(path, **({"source_root": source_root} if source_root is not None else {}))
+    build = load_profile(path)
+    if (build.packaged_runtime is None or intent["profile_digest"] != build.canonical_sha256
+            or intent["base_image"].removeprefix("docker.io/") != profile.image.removeprefix("docker.io/")):
+        raise ValueError("GRPO runtime build identity differs")
+    caps = build.packaged_runtime["capabilities"]
+    if (profile.methods != ("grpo",) or caps["compatibility"]["methods"] != ["grpo"]
+            or {"ref": model, "revision": revision} not in caps["compatibility"]["models"]
+            or prepared_format not in caps["compatibility"]["dataset_formats"]
+            or caps["contracts"] != {"workload_schema": "synaptic-packaged-grpo-workload/v1",
+                "prepared_input_schema": "synaptic-prepared-training-input/v1",
+                "artifact_contract_schema": "synaptic-grpo-artifacts/v1"}):
+        raise ValueError("GRPO runtime build compatibility differs")
+    return path, intent
+
+
+def plan_modal_recipe(path, *, project_root, profiles_root, source_root=None):
+    recipe = load_modal_recipe(path, profiles_root=profiles_root)
+    if type(recipe) is ModalSFTRecipeV1:
+        return plan_modal_sft_recipe(path, project_root=project_root, profiles_root=profiles_root, source_root=source_root)
+    from tuner.training.modal_host_prepared_copy import inspect_mounted_prepared_dataset, _verified_identity
+    from tuner.training.grpo_compilation import admit_grpo_snapshot, compile_grpo_input
+    locator = (project_root / recipe.dataset_locator).absolute()
+    directory = locator.parent if locator.name == "dataset.jsonl" else locator
+    if directory.resolve(strict=True).parent != (project_root / ".tracking/datasets").resolve(strict=True):
+        raise ValueError("GRPO publication outside project dataset root")
+    def validate(manifest, raw):
+        identity = _verified_identity(manifest, recipe.prepared_format)
+        if (identity.revision != recipe.dataset_digest or manifest["row_count"] != recipe.row_count
+                or manifest["prompt_column"] != recipe.declaration.hyperparameters.prompt_column):
+            raise ValueError("GRPO publication differs from recipe")
+        admit_grpo_snapshot(recipe.training_input(identity.ref), identity, raw)
+    manifest = inspect_mounted_prepared_dataset(directory, prepared_format=recipe.prepared_format,
+                                                snapshot_validator=validate)
+    identity = _verified_identity(manifest, recipe.prepared_format)
+    core = compile_grpo_input(recipe.training_input(identity.ref), identity)
+    profile = load_runtime_profile(recipe.runtime_profile, profiles_root)
+    _, intent = resolve_modal_recipe_build(profile, profiles_root, recipe.model.ref, recipe.model.revision,
+        method="grpo", prepared_format=recipe.prepared_format, source_root=source_root)
+    return ModalGRPORecipePlanV1(recipe, identity, profile.profile_sha256, profile.image,
+        intent["intent_digest"], core.fingerprint)

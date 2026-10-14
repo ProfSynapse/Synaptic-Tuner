@@ -292,8 +292,8 @@ def load_runtime_profile(name: str, profiles_dir: Path) -> RuntimeProfile:
     methods = _nonempty_unique_strings(
         compatibility["methods"], "compatibility.methods"
     )
-    if methods != ("sft",):
-        raise RuntimeProfileError("Runtime profile schema v1 supports only method sft")
+    if methods not in (("sft",), ("grpo",)):
+        raise RuntimeProfileError("Runtime profile schema v1 requires exactly one supported method: sft or grpo")
     runtime = profile["runtime"]
     if not isinstance(runtime, dict) or set(runtime) not in (
         {"image", "inventory"}, {"image", "inventory", "packaged_build_profile"}
