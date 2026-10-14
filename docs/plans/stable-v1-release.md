@@ -1228,3 +1228,25 @@ passed the base consumer and all 284 installed evaluation/report controls in
 the wheel and installed package. Seven maintenance checks remain current and
 skill mirrors match. No live provider effects occurred. HTTP response bounds,
 whole-operation deadlines and live account/model qualification remain separate.
+
+### Training-base inventory capture preparation
+
+The existing capture and inspector scripts now offer an explicit training-base
+mode with an immutable Unsloth image, exact interpreter and Modal builder pin
+`2025.06`. The pinned SDK's registry commands must contain only the selected
+`FROM`; modes that install Python, packages or an engine wheel reject before
+provider access. The inspector observes full bounded distribution metadata,
+Python executable and sysconfig facts, and Torch's actual CUDA build value.
+It distinguishes the registry base from the derived script-inspection image.
+This produces candidate facts only; no runtime profile or qualification is
+inferred, and no real image capture has been performed for the GRPO candidate.
+
+Independent source and CI/guide review passed. Root ran 174 capture/inspection
+controls with actual pinned Modal 1.5.4 in 1.26 seconds, with no skips. The
+existing dedicated SDK CI lane now includes the new 33 controls. Both scripts
+match their reviewed Git blobs; all seven maintenance checks remain current
+without inventory or pin changes and skill mirrors match. These are checkout
+maintenance tools: the current wheel and sdist omit both scripts. This evidence
+does not claim installed-script packaging, live provider effects or GPU/model
+compatibility. Genuine base capture is still required before authoring the
+named GRPO candidate profile and its bounded live update plan.
