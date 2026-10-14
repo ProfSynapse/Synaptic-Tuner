@@ -895,7 +895,11 @@ def build_derived_image(
         # Buildx writes operational state even on Linux. Keep that state in
         # this owned temporary config, separate from the immutable empty
         # Docker authority used for subsequent image inspection.
-        command_config = buildx_config
+        command_config = (
+            buildx_authority.config_directory
+            if buildx_authority is not None
+            else buildx_config
+        )
         dockerfile.write_text(dockerfile_text, encoding="utf-8", newline="\n")
         _stage_packaged_inputs(profile, temporary)
         _run_buildx_authorized(authority, buildx_authority, runner, build_command(
