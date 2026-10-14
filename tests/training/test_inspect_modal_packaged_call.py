@@ -1925,3 +1925,20 @@ def test_serving_message_byte_boundary_includes_unprojected_metadata(extra):
     result, _ = _inspect_serving(response)
     assert result["reason"] == ("RECEIVED_BOUND_EXCEEDED" if extra else "SNAPSHOT_ONLY")
     assert "private" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("stage", (
+    "GRPO_ADMISSION", "GRPO_REVALIDATION", "GRPO_PREPARATION", "GRPO_INVOCATION",
+    "GRPO_TRAINER", "GRPO_CHILD_DEADLINE", "GRPO_CLEANUP_UNCERTAIN",
+    "GRPO_ARTIFACT", "GRPO_UNKNOWN",
+))
+def test_actual_grpo_issuer_bytes_are_fixed_diagnostic_failure(monkeypatch, stage):
+    monkeypatch.setattr(diagnostic, "_pinned_python", lambda: True)
+    document = packaged_worker_failure(stage)
+    output = SimpleNamespace(data_format=_Proto.DATA_FORMAT_PICKLE,
+                            result=_Result(_GenericResult.GENERIC_STATUS_SUCCESS,
+                                           canonical_bytes(document)))
+    assert diagnostic._classify_fixed_failure(output, _Proto, canonical_bytes) == f"WORKER_{stage}"
+    document["failure_stage"] = stage + "_PRIVATE_SENTINEL"
+    output.result = _Result(_GenericResult.GENERIC_STATUS_SUCCESS, canonical_bytes(document))
+    assert diagnostic._classify_fixed_failure(output, _Proto, canonical_bytes) == "PROVIDER_SUCCESS_UNKNOWN"
