@@ -935,3 +935,23 @@ actual isolated owned child, native verifier, HMAC completion and reader streams
 with explicit model/image/provider substitutes. Fresh reader construction and
 wrong-signature rejection are covered; full public-host SQLite restart, ordinary
 recipe launch and live GRPO qualification remain separate integration gates.
+
+### Strict GRPO recipe planning
+
+The normal Modal planning surface now accepts a strict GRPO recipe and an exact
+GRPO-compatible named runtime profile. It retains and validates prompt bytes,
+resolves the public GRPO declaration, and binds final material only to genuinely
+prepared local inputs and the original runtime intent. The host-owned planning
+store survives close/reopen after source and recipe removal. Ordinary execution,
+restricted metrics qualification and quoting remain closed pending the normal
+runner integration and live qualification. No candidate profile is promoted.
+
+Fresh sdist-built wheel
+`c4f4bc5123a6d93fb13f1f095f64189ec6785a9ac9c5a927127a915eecef8064`
+passed the base-only consumer and 163 installed host, recipe and profile tests
+(133.02 seconds). All six changed production modules match reviewed source bytes;
+all six lock checks remain current without refresh. Snapshot callbacks receive
+an independently parsed view of the same retained bytes before final identity
+checks; SFT, conversation and GRPO callback controls pass together. Independent
+source and integrated CI review passed. These CPU controls establish planning
+and custody behavior, not cold full-host recovery or provider qualification.
