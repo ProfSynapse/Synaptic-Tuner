@@ -23,55 +23,38 @@
 
 ## Public API and host consumers (Beta)
 
-The current source package is **1.1.0 / Beta**. Installed CPU conformance is not
-final-source live provider qualification or a stable release. Start with the
-[operation and qualification matrix](docs/plans/api-v1-support-matrix.md) for
-supported operations and limits, and the [release plan](docs/plans/stable-v1-release.md)
-for remaining gates.
+`synaptic_tuner.api.v1` provides Data generation/improvement/validation,
+evaluation and report comparison, training, known-run observation/verification,
+and verified artifact download/publication through caller-configured ports.
+The source package is **1.1.0 / Beta**; see the [support matrix](docs/plans/api-v1-support-matrix.md)
+and [release plan](docs/plans/stable-v1-release.md) for current acceptance.
 
-Install a reviewed wheel into your own environment, then check the packaged CLI:
+Install a reviewed wheel into your environment and inspect the packaged CLI:
 
 ```sh
 python -m pip install /absolute/path/synaptic_tuner-1.1.0-py3-none-any.whl
 synaptic --help
 ```
 
-The provider-neutral Python surface is `synaptic_tuner.api.v1`: `DataAPI`,
-`EvaluationAPI`, `TrainingAPI`, `RunsAPI` and `ArtifactsAPI`. The consuming host
-supplies configuration, credentials, grants, stores and selected provider ports;
-importing a facade does not configure or authorize a backend. Optional reference
-composition and caller-owned SQLite are described in the
-[host storage guide](docs/architecture/reference-host-storage.md).
-
-Use the existing **checkout-owned** consumers with the installed engine. From a
-neutral working directory, run their absolute paths with that environment's Python:
+The host owns configuration, credentials, grants and storage. The
+[storage guide](docs/architecture/reference-host-storage.md) shows the optional
+SQLite composition. Existing [nontraining](examples/nontraining/README.md) and
+[SFT](examples/training_qualification/README.md) checkout consumers join the
+public APIs; run their absolute paths with the installed engine from a neutral directory:
 
 ```sh
 python -I /absolute/checkout/examples/nontraining/qualification.py plan /absolute/private/consumer.yaml
 python -I /absolute/checkout/examples/training_qualification/launch.py plan /absolute/private/consumer.json
 ```
 
-Their [nontraining guide](examples/nontraining/README.md) and
-[SFT guide](examples/training_qualification/README.md) explain explicit templates,
-execution, verification and cold readback. Templates contain placeholders and do
-not authorize effects. A nontraining plan is effect-free; the SFT consumer plan
-is a pure material/profile preview, with full public preflight deferred until
-host composition. Examples, source-owned build declarations and maintenance
-scripts are not installed package assets.
-
-The base package has installed compatibility checks on Ubuntu Python 3.10–3.14
-and Windows/macOS Python 3.12. This does not qualify every workflow on those
-platforms: descriptor-based workers and durable publication require local POSIX
-custody; effectful Modal launching requires the exact copied CPython 3.11.14,
-Modal 1.5.4 and hash-pinned launcher closure. HF and trainer dependencies use
-separate pinned environments. There is no implicit SDK/ML install, local GPU
-requirement for base imports, or universal provider capability. Recovery retains
-known-run status/artifacts and uncertainty without replay; it does not resume
-arbitrary interrupted generation or training.
-
-The utility routes below remain useful legacy/config-first workflows. Their
-completion does not establish public API provider parity or qualify an unreviewed
-recipe, image, model or account.
+Replace template placeholders first. Nontraining planning is effect-free; SFT
+planning previews material/profile, with full public preflight at host composition.
+Consumers and source-owned build declarations remain checkout inputs.
+Base install checks cover Ubuntu Python 3.10–3.14 and Windows/macOS Python 3.12.
+Descriptor workers/publication require local POSIX; effectful Modal uses exact
+CPython 3.11.14 / Modal 1.5.4 and its hashed launcher closure. HF/ML dependencies
+use separate pinned environments. The utility routes below support legacy
+config-first generation, training, evaluation and deployment.
 
 ## The Problem
 
@@ -214,7 +197,7 @@ SynthChat (env-backed data)  →  SFT (local or HF Jobs)  →  cloud eval / exac
 - `Trainers/grpo/configs/config.yaml` is the older static projected-dataset GRPO path.
 - `Trainers/grpo/configs/env_config.yaml` is the current environment-backed multi-step GRPO path.
 - Local NVIDIA `train -> grpo` now routes to the env-backed trainer and will bootstrap the isolated GRPO runtime if it is missing.
-- The canonical alignment flow is documented in [.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md).
+- The canonical alignment flow is documented in [.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md](.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md).
 
 ## Config-Driven Architecture
 
