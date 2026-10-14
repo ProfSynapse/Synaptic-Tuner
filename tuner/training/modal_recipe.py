@@ -378,7 +378,7 @@ class ModalGRPORecipePlanV1:
             "prepared_dataset": self.prepared_identity.to_dict(), "row_count": self.recipe.row_count,
             "core_workload_digest": self.core_workload_digest,
             "limits": self.recipe.limits(),
-            "execution_status": "unsupported-until-provider-dispatch-integration",
+            "execution_status": "runtime-binding-and-cpu-qualification-required",
             "resource_request": {"accelerator": self.recipe.accelerator,
                 "accelerator_count": self.recipe.accelerator_count, "timeout_seconds": self.recipe.timeout_seconds},
             "operator_maximum_cost": None if self.recipe.maximum_cost_minor_units is None else {

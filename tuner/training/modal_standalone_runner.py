@@ -312,10 +312,13 @@ class ModalStandaloneCPUQualificationV1:
     training_executed: bool = False
     gpu_qualified: bool = False
     transport_qualification: dict | None = None
+    method: str = "sft"
 
     def to_dict(self) -> dict[str, object]:
+        if type(self.method) is not str or self.method not in ("sft", "grpo"):
+            raise ValueError("invalid CPU qualification report method")
         return {
-            "schema_version": "synaptic-modal-sft-cpu-qualification/v1",
+            "schema_version": f"synaptic-modal-{self.method}-cpu-qualification/v1",
             "runtime_release_digest": self.runtime_release_digest,
             "deployment_facts_digest": self.deployment_facts_digest,
             "qualification_output_sha256": self.qualification_output_sha256,
@@ -326,20 +329,29 @@ class ModalStandaloneCPUQualificationV1:
         }
 
 
-def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
+def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1 | ModalGRPORecipePlanV1,
                        context: object, resources: ResourceSpec,
                        storage: ModalHostStorageV1, effect_id: str,
                        modal_profile: str, modal_environment: str,
                        builder_cache_root: Path, metrics_admission=None, local_inputs=None):
+    if type(plan) not in (ModalSFTRecipePlanV1, ModalGRPORecipePlanV1):
+        raise ModalStandaloneRunUnavailable("modal_host_configuration_invalid")
+    grpo = type(plan) is ModalGRPORecipePlanV1
     profiles_root = context.engine_root / "Trainers" / "runtime_profiles"
     admitted = load_runtime_profile(plan.recipe.runtime_profile, profiles_root).resolve(
         model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision,
-        method="sft",
+        method="grpo" if grpo else "sft",
     )
-    profile_path, build_intent = resolve_modal_sft_build(
-        admitted, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision,
-        prepared_format=plan.recipe.prepared_format, source_root=context.engine_root,
-    )
+    if grpo:
+        profile_path, build_intent = resolve_modal_recipe_build(
+            admitted, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision,
+            prepared_format=plan.recipe.prepared_format, source_root=context.engine_root, method="grpo",
+        )
+    else:
+        profile_path, build_intent = resolve_modal_sft_build(
+            admitted, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision,
+            prepared_format=plan.recipe.prepared_format, source_root=context.engine_root,
+        )
     if (admitted.profile_sha256 != plan.profile_sha256
             or admitted.image != plan.profile_base_image
             or build_intent["intent_digest"] != plan.runtime_material_intent_digest):
@@ -376,7 +388,7 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
         runtime=runtime, private_storage=storage,
         effect_id=effect_id, environment_name=modal_environment,
         **({"capture_progress": True, "transport_root": _private_root()}
-           if plan.recipe.observation_capture is not None else {}),
+           if not grpo and plan.recipe.observation_capture is not None else {}),
     )
     if (type(qualification) is not ModalHostCPUQualificationV1
             or type(qualification.receipt) is not ModalRuntimeReleaseQualificationReceiptV1
@@ -392,15 +404,13 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
     return secrets_port, client, client_binding, runtime, qualification
 
 
-def qualify_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
+def qualify_modal_standalone_job(*, plan: ModalSFTRecipePlanV1 | ModalGRPORecipePlanV1, context: object,
                                  modal_profile: str,
                                  modal_environment: str,
                                  fresh_attempt: bool = False) -> ModalStandaloneCPUQualificationV1:
     """Build/deploy and check the installed CPU worker; never stage training input."""
-    if type(plan) is ModalGRPORecipePlanV1:
-        raise ModalStandaloneRunUnavailable("modal_grpo_dispatch_unsupported")
     if (os.name != "posix" or platform.python_version() != "3.11.14"
-            or type(plan) is not ModalSFTRecipePlanV1
+            or type(plan) not in (ModalSFTRecipePlanV1, ModalGRPORecipePlanV1)
             or plan.recipe.maximum_cost_minor_units is None):
         raise ModalStandaloneRunUnavailable("modal_host_qualification_unavailable")
     local_inputs = None
@@ -436,6 +446,7 @@ def qualify_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                  "verification": qualification.transport_verification.to_dict()
                     if qualification.transport_verification is not None else None}
                 if qualification.transport_probe is not None else None),
+            method="grpo" if type(plan) is ModalGRPORecipePlanV1 else "sft",
         )
     except (ModalHostBootstrapUnavailable, ModalHostQualificationUnavailable, ModalLocalPreparationUnavailable):
         raise
@@ -448,7 +459,7 @@ def qualify_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             local_inputs.close()
 
 
-def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
+def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1 | ModalGRPORecipePlanV1, context: object,
                              modal_profile: str, modal_environment: str,
                              fresh_attempt: bool = False,
                              metrics_admission: MetricsQualificationAdmission | None = None) -> ModalStandaloneRunResultV1:
@@ -457,15 +468,26 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
     No user callback, manually built wheel or provider-specific public API is
     part of this command.  The public TrainingAPI and RunsAPI own the run.
     """
-    if type(plan) is ModalGRPORecipePlanV1:
-        raise ModalStandaloneRunUnavailable("modal_grpo_dispatch_unsupported")
     if (os.name != "posix" or platform.python_version() != "3.11.14"):
         raise ModalLocalPreparationUnavailable("LAUNCHER_PYTHON")
-    if (type(plan) is not ModalSFTRecipePlanV1
+    if (type(plan) not in (ModalSFTRecipePlanV1, ModalGRPORecipePlanV1)
             or type(modal_profile) is not str or not modal_profile
             or type(modal_environment) is not str or not modal_environment
             or plan.recipe.maximum_cost_minor_units is None):
         raise ModalStandaloneRunUnavailable("modal_host_configuration_invalid")
+    grpo = type(plan) is ModalGRPORecipePlanV1
+    if grpo:
+        if metrics_admission is not None:
+            raise ModalStandaloneRunUnavailable("modal_host_configuration_invalid")
+        from tuner.training.grpo_compilation import compile_grpo_input
+        try:
+            core = compile_grpo_input(plan.recipe.training_input(plan.prepared_identity.ref), plan.prepared_identity)
+            model = core.document["model"]
+            if (core.fingerprint != plan.core_workload_digest
+                    or model["tokenizer_revision"] != model["revision"]):
+                raise ValueError
+        except Exception:
+            raise ModalStandaloneRunUnavailable("modal_host_configuration_invalid") from None
     phase: str | None = None
     retained_run = None
 
@@ -503,7 +525,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
         validate_retention_root(prepared_root)
         normalizer, normalizer_config, verifier = modal_copied_preparation_ports(
             private_root=prepared_root, identity=plan.prepared_identity,
-            train_rows=recipe.train_rows, validation_rows=recipe.validation_rows,
+            **({"train_rows": recipe.train_rows, "validation_rows": recipe.validation_rows} if not grpo else {}),
         )
         preparation = TrainingInputPreparationServiceV1(
             prepared_root=prepared_root,
@@ -522,10 +544,16 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             raise ValueError
         identity = prepared.prepared.identity
         resolved_config = recipe.packaged_config(identity)
-        workload = compile_packaged_sft_workload(resolved_config=resolved_config)
-        if (workload.fingerprint != plan.workload_digest
-                or packaged_configuration_digest(resolved_config) != plan.configuration_digest):
-            raise ValueError
+        if grpo:
+            # Final packaged bytes require the actual qualified runtime release.
+            core = compile_grpo_input(recipe.training_input(identity.ref), identity)
+            if core.fingerprint != plan.core_workload_digest:
+                raise ValueError
+        else:
+            workload = compile_packaged_sft_workload(resolved_config=resolved_config)
+            if (workload.fingerprint != plan.workload_digest
+                    or packaged_configuration_digest(resolved_config) != plan.configuration_digest):
+                raise ValueError
         resources = ResourceSpec(recipe.accelerator, recipe.accelerator_count,
                                  recipe.timeout_seconds)
         local_inputs.revalidate(local_inputs.profile_path, plan.runtime_material_intent_digest)
@@ -551,27 +579,36 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             phase = "RUN_HOST_ASSEMBLY"
             release, facts = runtime.release, runtime.facts
             provider_binding = facts.build_provider_binding(release)
-            execution = PackagedExecutionBindingV1.build(
-                run_ref=run_id, runtime_release=release,
-                provider_runtime_binding=provider_binding,
-                prepared_input_ref=identity.ref,
-                prepared_input_revision=identity.revision,
-                prepared_input_content_digest=identity.content_digest,
-                prepared_input_size_bytes=identity.size_bytes,
-                prepared_input_format=identity.format,
-                workload_digest=workload.fingerprint,
-                configuration_digest=packaged_configuration_digest(resolved_config),
-                artifact_policy_digest=packaged_artifact_policy_digest(recipe.artifact_policy()),
-            )
-            components = ResolvedTrainingComponents(
-                execution, CanonicalDocument.from_mapping({
-                    "schema_version": PACKAGED_CONTEXT_SCHEMA,
-                    "runtime_release": release.to_dict(),
-                }), resolved_config,
-                RuntimeSpec(None, release.installed_distributions_digest,
-                            release.python_version, "modal_build", release.material_digest),
-                resources, recipe.artifact_policy(),
-            )
+            if grpo:
+                selected = load_runtime_profile(recipe.runtime_profile,
+                    context.engine_root / "Trainers" / "runtime_profiles")
+                components, workload = bind_modal_grpo_recipe_material(
+                    plan=plan, identity=identity, run_id=run_id, release=release,
+                    provider_binding=provider_binding, profile=selected, local_inputs=local_inputs,
+                )
+                execution = components.execution_source
+            else:
+                execution = PackagedExecutionBindingV1.build(
+                    run_ref=run_id, runtime_release=release,
+                    provider_runtime_binding=provider_binding,
+                    prepared_input_ref=identity.ref,
+                    prepared_input_revision=identity.revision,
+                    prepared_input_content_digest=identity.content_digest,
+                    prepared_input_size_bytes=identity.size_bytes,
+                    prepared_input_format=identity.format,
+                    workload_digest=workload.fingerprint,
+                    configuration_digest=packaged_configuration_digest(resolved_config),
+                    artifact_policy_digest=packaged_artifact_policy_digest(recipe.artifact_policy()),
+                )
+                components = ResolvedTrainingComponents(
+                    execution, CanonicalDocument.from_mapping({
+                        "schema_version": PACKAGED_CONTEXT_SCHEMA,
+                        "runtime_release": release.to_dict(),
+                    }), resolved_config,
+                    RuntimeSpec(None, release.installed_distributions_digest,
+                                release.python_version, "modal_build", release.material_digest),
+                    resources, recipe.artifact_policy(),
+                )
             signer_ref = "modal-runtime-release-qualification-hmac-v1"
             signer = HMACAuthenticator(
                 {signer_ref: runtime.qualification_key},
@@ -733,7 +770,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             phase = "RUN_CALL_OBSERVE"
             progress = None
             progress_result = None
-            if recipe.observation_capture is not None:
+            if not grpo and recipe.observation_capture is not None:
                 progress_result = {"status": "progress_capability_disabled", "records_path": None}
                 try:
                     descriptor = host.composition.runs._descriptor(workflow)
@@ -789,7 +826,7 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             )))
             evaluation_path = None
             evaluation_passed = None
-            if recipe.post_training is not None:
+            if not grpo and recipe.post_training is not None:
                 phase = "RUN_EVALUATION_READ"
                 # Use the existing authenticated Foundation read binding;
                 # evaluation does not create another submission or grant.
