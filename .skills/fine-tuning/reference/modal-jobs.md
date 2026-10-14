@@ -1745,3 +1745,25 @@ unrelated features to satisfy this proof. External provider failures remain poss
 record them separately from reproduced workflow defects and never promise that
 every invocation must succeed. Implementation and live results must be described
 from retained evidence rather than this acceptance target.
+
+### Observing a known run after an uncertain cancellation
+
+Public `RunsAPI.outcome` can observe a run in `cancel_reconcile_required` when
+its original authenticated submission still binds the exact known provider job.
+A pending observation preserves `reconcile_required`; it is not proof of current
+GPU activity. Authenticated success, failure or cancellation can settle the run
+independently of whether the cancellation request was acknowledged. Natural
+completion remains success.
+
+The original uncertain cancellation intent and Foundation history remain intact.
+Observation creates no cancellation acknowledgment, `FOUND` receipt or bound
+cancellation reference, and never repeats cancel, authorizes a new effect or
+renews submission authority. Unknown submission, an uncommitted cancel intent,
+stale or mismatched evidence and read failures remain closed. Ordinary capability
+gates and sealed log restrictions do not change.
+
+Provider-free tests cover cold SQLite public outcomes and a killed Modal host with
+actual signed native GRPO completion, retained keys/context/assessment/catalogs,
+fresh pending/terminal readers and verified five-role downloads. Scripted SDK,
+image and ML boundaries remain explicit; this is host/readback conformance, not
+live provider cancellation or recovery qualification.
