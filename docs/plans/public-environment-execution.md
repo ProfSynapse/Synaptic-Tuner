@@ -1,11 +1,11 @@
 # Public environment execution through DataAPI
 
-Status: admission, immutable input consumption, bounded filesystem and fixed
-child supervisor are implemented and reviewed. Optional host session-factory
-integration implements generation/improvement through the normal DataAPI, with
-installed local workflow and bounded worker cancellation verified, 2026-10-13.
-Complete durable recovery remains open. This is node C of the
-[stable release plan](stable-v1-release.md), not a full stable-release verdict.
+Status: admission, immutable consumption and configured DataAPI session/worker
+execution are implemented with installed CPU evidence. The acknowledged-custody
+fixed guardian now covers owner death and stopped-child termination/cleanup;
+pre-handoff owner loss, guardian/machine loss and unconfirmed cleanup retain their
+limits. This is local supervision, not resumable generation or a full stable
+release verdict. See the [current stable release status](stable-v1-release.md).
 Root owns release task `97d0f9df-6701-4887-a7a3-2993a117f90f`.
 
 ## Existing boundary and reason for a reusable change
@@ -122,12 +122,15 @@ result and list framework were cancelled after user review. They are not require
 for this composition.
 
 The host supplies the private scratch parent, runtime factory and parent-only
-boundary callback. The fixed worker retains directory descriptors and its actual
-`Popen` handle, transports only bounded whitelisted fixture operations, and
-checks the original deadline/cancellation while polling IPC on the owning thread.
-It terminates, escalates when necessary and waits for the exact child before
-parent cleanup. Lost replies, unknown startup, exit or cleanup preserve consumed
-ownership/uncertainty instead of permitting execution again. Infrastructure
+boundary callback. The host supervisor retains scratch anchors and its actual
+guardian `Popen` handle, transports only bounded whitelisted fixture operations,
+and checks the original deadline/cancellation while polling IPC on the owning
+thread.
+After acknowledged custody, a fixed guardian owns the exact worker and scratch
+descriptors. Normal close or owner-pipe EOF requests termination/escalation/wait;
+confirmed child exit precedes guardian cleanup. Parent cleanup retry requires
+confirmed exit and relinquished guardian custody. Lost replies, unknown startup,
+exit or cleanup preserve consumed ownership/uncertainty instead of permitting execution again. Infrastructure
 `WorkerLifecycleError` is fatal and must not become model-quality feedback.
 
 Session closure occurs in `finally`. Cancellation prevents subsequent model/tool/
@@ -135,9 +138,11 @@ row work and requests owned-child termination, while preserving completed rows.
 Unknown active attempts retain RUNNING or CANCEL_REQUESTED with safe diagnostics;
 they are not falsely terminalized. Private controller/descriptors are process-local:
 a cold composition cannot recreate kill authority from a stored PID or declare
-cleanup merely because a receipt is absent. Durable termination/cleanup recovery
-and resumable row checkpoints remain broader stable-release gates. No resume or
-continuation is claimed here.
+cleanup merely because a receipt is absent. Acknowledged-custody owner-death
+cleanup is now tested with real SIGKILL and a stopped worker. Pre-handoff death, guardian/machine loss and unconfirmed cleanup
+remain outside that guarantee. No PID-based adoption, regenerated lease or row
+continuation is claimed here; advertised cancellation still needs actual backend
+qualification.
 
 Worker IPC and termination waits are finite. `Popen` construction and parent
 filesystem setup/cleanup remain synchronous OS calls; this is not a universal

@@ -1,26 +1,30 @@
 ---
 status: release-preparation
 baseline: df166a75
-updated: 2026-10-13
+updated: 2026-10-14
 ---
 
 # API v1 support and qualification matrix
 
-This matrix inventories the selected stable-v1 scope at `df166a75`; it is not a
-release certification. Subsequent work must update individual rows only after
-implementation and exact-source acceptance. Environment rows include later
-admission/snapshot, fixed-worker and installed public local workflow evidence
-through runtime `8de9e430`. Complete durable recovery remains open. The [stable release plan](stable-v1-release.md)
-is the acceptance authority. SFT requires Docker, Modal and HF Jobs parity;
-GRPO selects Modal as the first candidate, still unqualified. DPO/KTO, RunPod,
-Syntunia and broader GRPO provider parity are deferred.
+This is the current support view of the locally accepted preparation stack
+through PR #236 on 2026-10-14, not a stable release certification. Main is
+`ea52fb57` through merged PR #233; PRs #234–236 still await exact CI/merge.
+`df166a75` in the frontmatter is the historical matrix baseline. The
+[stable release plan](stable-v1-release.md) retains current acceptance and exact
+dated source/wheel evidence. SFT requires Docker, Modal and HF Jobs live parity;
+GRPO selects Modal first, with an actual captured but unqualified candidate.
+DPO/KTO, RunPod, Syntunia and additional GRPO provider parity remain deferred.
 
 Status vocabulary:
 
 - **Contract-only:** typed surface or planned semantic operation without a
   usable accepted backend/composition for this claim.
-- **Implemented/provider-free:** code and local/mock behavior exist; real backend,
-  installed consumer and live lifecycle acceptance remain separate requirements.
+- **Implemented/provider-free:** code and local/mock behavior exist; installed
+  acceptance is stated separately for each composition, and live provider
+  qualification remains a separate requirement.
+- **Installed accepted, bounded CPU:** a neutral consumer exercises installed
+  production modules with declared fixtures/local processes. It does not
+  qualify a live model, GPU, provider account or every Python/platform.
 - **Live-qualified, bounded:** evidence establishes the stated operation only on
   its exact source/configuration. It does not qualify current main automatically.
 - **Unavailable/disabled:** absent implementation, missing required host port or
@@ -28,40 +32,40 @@ Status vocabulary:
 
 ## Included workflow operations
 
-| Family / operation | Status at this baseline | Backend evidence and stable gap |
+| Family / operation | Current accepted support | Backend evidence and stable gap |
 | --- | --- | --- |
-| Scenarios: author/edit/version | Existing config-first YAML/CLI authoring; complete public authoring operation unavailable | Scenario/rubric schemas and loaders exist. `DataAPI` consumes scenario refs; it is not a scenario CRUD/version authority. Define immutable public authoring/validation references and installed resources. |
-| Scenarios: validate/select | Implemented/provider-free loaders and validation | Config/scenario validation does not establish semantic input coverage or permission for environment effects. Qualify actual installed assets and representative full scenarios. |
+| Scenarios: author/edit/version | Host-owned config-first YAML and immutable captured refs; no scenario CRUD facade | Existing declarative files/schema/loaders feed DataAPI admission. Document and qualify the supported author/validate/version workflow and actual source coverage; do not invent a separate authoring authority merely to replace host file ownership. |
+| Scenarios: validate/select | Installed loaders, selected dependency capture and bounded validation | Actual scenario/rubric/tool declarations are consumed from retained snapshots. Structural validation does not establish semantic coverage or permission for environment effects. Representative full scenarios remain a release qualification gate. |
 | Environments: config/create/validate | Reviewed admission, retained inputs and installed local host session composition | Optional `ReferenceDataPortsV1.environment_sessions` connects a host-configured factory to existing runtime methods. Public planning/preflight remain effect-free; selected execution requires that factory. No new environment facade or grant framework is required. |
-| Environments: execute/tools/feedback | Installed public local generation/improvement and bounded worker cancellation verified | Runtime `8de9e430` exercises configured tools, fresh fixtures and candidate feedback through DataAPI. Actual stalled-worker cancellation verifies exit/cleanup; uncertainty stays nonterminal and repeated starts do not replay. Complete durable restart/reconciliation remains open. Simulation is explicit; no sandbox or universal wall-clock claim. |
-| SynthChat: plan/preflight/generate | Implemented/provider-free public `DataAPI` + optional reference backend | Host supplies exact `ReferenceDataPortsV1` and LLM clients. Installed local environment workflows use deterministic injected clients; actual model/backend qualification remains open. |
-| SynthChat: improve/judge | Improve mode implemented/provider-free; judge is configured workflow behavior, not a standalone `DataAPI` mode | `DataMode` exposes generate/improve. Judge/rubric client, usage and input lineage need bounded backend qualification; CLI availability is not a public judging-service guarantee. |
+| Environments: execute/tools/feedback | Installed public local worker/session execution and acknowledged-custody owner-death cleanup | Configured tools, fresh fixtures and corrective feedback use normal DataAPI. Real stalled-child/cancel/owner-SIGKILL controls pass; guardian/machine loss and pre-handoff death preserve their limits. No arbitrary row continuation, security sandbox or universal wall-clock claim. Live nontraining/backend qualification remains open. |
+| SynthChat: plan/preflight/generate | Installed public DataAPI with configured reference ports | The 337-control consumer lane joins actual fixed workers and measured scripted LLM calls. Requests and selected inputs are committed before stages; missing clients/factories or changed inputs reject. Real model/account acceptance remains open. |
+| SynthChat: improve/judge | Installed improve plus configured judge behavior | Actual generated bytes are improved and validated, with structured environment feedback and per-run export binding. Judge is workflow behavior rather than a separate DataAPI mode. Paid usage/account acceptance and representative quality/source coverage remain open. |
 | SynthChat: export/datasets/validation | Implemented/provider-free result/dataset operations and validators | Bind immutable export, format, source coverage and split lineage; no manual relabeling. Installed source assets and exact downstream training identities must be checked. |
-| SynthChat: usage/progress/cancel | Implemented/provider-free reference accounting/observations and cancellation state | Paid clients require authenticated spend scope; unmetered paid backends refuse. Cancellation state is not proof of interrupted in-flight work. Restart and real usage settlement remain open. |
+| SynthChat: usage/progress/cancel | Installed accounting, stored observations and cooperative cancellation | Paid unknown usage latches refusal across sibling run clients; measured known retries/local legacy callers retain their behavior. Cancellation prevents later work and requests owned worker termination; it does not stop an in-flight LLM/provider-internal retry. Cold reads preserve original claims/spend without replay or resumable rows. |
 | Text-conversation training preparation | Installed normalizer, independent verifier and immutable source extension | Declarative mapping/target/group splits preserve ordered text messages without invented ingestion ancestry. All 49 installed cases pass. SFT compilation/loading/masking/native verification also pass 47 installed CPU cases. Two installed joined cases now carry real configured Data generation/improvement and environment assertions through immutable preparation and public resolve/plan after raw input deletion. A separate unqualified candidate declares the new format; historical releases still reject it. The normal Modal recipe/copy path now selects it explicitly, covered by 113 installed host cases including scripted public start. Installed hosts now use explicit engine source selection, covered by 122 installed host cases with real local Git and scripted builds. A separately admitted source checkout, image capture and live training qualification remain required. |
 | Dataset validation | Implemented/provider-free `DataAPI.validate` and legacy validators | Real configured catalog/default assets must load in installed consumers; missing defaults cannot silently become empty schemas. Validation does not attest semantic provenance by itself. |
 | Evaluation: plan/preflight/start/status/results | Implemented/provider-free optional `EvaluationAPI` reference composition | Requires explicit backend registry, scenario resolver, grants/spend and host stores. Local HTTP body limits default to 1 MiB each, host-configurable through 64 MiB; exact UTF-8 transport and retained report checks pass installed. Metered/unmetered paid adapters exist; neither a registry entry nor CPU transport tests qualify a live backend. |
-| Evaluation: judge/usage | Configured backend support exists; selected stable paid judge unqualified | Unmetered paid execution refuses `backend_unmetered` before client opening. Select and qualify intended judge/backend accounting and bounded benchmark; do not bypass refusal. |
-| Evaluation: reports/comparison | Installed public comparison of verified retained reports | Existing result requests select exact retained reports verified against stored run bindings; comparison reads survive SQLite reopening without backend execution or scenario rereads. Consumed prompt/scoring/generation controls determine comparability; missing or external judge/environment controls remain unverified. All 209 installed CPU cases pass, including existing renderers. This is configuration provenance, not remote model attestation or quality qualification. |
-| Evaluation: progress/cancel/restart | Observations and cancel-request transitions implemented/provider-free | A cancel request is not terminal cancellation. Durable restart, in-flight interruption/reconciliation and backend conformance remain open. |
-| Artifacts: run inventory/verified download | Implemented/provider-free; bounded historical Modal live proof | Public `RunsAPI` artifact streaming preserves per-file/aggregate bounds and end-to-end hashes. Historical five-file native proof is scoped below; new-source installed acceptance remains required. |
-| Artifacts: destinations/publish/verify | Implemented/provider-free contracts; default reference publication unavailable operationally | Default composition uses empty destination registry, unavailable verified source, in-memory spool/publication store. Host-local and HF model-repository durable transfer/commit/verification must be supplied and qualified. |
-| Artifacts: restart/ambiguous publication | Contract/mechanism pieces, complete supported durable host unavailable | Persist claim/transfer/commit/verified/ambiguous states, expected HF parent/pinned commit and exact reconciliation. HF bucket progress is not model publication; receipt loss cannot authorize duplicate writes/commits. |
-| Host record/stream storage | Optional SQLite implementation; atomic Data/Evaluation/Pipeline/training-workflow head/history updates | [Host storage](../architecture/reference-host-storage.md) documents explicit composition, schema initialization, process-crash boundaries and reopened fake-provider host tests. Reopened records do not restore worker ownership or complete provider/publication recovery. |
+| Evaluation: judge/usage | Installed named metered paid judge and same-scope response/judge accounting | Local response plus paid judge counts only attributable judge usage; paid response/judge share a meter only for the same account/currency. Missing/wrong-shape/raised usage remains indeterminate and subsequent paid calls stop. Optional finite HTTP transport is implemented; genuine paid backend/account qualification remains open. |
+| Evaluation: reports/comparison | Installed public retained-report comparison and SQLite readback | Signed run/role bindings and consumed input/scoring/generation controls determine comparability. Missing/external judge/environment provenance remains unverified; comparison does not settle unknown spend. The 337 installed lane includes actual public comparison/renderer/consumer joins. This is configuration provenance and mechanical score comparison, not remote model or quality attestation. |
+| Evaluation: progress/cancel/restart | Stored lifecycle/progress/cancel state and cold result/report reads | Retained reports read/compare without reopening backends. Interrupted active work remains truthful and non-replayable; no mid-case continuation or forced in-flight HTTP termination is claimed. Advertised real backend cancellation/recovery still needs qualification. |
+| Artifacts: run inventory/verified download | Installed public native verification/stream/download; historical exact-source Modal live proof | Ordinary Docker/HF consumer lanes pass 61/80 controls and the native/local join passes 73. Original role/hash/size plus chunk/EOF bounds are enforced. Historical live five-file proof does not qualify the final source on all providers. |
+| Artifacts: destinations/publish/verify | Optional installed durable local destination/source composition; default registry remains empty | Caller supplies original publication authority and existing stores/spool/registry. Local exclusive files and authenticated marker are implemented; source join uses trusted RunsAPI stored verified manifests and actual public streams. Usable HF model-repository publication remains an implementation and live gate. |
+| Artifacts: restart/ambiguous publication | Installed local actual-process marker lookup recovery | Real killed-publisher/first-new-SQLite-opener controls verify original markers without source streams or new writes; incomplete markers stay ambiguous, never absent/retry authority. HF expected-parent/owned immutable snapshot reconciliation remains separate; bucket progress is not final model publication. |
+| Host record/stream storage | Optional caller-owned SQLite plus atomic heads/history and retained catalogs | Data/Evaluation/Pipeline/training stores preserve exact claims/plans/history; local publication adds retained OS ownership. [Host storage](../architecture/reference-host-storage.md) states cold prerequisites. Storage does not recreate credentials, active worker/source lease or remote continuation authority. |
 
 ## Training provider and lifecycle matrix
 
 | Route / operation | Current support | Evidence and release requirement |
 | --- | --- | --- |
 | SFT generic plan/preflight/start | Implemented/provider-free public `TrainingAPI` and SFT compiler | Compile exact recipe/input/runtime identities, then host-owned grants and coordinator effects. Not every named recipe/model/hardware combination is qualified. |
-| SFT Docker start/observe/artifacts | Implemented/provider-free explicit durable host composition | Scripted CLI tests exercise exact source staging, native verification and reopened SQLite reads/downloads with original material and keys. Real public SFT/GPU conformance remains open; use an authorized machine with usable GPU, not this server's failed GPU. |
-| SFT Docker logs/cancel/reconcile | Explicit durable host has opt-in bounded cancellation; ordinary logs/reconcile unavailable | Exact-container stop requests retain one-shot claims and authenticated receipts. Stop acknowledgment does not prove causal cancellation; natural completion retains its actual result. The older same-process composition still rejects cancellation. Actual process-loss and live lifecycle parity remain open. |
+| SFT Docker start/observe/artifacts | Installed explicit durable host and ordinary consumer | Exact declared local Unix endpoint, daemon/image/container/source identity and native five-role streams are exercised with scripted CLI replies. Cold reads retain material/profile/request/keys, image verification inputs, mounts and installed closure. Live public SFT/GPU conformance remains open. |
+| SFT Docker logs/cancel/reconcile | Profile-selected cancellation and retained known-receipt reconciliation; logs unavailable | Exact-container stop is one-shot; acknowledgment and natural terminal truth remain distinct. Default/unpromoted capability refusals remain enforced. The older same-process composition still rejects cancellation. Final-source live cancellation/recovery parity remains open. |
 | SFT Modal start/observe/verified artifacts | Implemented plus bounded exact-source live qualification | Historical native and restricted GPU pair verify reviewed runs; they do not establish final stable candidate or every recipe. Exact runtime/launcher/profile and source pins remain required. |
 | SFT Modal logs | Conditional implemented gate plus bounded CPU transport qualification | Generic preparation descriptor has logs false. Supported host composition enables logs only with exact matching reader-issued CPU probe proof and durable capture. Historical success/JSON cannot mint new authority. |
-| SFT Modal cancel/reconcile/cost quote | Public contract and internal mechanisms; ordinary operational descriptor disabled | Preparation descriptor advertises observe/artifact streaming, with cancel/reconcile/cost quote false. Existing quote/example lanes are not universal public capability. Stable cancellation/reconciliation and restart closure remain open. |
-| SFT HF Jobs public API v1 | Implemented/provider-free explicit ordinary SFT composition | Public start/observe/native verification/download uses existing host stores and authority, pinned SDKs and the declared runtime profile. Initial native acceptance requires prepared v1 inputs up to 2 MiB and exactly five final roles without checkpoint retention. Controlled SDK/bootstrap/SQLite tests do not qualify live HF, GPU, cancellation, reconciliation or full restart recovery. Legacy/protected lanes remain separate. |
-| GRPO Modal public training route | Public declarations, immutable preparation and explicit pure compiler implemented; executable backend and live acceptance unavailable | 233 installed CPU cases cover GRPO input/reward bindings, actual retained-core admission and legacy SFT compatibility. The default registry remains SFT-only. Separate GRPO child/source inventory, native verification, named runtime profile and actual provider qualification remain open. Candidate stack presence is not admission or success. |
-| Training restart/recovery, all providers | Durable host stores and bounded retained reads implemented; complete recovery unavailable | Modal known-call tests include an actual killed host and fresh-process public readback; Docker/HF tests reopen SQLite with the same scripted provider and original material/keys. These establish their stated boundaries, not every crash point or live remote recovery. Preserve consumed uncertain submissions without replay or renewed authority. |
+| SFT Modal cancel/reconcile/cost quote | One-shot internal machinery; ordinary default flags remain off | Explicit qualified profile/current-cancel policy is required; logs/quote/cancel/reconcile are not promoted by historical or CPU fixture success. Known terminal observations can progress after uncertain cancellation without fabricating acknowledgment. Real final-source lifecycle parity remains open. |
+| SFT HF Jobs public API v1 | Installed ordinary public host/consumer and source-free known-job reader | Pinned host Hub 1.33/model helper 1.32; exact request/job/mount/secret-ref/native bindings. Initial lane uses prepared v1 ≤2 MiB and exactly five final roles without checkpoints. Warm cancel/reconcile machinery retains ACK-only receipts and defaults off; configuration-candidate audit/possible work remains before a qualified advertised route. Source-free cold view denies cancel/reconcile/logs/reverify. Live SFT/cancel/recovery qualification remains open; protected lane stays separate. |
+| GRPO Modal public training route | Installed explicit compiler/preparation, isolated child/native verification, normal runner and known-run reads | Default method registry remains SFT-only; GRPO is explicitly selected. Captured SmolLM candidate retains actual 396-distribution base and passed 256 installed controls. The augmented image/model/GPU route remains unqualified; native completion and changed/grouped-variation evidence are separate, with inconclusive results preserved. |
+| Training restart/recovery, all providers | Bounded retained known-run/status/artifact recovery and no uncertain replay | Actual process-loss proofs preserve original host keys/material/catalogs and scripted provider inputs. Modal/HF known-job read views avoid original source/preparation; Docker keeps its explicit cold dependencies. Unknown submissions are not adopted. This is not arbitrary checkpoint continuation, and live three-provider recovery/cancellation parity remains open. |
 
 ## Exact historical live evidence
 
@@ -82,20 +86,34 @@ provider-free imports do not qualify every advertised Python/platform. Effectful
 Modal launching requires exact POSIX CPython 3.11.14 / Modal 1.5.4 and its pinned
 closure. Do not equate these with a universal library install requirement.
 
-Public schemas and workflow asset/catalog packaging are release preparation
-work. PR #178 merged the public schema inventory; preparation source `268fc534`
-passed checkout and sdist-built wheel asset checks plus a fresh base consumer in
-a neutral working directory. Catalog resolution and evaluator startup are tested
-without optional ML dependencies. Snapshot workflow source `f7d2df31` passed 793
-combined checks, including retained-input generation and improvement after source
-deletion. Fixed-worker source `27dde56e` adds accepted process/fixture primitives
-and the permanent neutral installed smoke. Public local runtime `8de9e430` passed
-916 combined tests with one intentional skip; its sdist-built wheel passed 51
-session/public cases with the non-worker SIGSTOP variant skipped. Permanent CI
-runs those tests with installed production modules and no checkout imports.
-Durable worker restoration and resumable continuation remain unqualified.
-Selected ML/GPU operations still require their real
-dependencies. Source checkout success alone is not installed workflow acceptance.
+Declared public schemas, catalogs, selected runtime profiles and separate fixed
+SFT/GRPO/HF source/dependency inventories are packaged and exercised through fresh
+sdist-built wheels with installed-origin/byte checks. Base installs include
+`jsonschema`; SDK/ML stacks remain explicit optional/pinned environments, not
+implicit imports or runtime upgrades. CPU evidence uses supported 3.12 consumers
+and selected real-seal/worker controls on 3.14; the portable SFT fixture deliberately
+rejects 3.14. Neither that split evidence nor metadata proves all interpreters.
+
+The `synaptic` console entrypoint is packaged. Host consumers under
+`examples/nontraining` and `examples/training_qualification`, maintenance capture
+scripts and source-owned image-build YAML are checkout inputs, not installed
+engine Python. CI copies those declared consumers/tests/data while importing
+production modules only from the wheel. Selected runtime YAML/inventory and
+trainer schemas/manifests stay installed; packaging a model profile does not
+qualify its image or GPU.
+
+An installed Modal host can explicitly select an accepted clean engine source
+through `SYNAPTIC_ENGINE_ROOT` / `ProjectContext.engine_root`. It builds that exact
+source while retaining installed policy/inspector agreement, original source
+intent and existing pushed/gitlink requirements where applicable. A wheel alone
+is not a Git build checkout; cold known-run reads do not replan current recipes
+or rebuild an image. Actual cold `--prepare-local` source-wheel creation is currently blocked by
+omitted build helper/schema/tool assets in its archive; the correction and real
+offline build proof are pending. The source-root handoff tests do not qualify
+that broken cold path. Exact launcher and provider image/child pins stay separate
+from the library's broad Python metadata. Linux/POSIX descriptor/lock/guardian
+operations and no local GPU are explicit boundaries, not Windows/macOS runtime
+qualification. Final supported platform/asset/release artifacts remain a gate.
 
 HTTP/SSE/browser transport, auth service, credentials, durable grants/stores and
 product state belong to a consuming host; API v1 exports do not supply a
@@ -120,5 +138,7 @@ record/stream stores. The proposed additional grant/episode contract framework a
 parallel v2 outcome/result/list family were cancelled; they are not acceptance
 requirements. Host-supplied policy and a session factory do not automatically
 qualify restart, cancellation or safe continuation. Unknown active attempts retain
-their uncertainty and cannot be replayed or falsely terminalized. Fixed-worker
-process descriptors are local custody, not a restored durable controller.
+their uncertainty and cannot be replayed or falsely terminalized. The fixed worker guardian owns acknowledged local custody and cleans up only
+after confirmed child exit. Pre-handoff owner loss, guardian/machine loss and
+unconfirmed cleanup stay outside that guarantee; no durable controller or row
+continuation is reconstructed from a PID.

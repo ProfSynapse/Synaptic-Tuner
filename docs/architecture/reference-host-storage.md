@@ -47,17 +47,19 @@ secrets or using provider catalogs.
 
 Recomposition still requires the original admitted prepared material, provider
 configuration, signing keys and retained Modal call/binding catalogs. These
-inputs are explicit constructor arguments; a workflow database does not replace
-them. New standalone Modal training runs select one SQLite instance for both
-ports under their existing private run directory.
+inputs are explicit warm constructor arguments; a workflow database does not
+replace them. The retained reader below supplies only its authenticated known-run read
+projection, without reconstructing executable source authority. New standalone
+Modal training runs select one SQLite instance for both ports under their existing private run directory.
 
 Provider-free tests close and reopen both the generic workflow database and the
 existing Modal catalog storage, then construct fresh effects, adapter and host
 objects against the same mocked provider. They exercise retained public reads
 without another training submission. They do not restore process-local source
 payloads or stage effects, enable cancellation/reconciliation, or recreate the
-sealed qualification object needed for restricted logs. Live provider restart
-and safe continuation remain separate release gates.
+sealed qualification object needed for restricted logs. Live known-run provider
+recovery remains a release gate; arbitrary continuation is not a claim of this
+composition.
 
 ## Standalone run retention
 
@@ -83,10 +85,14 @@ are never overwritten to retry the write. The loader checks private file
 custody, byte integrity and run/scope associations. It does not replace typed
 runtime validation or grant new execution authority.
 
-This supplies the original inputs needed for a future standalone reader.
-There is no standalone readback command yet, and it cannot recover signing keys
-that older runs never retained. In-flight recovery, continuation and disabled
-provider capabilities remain open release requirements.
+The existing `open_retained_modal_runs` reader and generic runs CLI
+(`show`, `observe`, `verify`, `download`) now consume those original retained inputs through RunsAPI. Exact known calls
+can be observed without current recipe/source replanning; terminal verified reads
+avoid provider polling. They cannot restore keys that older runs never retained,
+renew a submit claim, discover an unknown call, reconstruct an input lease or
+continue interrupted training. Original catalogs, scope and signing keys remain
+required. Default/unsupported capabilities remain refused; real provider lifecycle
+qualification is separate. See the [current operation matrix](../plans/api-v1-support-matrix.md).
 
 ## Transactions and compatibility
 
@@ -136,8 +142,10 @@ behavior, not fresh remote-provider qualification.
 
 This store also accepts the other public storage partitions, but the atomic
 head/history integration is scoped to the four stores named above.
-Complete training recovery, provider call catalogs, durable artifact
-publication and end-to-end host migrations remain separate release gates.
+Supported known-run recovery and optional durable local publication are described
+below and in the current operation matrix. Real provider lifecycle parity,
+HF final publication and final supported-host migration/release acceptance remain
+separate gates; stored state does not promise arbitrary continuation.
 See the [stable release plan](../plans/stable-v1-release.md).
 
 ## Optional durable publication records
