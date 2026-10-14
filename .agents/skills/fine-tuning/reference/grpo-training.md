@@ -11,8 +11,10 @@ join for an explicitly compatible host-supplied profile**. It does not establish
 model/image compatibility or qualify GRPO training. The legacy trainer commands below remain separate. The generic Modal private-copy
 helper can preserve an already verified GRPO prompt publication through these
 ports. A strict normal Modal recipe can report a core-only preplan when the host
-supplies an explicitly compatible named GRPO profile; no ordinary candidate
-profile/image is shipped or qualified yet. Missing or incompatible profiles reject.
+supplies an explicitly compatible named GRPO profile. The additive
+`smollm2-135m-grpo-candidate-v1` profile now retains an actual CPU base capture;
+its augmented image, model, GPU and updates remain unqualified. Missing or
+incompatible profiles reject.
 Ordinary execution and CPU qualification use the normal pinned host path.
 Provider quotation and metrics qualification remain refused for GRPO.
 
@@ -594,6 +596,39 @@ env-GRPO smoke job and confirm the run does not raise a length/logprob mismatch.
 ## Platform Note
 
 GRPO requires **WSL/Linux only** — native Windows is not supported.
+
+
+## Captured ordinary candidate configuration
+
+`examples/grpo_captured_candidate` provides four explicit message-list prompts,
+a configured blue-word regex reward, a genuine preparation-service example and a
+normal Modal recipe for the named SmolLM2-135M candidate. It declares three steps,
+four generations, FP16, rank-eight q_proj/v_proj adapters and bounded G4 evidence.
+Read its complete README and review the actual prompts/reward before GPU use.
+There is no guaranteed grouped reward variation; zero/unchanged evidence stays
+inconclusive without retry or promotion. The existing GRPO quote flags remain
+unsupported; prepare resource costs through the existing read-only rate workflow.
+
+The exact base inventory has 396 distributions, captured under reviewed source
+`bde909346278d9ec4399a8244f5948440c4b5d8f`, builder `2025.06`, CPython 3.11.14 and
+its observed executable/library roots. Capture SHA256 is
+`33bb4fa0eec173dda12882a5c5d34c5d643f2b92f1dc32addd3a6009de879ac7`;
+canonical inventory bytes plus newline have SHA256
+`46f0feddd1ba6d5e155dfb227d92679f9afd65634b98d80260cf0517b4b102cd`.
+This script-copy-derived CPU observation imported Torch for CUDA build metadata;
+it did not attest registry-base byte identity or load a model. Original CLI exit
+zero requires terminate/poll cleanup in that reviewed source; no independent
+subsequent cleanup observation is claimed.
+
+The source/host-owned image profile is excluded from the referenced wheel. Its
+actual accepted wheel anchor is replaced by the actual newly built current-source
+wheel in bound build material, using the existing normal builder. Never invent a
+future SHA or embed a circular self-hash. Actual derived-image inventory and CPU
+GRPO qualification remain separate from the 396-distribution base observation.
+The old SFT profiles and fixed SFT68/outer5 and GRPO131/outer13 inventories stay
+unchanged. Installed candidate tests require an actual fresh wheel, verify the
+runtime YAML/inventory are shipped and the source image profile is absent, and
+label their synthetic Git preplan observation as CPU control-flow evidence only.
 
 ## Optional bounded training measurements
 

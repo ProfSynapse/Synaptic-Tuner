@@ -1,0 +1,17 @@
+# Candidate only: actual CPU base inventory, not GPU/model/update qualification.
+# Capture33bb4fa0eec173dda12882a5c5d34c5d643f2b92f1dc32addd3a6009de879ac7.
+schema_version: syntunia-runtime-profile/v1
+name: smollm2-135m-grpo-candidate-v1
+compatibility:
+  models:
+  - name: HuggingFaceTB/SmolLM2-135M-Instruct
+    revisions:
+    - a91318be21aeaf0879874faa161dcb40c68847e9
+  methods:
+  - grpo
+runtime:
+  image: docker.io/unsloth/unsloth@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39
+  packaged_build_profile: smollm2_135m_packaged_grpo_candidate_v1
+  inventory:
+    path: smollm2-135m-grpo-candidate-v1.inventory.json
+    sha256: sha256:46f0feddd1ba6d5e155dfb227d92679f9afd65634b98d80260cf0517b4b102cd
