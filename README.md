@@ -1,8 +1,8 @@
 # HF SFT qualification host fixture
 
 This dedicated host branch is not an engine PR. Its engine Gitlink is exactly
-d4940634d0b278358fd9b851605f84986d3da57d, with the actual pushed
-`release/derived-bootstrap-integration` branch hint. Verify its actual public
+1da0a80891bd9c63f5635a1133275907a2f5f366, with the actual pushed
+`release/stable-candidate-integration` branch hint. Verify its actual public
 branch HEAD before authenticating a new source proof. Do not substitute `main`
 for this exact selected source.
 The host itself must be reviewed/pushed and its exact branch verified before
@@ -55,7 +55,8 @@ No Job, bucket creation/upload, model download, image build or paid training was
 performed. Existing capability defaults and lost-reply/no-replay rules remain.
 
 This candidate rebind preserves the original 7df0a0bf host history and exact
-eight authored rows. The current engine includes the reviewed source-preparation union and exact
-bootstrap provenance reinstall correction. Verify its
+eight authored rows. The current engine includes the reviewed source-preparation union, bootstrap
+provenance correction, Linux builder isolation and intended stable metadata.
+The selected package version remains 1.1.0; final qualification is still pending. Verify its
 actual pushed branch and this host ref before source authentication. CI and live
 qualification are separate; this fixture alone grants no effects. Owner selected private professorsynapse/toolset-training-artifacts, but no job/upload/model download is authorized by this host. Fresh local source/authority/reader keys and caller config remain private, outside tracked files.
