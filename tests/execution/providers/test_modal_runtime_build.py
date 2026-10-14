@@ -556,8 +556,10 @@ def test_wheel_archive_rejects_head_change_before_builder(monkeypatch, tmp_path)
         if "archive" in command:
             assert command[3:] == [
                 "archive", "--format=tar", first,
-                "pyproject.toml", "README.md", "LICENSE", "tuner", "synaptic_tuner",
-                "shared", "SynthChat", "Evaluator", "MechInterp", "Trainers",
+                "pyproject.toml", "README.md", "LICENSE", "MANIFEST.in",
+                "_build_support.py", "cli-first-tool-schemas.json", "Tools/tool_schemas.json",
+                "tuner", "synaptic_tuner", "shared", "SynthChat", "Evaluator",
+                "MechInterp", "Trainers", "schemas",
             ]
             return subprocess.CompletedProcess(command, 0, b"not-needed", b"")
         pytest.fail("builder must not start after HEAD changes")

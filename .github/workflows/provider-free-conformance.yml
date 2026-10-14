@@ -115,11 +115,16 @@ on:
       - "scripts/regenerate_grpo_worker_closures.py"
       - "scripts/regenerate_hf_parent_closure.py"
       - "tests/execution/providers/test_modal_training_base_capture.py"
+      - "tests/execution/providers/test_modal_source_wheel_build.py"
       - "scripts/capture_modal_inference_runtime.py"
       - "scripts/inspect_modal_inference_runtime.py"
       - "scripts/ci_pytest_shard.sh"
       - ".gitattributes"
       - "pyproject.toml"
+      - "_build_support.py"
+      - "MANIFEST.in"
+      - "cli-first-tool-schemas.json"
+      - "Tools/tool_schemas.json"
       - ".github/workflows/provider-free-conformance.yml"
   push:
     branches: [main, feat/submodule-cloud-api-v1, feat/submodule-cloud-api-v1-windows]
@@ -1408,6 +1413,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up supported Python
+        id: modal-diagnostic-python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
@@ -1439,6 +1445,35 @@ jobs:
 
       - name: Run packaged-call, progress and base-capture contracts with the pinned SDK
         run: python -B -m pytest -q -p no:cacheprovider tests/training/test_inspect_modal_packaged_call.py tests/execution/providers/test_modal_sdk_progress_handle.py tests/execution/providers/test_modal_sdk_cancel_handle.py tests/execution/providers/test_modal_training_base_capture.py
+
+      - name: Set up exact source-wheel builder Python
+        id: modal-source-python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11.14"
+
+      - name: Prepare isolated locked source-build controller
+        run: |
+          python -m venv --copies --without-pip "$RUNNER_TEMP/modal-source-controller"
+          python -m pip --python "$RUNNER_TEMP/modal-source-controller" install \
+            --require-hashes --no-deps --only-binary=:all: \
+            -r requirements/modal-launcher-v1.lock
+          python -m pip --python "$RUNNER_TEMP/modal-source-controller" install \
+            --no-deps "$RUNNER_TEMP"/wheelhouse/synaptic_tuner-*.whl
+          "$RUNNER_TEMP/modal-source-controller/bin/python" -I - <<'PY'
+          import platform
+          from importlib.metadata import version
+          assert platform.python_version() == "3.11.14"
+          assert version("modal") == "1.5.4"
+          PY
+
+      - name: Build actual selected source wheel and verify public assets
+        env:
+          SYNAPTIC_TEST_MODAL_SOURCE_WHEEL_PYTHON: ${{ runner.temp }}/modal-source-controller/bin/python
+        run: |
+          "${{ steps.modal-diagnostic-python.outputs.python-path }}" -B -m pytest \
+            --confcutdir=tests/execution/providers -q -p no:cacheprovider \
+            tests/execution/providers/test_modal_source_wheel_build.py
 
   conformance-gate:
     name: CPython 3.12 / pytest 8

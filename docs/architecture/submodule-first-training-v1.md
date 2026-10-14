@@ -1,11 +1,12 @@
 # Submodule-first training product v1
 
-Status: Phase 0 evidence and contract baseline
-Current implementation correction: see the dated coordinator checkpoint below;
-the frozen matrix remains historical evidence for its explicitly named commit.
-Current main-merge review pointer (2026-10-07):
-[`../review/api-v1-release-readiness.md`](../review/api-v1-release-readiness.md)
-tracks the `80d9a063` candidate's narrow scope, evidence limits and open gates.
+Status: historical product boundary and frozen evidence matrix.
+The dated checkpoints and capability matrix below describe their named sources;
+they are not the current backend inventory or release verdict. Current accepted
+composition/packaging status is in the [stable release plan](../plans/stable-v1-release.md)
+and [operation matrix](../plans/api-v1-support-matrix.md).
+The [October 7 readiness review](../review/api-v1-release-readiness.md) remains
+historical evidence for its explicitly scoped candidate.
 Approved roadmap: [`../plans/submodule-first-training-product-roadmap-plan.md`](../plans/submodule-first-training-product-roadmap-plan.md)
 
 This document is the authoritative product boundary and evidence matrix for the

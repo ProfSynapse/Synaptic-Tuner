@@ -39,9 +39,10 @@ _MAX_CAPTURE_BODY_BYTES = 128 * 1024
 _SOURCE_STATUS_TIMEOUT_SECONDS = 120
 _BUILDER_ATTESTATION = object()
 _WHEEL_SOURCE_PATHS = (
-    "pyproject.toml", "README.md", "LICENSE",
+    "pyproject.toml", "README.md", "LICENSE", "MANIFEST.in",
+    "_build_support.py", "cli-first-tool-schemas.json", "Tools/tool_schemas.json",
     "tuner", "synaptic_tuner", "shared", "SynthChat", "Evaluator",
-    "MechInterp", "Trainers",
+    "MechInterp", "Trainers", "schemas",
 )
 _SOURCE_STATE_REASONS = (
     "INPUT_INVALID", "HEAD_BEFORE_UNAVAILABLE", "HEAD_BEFORE_MISMATCH",

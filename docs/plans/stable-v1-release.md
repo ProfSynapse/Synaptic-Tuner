@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: release-preparation
 scope: OSS API v1 stable workflow release
 baseline: 321a085f
 updated: 2026-10-14
@@ -14,8 +14,9 @@ SFT, GRPO, evaluation/reports/comparison and artifacts, with durable host
 composition, restart recovery, cancellation and reconciliation. SFT parity across
 local Docker, Modal and Hugging Face Jobs is mandatory. GRPO includes one qualified provider first; Modal is the selected initial
 candidate because its GRPO stack exists, not because that route is qualified.
-Docker/HF GRPO parity is deferred. The baseline is main
-`321a085f`; selecting this scope does not establish that its gates have passed.
+Docker/HF GRPO parity is deferred. `321a085f` is the historical planning
+baseline, not current main or the accepted preparation stack. Selecting this
+scope does not establish that its gates have passed.
 No version bump, tag, package publication or provider execution is authorized by
 this document. Live qualifications require reviewed finite scope and authority.
 
@@ -27,7 +28,55 @@ pipeline compositions retain truthful backend status; no facade or CLI alone
 establishes a stable installed operational contract.
 The Python API is a library contract, not a deployed HTTP/MCP service.
 
-## Current evidence and gaps
+## Current release status — 2026-10-14
+
+The source distribution is still **1.1.0 / Beta**, not a stable release. At this
+checkpoint, main is `db2459a6` through merged [#234](https://github.com/ProfSynapse/Synaptic-Tuner/pull/234). PRs
+[#235](https://github.com/ProfSynapse/Synaptic-Tuner/pull/235)–[#236](https://github.com/ProfSynapse/Synaptic-Tuner/pull/236) have locally accepted installed evidence
+and are awaiting their stack's CI/merge;
+local acceptance is not a main-merge or publication claim. No stable version,
+tag or package publication has been selected. The dated log below retains exact
+source/wheel hashes, failures and evidence limits; older unavailable/baseline
+summaries are historical rather than current backend verdicts. Counts below are
+overlapping installed lane totals, not a cumulative unique-test count.
+
+| Supported preparation/composition | Current accepted evidence | Remaining release work |
+| --- | --- | --- |
+| Durable host records/history | Caller-owned SQLite implements existing record/stream ports and atomic Data/Evaluation/Pipeline/training-workflow updates; retained plans, claims and original keys support bounded cold reads. | Final supported-host/recovery qualification; a database does not restore credentials, source leases or active processes. |
+| Data/environment/evaluation consumer | **337 installed controls** exercise public generate/improve/validate, actual local fixture workers, measured scripted response/judge calls, immutable exports, reports/comparison and SQLite readback. Paid-call uncertainty stops later paid dispatches; bounded HTTP acquisition is implemented. | Genuine bounded paid backend/judge/account acceptance, representative scenario/source coverage and advertised cancellation behavior. CPU scripted calls are not live model/account qualification. |
+| Ordinary SFT consumers | Shared checkout consumer with installed production passed **Docker 61 / HF 80** controls, including public start, known reads, native five-role verification/download and uncertain-submit non-replay. Modal also has the normal retained-run/public lifecycle and historical exact-source live evidence. | Final-source **Docker/Modal/HF** live SFT parity, real cancellation/reconciliation and known-run recovery with original inputs/keys. Historical Modal success does not qualify the final stack. |
+| Modal GRPO | Public compiler/preparation, fixed isolated child, native verification, normal runner and retained known-run reads are implemented. The actual captured SmolLM candidate passed **256 installed controls** and retains the observed **396-distribution base**. | Qualify the actual augmented image/CPU closure, pinned model/tokenizer and one bounded **Modal GPU GRPO** run with real update/grouped reward evidence; constant/unchanged observations remain inconclusive. Other GRPO providers remain deferred. |
+| Local publication | Caller-owned durable store/spool/create-only destination passed **377 installed controls + one existing skip**; native RunsAPI join passed **73 installed Docker/publication controls** with five-role streams and cold marker lookup. | Usable HF model-repository publication remains a separate implementation/live gate: expected-parent submission and verified owned immutable snapshot at the returned OID/current tip, without claiming RPC causality or an introducing commit after a lost reply. |
+| Environment owner death | Guardian-backed fixed worker passed **388 installed controls + one existing skip**, including real owner SIGKILL/stopped-worker termination and retained-identity cleanup after acknowledged custody. | Keep pre-handoff owner loss, guardian/machine loss and unconfirmed cleanup explicit. This is local ownership cleanup, not resumable generation or a security sandbox. |
+| Packaging/platforms | Fresh sdist-built wheels, neutral consumers, installed origins and declared assets are tested. The corrected offline source archive passed **39 source controls**, including a real pinned build, and **163 installed Modal controls**. Host examples/build declarations remain checkout-owned. | Merge the correction, repeat normal local preparation on its final source, then freeze advertised inventory/platform/install guidance and release artifacts; metadata `>=3.10` is not qualification. |
+
+**Recovery means retained known-run/status/history/artifact access and truthful
+uncertainty without replay.** Implemented cold readers reuse original stored
+bindings and keys; they do not renew submission authority, discover/adopt an
+unknown job, replay a lost request, resume arbitrary generated rows or continue
+training from an unadmitted checkpoint. Cancellation requests, SDK acknowledgment,
+observed terminal status and confirmed owned-process termination are distinct.
+The real provider cancellation/recovery/parity gates remain required; this scope
+clarification does not waive them.
+
+The source-wheel/archive correction has local acceptance and still needs CI/merge
+and a fresh normal preparation attempt. Remaining functional work includes
+usable HF model-repository publication and the HF cancellation/reconciliation
+configuration-candidate audit: its default flags remain off and may need further
+work before the advertised qualified route is usable. The accepted local stack
+still requires exact CI/merge and final supported-composition review. Live qualification remains SFT on all three
+providers, GRPO on one, and genuine paid nontraining workflows. Then complete the
+existing final contract/platform/distribution review and choose a stable release.
+No new grant, lifecycle DTO, store or scenario CRUD framework is required merely
+to close this plan. Supported host composition and installed/source prerequisites
+are detailed in the [operation matrix](api-v1-support-matrix.md) and
+[host storage guide](../architecture/reference-host-storage.md).
+
+## Historical planning evidence and gaps
+
+These earlier planning summaries preserve their original scope. Current support
+is the dated summary above and the updated operation matrix; release acceptance
+criteria below are unchanged.
 
 Historical claims remain bound to their tested sources. The
 [October 7 readiness checkpoint](../review/api-v1-release-readiness.md) and
@@ -36,7 +85,7 @@ are not current release verdicts. The
 [integration handoff](api-v1-integration-handoff.md) and
 [streaming evidence](training-progress-streaming.md) describe later additions.
 
-| Area | Evidence at this baseline | Stable gate still required |
+| Area | Earlier planning evidence | Gate recorded at that checkpoint |
 | --- | --- | --- |
 | Public contracts | Import-light typed API v1 and provider-neutral reference composition; provider-free tests. | Exact release contract inventory, compatibility/error policy and supported compositions. |
 | Docker | Adapter/conformance implementation and provider-free tests are present. | Real SFT lifecycle, cancellation and restart/reconciliation evidence through the public API; fake tests do not satisfy this. |
@@ -46,9 +95,9 @@ are not current release verdicts. The
 | Packaging/platforms | Distribution version `1.1.0`, Python metadata `>=3.10`, selected wheel assets and Python 3.12 CI. The initial baseline omitted public schemas and workflow assets; later installed preparation evidence is recorded below, while the full script/asset inventory remains open. | Complete supported distribution inventory, clean installed consumer, demonstrated Python/platform matrix and release artifacts. Metadata is not qualification. |
 | Optional families | Public facades exist; some operations require host-supplied backends. | Per-operation backend status, filtering and explicit supported/experimental/deferred boundaries. |
 
-### Included workflow families: baseline versus release acceptance
+### Earlier workflow-family snapshot versus release acceptance
 
-| Family | Current evidence category | Required stable acceptance |
+| Family | Earlier evidence category | Required stable acceptance |
 | --- | --- | --- |
 | Scenarios | Checked-in CLI/config/schema workflows; not proof of a complete public authoring API. | Safe author/validate/version workflow with immutable scenario/rubric refs, installed templates/schemas and explicit public contracts. |
 | Environments | Reviewed configured local DataAPI generation/improvement, immutable inputs, fixed worker, installed workflow and stalled-child cancellation. | Complete durable restart/reconciliation and supported backend qualification beyond the local fixture workflow. No security-sandbox claim. |
@@ -94,11 +143,12 @@ backend and bounded evidence; both SFT and the selected GRPO route connect the
 workflow without undocumented manual repair. Qualify the selected Modal GRPO route before claiming stable acceptance;
 additional GRPO providers remain deferred.
 
-All milestones below are **open**. Record terminal evidence against the exact
-candidate source and artifact digest; no historical result automatically closes
-a new gate. Retain failed attempts, consumed claims and uncertain submissions.
+The release-exit criteria below remain authoritative. Implementation evidence
+closes only its stated slice, not the broad release milestone. Record terminal
+evidence against the exact candidate source and artifact digest; no historical
+result automatically closes a new gate. Retain failed attempts, consumed claims and uncertain submissions.
 
-## Current preparation progress (2026-10-13)
+## Preparation checkpoint — 2026-10-13 (historical)
 
 PR #178 merged as `79f45ae2` with all required checks passing, packaging the
 51 public schemas and defining these release gates. The next integrated preparation source, `268fc534`, adds
@@ -294,7 +344,7 @@ capabilities, package metadata and each advertised provider.
   boundaries and host configuration. Secret material never enters packages,
   recipes, runtime image environment or the isolated trainer.
 
-### Baseline blockers and preparation status
+### Historical baseline blockers and preparation follow-ups
 
 - The baseline wheel inventory omitted Evaluator's 16 configuration YAML files and one
   recipe, SynthChat's seven configuration YAML files, 19 rubrics and 11 scenarios,
@@ -318,7 +368,9 @@ capabilities, package metadata and each advertised provider.
   boundary)`. The installed local workflow now demonstrates generation/improvement,
   failure feedback, cancellation and cleanup with deterministic injected clients.
   Paid model/backend acceptance and complete durable recovery remain open.
-- The paid evaluation judge path rejects with `backend_unmetered`. Select and
+- At the initial checkpoint the paid evaluation judge path rejected with
+  `backend_unmetered`; the later accepted metered judge closes that implementation
+  gap, while live qualification remains open. Select and
   qualify the intended judge backend, usage/accounting contract and bounded
   evaluation benchmark before a stable judging claim. Do not bypass metering or
   treat a facade/mock response as paid backend qualification.
@@ -1449,3 +1501,27 @@ The process controls use real SIGKILL and a new first SQLite opener, retaining
 scripted fixture host inputs through fork. They do not establish independent
 remote-provider reconstruction or live training/publication. HF repository
 publication remains a separate destination and qualification gate.
+
+### Real offline source-wheel build acceptance — 2026-10-14
+
+Normal local GRPO preparation on `9285cd1d` failed before provider effects:
+the retained build reported `OFFLINE_WHEEL_FAILED`, and exact subprocess
+diagnostics identified the missing `_build_support` packaging helper. The fixed
+source archive includes that helper, `MANIFEST.in`, both declared tool catalogs
+and the public schemas, alongside the existing package trees. It retains the
+clean source/commit checks and exact offline builder pins.
+
+Root integration `e3b92ef2` passed **39 source controls** in 16.67 seconds,
+including an actual CPython 3.11.14 offline build from a genuine Git snapshot.
+The pre-fix allowlist reproduced the closed build failure; emitted schemas,
+catalogs and candidate resources now match their source bytes. Fresh sdist-built
+wheel SHA256 `d464d3ec1fd15037fb11482d4f6e0f7fb8c60e317d03a9a18a6e8a67c6e93320`
+passed neutral base-resource checks and **163 installed Modal controls** under
+CPython 3.12.15 in 130.95 seconds. All seven runtime/source lock checks remain
+current without pin or hash changes. The same real build control is included in
+the existing pinned Modal diagnostic CI job, triggered by its packaging inputs.
+
+This closes the demonstrated source-archive omission. The original failed
+attempt remains retained; a new normal preparation binds the final source.
+No image, provider resource, model download or GPU qualification was performed
+by these controls.
