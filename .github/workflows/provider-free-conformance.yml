@@ -667,7 +667,7 @@ jobs:
           os.chdir(root)
           raise SystemExit(pytest.main([
               "-q", "-p", "no:cacheprovider",
-              str(root / "tests/training/test_modal_recipe.py"),
+              str(root / "tests/training/test_modal_recipe.py") + "::test_host_manifest_publication_is_planned_from_declared_tracking",
               str(root / "tests/runtime/test_modal_build_inspector.py"),
               str(root / "tests/execution/providers/test_modal_runtime_build.py"),
               str(root / "tests/training/test_modal_host_runtime.py"),
