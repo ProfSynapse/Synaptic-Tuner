@@ -21,6 +21,7 @@ on:
       - "tests/contract/test_environment_sessions_v1.py"
       - "tests/contract/test_nontraining_metered_join_v1.py"
       - "tests/contract/test_paid_evaluation_judge_v1.py"
+      - "tests/contract/test_metered_uncertain_calls_v1.py"
       - "shared/llm/metering.py"
       - "tests/contract/test_public_training_input_v1.py"
       - "tuner/training/**"
@@ -1104,6 +1105,7 @@ jobs:
           import Evaluator.runner as runner
           import Evaluator.schema_validator as validator
           import synaptic_tuner.api.v1.reference.evaluation as reference
+          import synaptic_tuner.api.v1.reference.data as data_reference
           import synaptic_tuner.api.v1.evaluation_facade as facade
           import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
           import synaptic_tuner.api.v1.reference.environment_sessions as sessions
@@ -1112,7 +1114,7 @@ jobs:
           import Evaluator.judge_validator as judge_validator
           import shared.judge.judge_service as judge_service
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (basis, comparison, runner, validator, reference, facade, factory, sqlite_store, sessions, worker, metering, judge_validator, judge_service):
+          for module in (basis, comparison, runner, validator, reference, facade, factory, sqlite_store, sessions, worker, metering, judge_validator, judge_service, data_reference):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -1126,6 +1128,7 @@ jobs:
               "contract/test_reference_spend_v1.py",
               "contract/test_nontraining_metered_join_v1.py",
               "contract/test_paid_evaluation_judge_v1.py",
+              "contract/test_metered_uncertain_calls_v1.py",
               "evaluator/test_compare.py",
               "evaluator/test_comparison_basis.py",
               "cloud/test_schema_validator.py",
