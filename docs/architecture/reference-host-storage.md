@@ -155,8 +155,9 @@ prevent another opener from silently selecting a different lock root or a
 replacement lock file. Stable lock files are never deleted. Closing or process
 death releases local ownership; a fresh reader can fence an orphan only for
 existing lookup recovery, never another transfer. Active owners cannot be
-fenced. `create=False` requires original root/lock bindings and refuses missing
-setup instead of creating it during cold reads.
+fenced. `create=False` requires the original root binding; ownership operations
+also require their original lock bindings and files. Missing setup is refused
+instead of created during cold reads.
 
 Real SQLite/process controls cover an active competing opener, producer
 `SIGKILL`, the first fresh database opener, authenticated fixture receipt lookup,
