@@ -4,7 +4,12 @@ from pathlib import Path
 
 # Checkout root or installed site-packages root, never the caller's CWD/PYTHONPATH.
 sys.path.insert(0, str(Path(__file__).resolve(strict=True).parents[2]))
-from shared.environments.local_worker import _run_child
+from shared.environments.local_worker import _run_child, _run_guardian
 
 if __name__ == '__main__':
-    _run_child()
+    if sys.argv[1:] == ["guardian"]:
+        _run_guardian()
+    elif not sys.argv[1:]:
+        _run_child()
+    else:
+        raise SystemExit(2)

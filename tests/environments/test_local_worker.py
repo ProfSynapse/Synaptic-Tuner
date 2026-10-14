@@ -59,13 +59,13 @@ def test_stopped_child_deadline_actual_exit_before_cleanup(parent, limits):
     runtime = WorkerEnvironmentRuntime(parent, limits)
     runtime.setup(EnvironmentFixture([], {'file': 'retained'}))
     process = runtime._process
-    process.send_signal(signal.SIGSTOP)
+    os.kill(runtime._worker_pid, signal.SIGSTOP)
     runtime._deadline = time.monotonic() + 0.1
     started = time.monotonic()
     with pytest.raises(WorkerLifecycleError, match='deadline'):
         runtime.read_text('file')
     assert time.monotonic() - started < 3
-    assert process.returncode == -signal.SIGKILL
+    assert process.returncode == 0
     assert list(parent.iterdir()) == []
     with pytest.raises(RuntimeError, match='unavailable'):
         runtime.read_text('file')
@@ -215,7 +215,7 @@ def test_partial_reply_eof_is_uncertain_no_replay(runtime, monkeypatch):
     scanners = []
     # Keep the fixed child from resetting its inherited directory position
     # before the parent observes our deliberately truncated response.
-    process.send_signal(signal.SIGSTOP)
+    os.kill(runtime._worker_pid, signal.SIGSTOP)
     def partial_reply():
         read_fd, write_fd = os.pipe()
         os.write(write_fd, b'\x00\x00')
@@ -230,7 +230,7 @@ def test_partial_reply_eof_is_uncertain_no_replay(runtime, monkeypatch):
     try:
         with pytest.raises(WorkerLifecycleError, match='protocol'):
             runtime.read_text('a/file')
-        assert process.returncode == -signal.SIGKILL
+        assert process.returncode == 0
         assert runtime._failed
         assert runtime._storage._root_fd is None
         with pytest.raises(WorkerLifecycleError, match='unavailable'):
@@ -251,10 +251,10 @@ def test_request_backpressure_cancellation_terminates(parent, limits):
     runtime.setup(EnvironmentFixture())
     runtime._boundary = boundary
     process = runtime._process
-    process.send_signal(signal.SIGSTOP)
+    os.kill(runtime._worker_pid, signal.SIGSTOP)
     with pytest.raises(WorkerLifecycleError, match='boundary_interrupted'):
         runtime.write_text('large', 'x' * (1024 * 1024))
-    assert process.returncode == -signal.SIGKILL
+    assert process.returncode == 0
     assert list(parent.iterdir()) == []
 
 
@@ -270,18 +270,41 @@ def test_fixed_entry_ignores_cwd_and_pythonpath(parent, limits, tmp_path, monkey
     runtime.teardown()
 
 
-def test_exit_confirmation_failure_preserves_owned_scratch(runtime, parent, monkeypatch):
-    process = runtime._process
-    original_wait = process.wait
-    def uncertain_wait(*args, **kwargs):
-        raise subprocess.TimeoutExpired('fixed-child', kwargs.get('timeout', 0))
-    monkeypatch.setattr(process, 'wait', uncertain_wait)
-    with pytest.raises(WorkerLifecycleError, match='termination_uncertain'):
+def test_guardian_loss_preserves_owned_scratch(parent, limits):
+    import shared.environments.local_worker as module
+    from pathlib import Path
+    program = r"""
+import ctypes,os,signal,sys
+sys.path.insert(0,sys.argv[1])
+from shared.environments.local_worker import WorkerEnvironmentRuntime,WorkerLifecycleError
+from shared.environments.bounded_local_runtime import FilesystemLimits
+from shared.environments.fixture_parser import EnvironmentFixture
+assert ctypes.CDLL(None).prctl(36,1,0,0,0)==0
+runtime=WorkerEnvironmentRuntime(sys.argv[2],FilesystemLimits(30,4096,2048,4096,8,128,10))
+runtime.setup(EnvironmentFixture([],{'file':'retained'}))
+process=runtime._process
+worker_pid=runtime._worker_pid
+process.kill();process.wait(timeout=2)
+try:
+    try:
         runtime.teardown()
-    assert runtime._storage._root_fd is not None and list(parent.iterdir())
-    monkeypatch.setattr(process, 'wait', original_wait)
-    original_wait(timeout=2)
-    runtime.teardown()
+    except WorkerLifecycleError as error:
+        assert error.code=='worker_termination_uncertain'
+    else:
+        raise AssertionError('guardian loss accepted')
+    assert runtime._storage._root_fd is not None
+    assert runtime._storage.read_text('file')=='retained'
+finally:
+    os.kill(worker_pid,signal.SIGKILL)
+    assert os.waitpid(worker_pid,0)[0]==worker_pid
+    # Independent test wait proved its owned child exit; production cannot adopt it.
+    runtime._storage.teardown()
+"""
+    result = subprocess.run([sys.executable, '-I', '-c', program,
+        str(Path(module.__file__).resolve().parents[2]), str(parent)],
+        capture_output=True, timeout=8)
+    assert result.returncode == 0, result.stderr.decode()
+    assert list(parent.iterdir()) == []
 
 
 def test_operation_whitelist_no_arbitrary_execution(runtime):

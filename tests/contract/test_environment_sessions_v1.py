@@ -573,7 +573,7 @@ def test_public_cancel_reaps_stalled_owned_child_from_parent_poll(selected, requ
         def stalled_read(path):
             nonlocal armed
             process = runtime._process
-            os.kill(process.pid, signal.SIGSTOP)
+            os.kill(runtime._worker_pid, signal.SIGSTOP)
             stopped_processes.append(process)
             armed = True
             return original_read(path)

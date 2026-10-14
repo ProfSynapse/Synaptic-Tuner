@@ -22,6 +22,8 @@ on:
       - "tests/contract/test_data_conversation_sft_handoff_v1.py"
       - "tests/contract/test_environment_admission_v1.py"
       - "tests/contract/test_environment_sessions_v1.py"
+      - "shared/environments/**"
+      - "tests/environments/**"
       - "tests/contract/test_nontraining_metered_join_v1.py"
       - "tests/contract/test_paid_evaluation_judge_v1.py"
       - "tests/contract/test_paid_http_bounds_v1.py"
@@ -448,7 +450,7 @@ jobs:
               shutil.copy2(checkout / "tests" / "execution" / "coordinator_v1" / name, publications / name)
           environments = root / "tests" / "environments"
           environments.mkdir()
-          for name in ("test_local_worker.py", "test_bounded_local_runtime.py"):
+          for name in ("test_local_worker.py", "test_local_worker_owner_death.py", "test_bounded_local_runtime.py"):
               shutil.copy2(checkout / "tests" / "environments" / name, environments / name)
           for name in ("config", "rubrics"):
               shutil.copytree(Path(SynthChat.__file__).parent / name, root / "SynthChat" / name,
@@ -462,6 +464,7 @@ jobs:
                           str(tests / "test_atomic_workflow_store_v1.py"),
                           str(tests / "test_sqlite_workflow_host_v1.py"),
                           str(environments / "test_local_worker.py"),
+                          str(environments / "test_local_worker_owner_death.py"),
                           str(environments / "test_bounded_local_runtime.py"),
                           str(tests / "test_public_publication_v1.py"),
                           str(publications / "test_publication.py"),

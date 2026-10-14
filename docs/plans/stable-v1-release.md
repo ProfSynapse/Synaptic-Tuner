@@ -1402,3 +1402,28 @@ skip**, under CPython 3.14.4. The new module matches source, wheel and install.
 This qualifies the local adapter and lookup-recovery behavior with fixture-signed
 sources. Joining actual native-verified RunsAPI artifacts and implementing an HF
 model destination remain subsequent nodes; no remote publication was performed.
+
+
+### Fixed worker owner-death installed acceptance — 2026-10-14
+
+The existing fixed environment worker now uses a small guardian that owns the
+exact child and retained scratch descriptors. After acknowledged custody, owner
+death closes a dedicated liveness pipe; bounded termination/wait precedes
+identity-preserving cleanup. A stopped worker cannot stop its guardian.
+
+Root review corrected partial pipe allocation, startup backpressure/cancellation
+and pending or partially consumed custody frames during teardown. **36 focused
+controls passed**, including actual owner SIGKILL and stopped-worker cleanup.
+Fresh sdist-derived wheel SHA256
+`8196f5cc04175ca0a7fa07b417b74c8ecc9b68a665851f6650874a5391119a7c` passed base resources and the exact installed
+lifecycle/publication lane: **388 passed, one existing non-worker cancellation
+skip**, on CPython 3.14.4. Both existing worker modules match source, wheel and
+installation; source `361a4c4c` includes accepted author fixes through `ffa8f5f2`
+and the test-only EOF outcome correction `6cd77b50`.
+
+Pre-handoff owner death, guardian death and machine loss remain outside this
+cleanup guarantee. Unconfirmed worker exit preserves scratch and uncertainty;
+cleanup retry requires confirmed exit and relinquished guardian custody. This
+is local process supervision, not a security sandbox or durable continuation.
+No generation row or uncertain paid request is replayed, and process cleanup
+alone does not establish a terminal DataAPI outcome.
