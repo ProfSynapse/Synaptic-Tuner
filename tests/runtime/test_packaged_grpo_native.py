@@ -162,11 +162,12 @@ def test_closed_admission_never_prepares_or_spawns(native, monkeypatch):
 
 
 def test_emitted_native_documents_match_installed_schema_resources(native):
-    from importlib.resources import files
+    from pathlib import Path
     from jsonschema import Draft202012Validator
     from referencing import Registry, Resource
 
-    schema_root = files("schemas")
+    # Anchor to the actual production package, including editable installs.
+    schema_root = Path(runtime.__file__).resolve().parents[2] / "schemas"
     names = (
         "synaptic-packaged-grpo-workload-v1.schema.json",
         "synaptic-grpo-workload-v1.schema.json",
