@@ -126,7 +126,7 @@ python examples/training_qualification/launch.py plan /private/output/consumer.j
 member. It binds the selected profile/inventory/image, declared interpreter,
 HF roots, configured reset environment and named requirements. The member is
 retained in `CoordinatorResolvedMaterial.execution_context`; its SHA256 supplies
-`ExecutionSourceV1.runtime.deployment_member_sha256`. This is a declared host
+`ExecutionSourceV1.deployment_member_sha256`. This is a declared host
 runtime configuration, not a staged member or observed provider deployment.
 The remote worker still independently enforces its existing source, runtime,
 inventory, roots and dispatch contracts.
