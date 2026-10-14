@@ -1,0 +1,48 @@
+{
+  "schema_version": "synaptic-sft-config/v1",
+  "method": "sft",
+  "execution": {
+    "mode": "developer_integration"
+  },
+  "model": {
+    "ref": "Qwen/Qwen3.5-4B",
+    "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "tokenizer_revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "load_in_4bit": false
+  },
+  "dataset": {
+    "ref": "prepared://sha256/7aa26aba079ac1210466c5c2cdf747f00c764b5bc4ed366e2f67af7ffa0d3770",
+    "revision": "7aa26aba079ac1210466c5c2cdf747f00c764b5bc4ed366e2f67af7ffa0d3770",
+    "content_digest": "739b3df17bf7fc39d5c9487136a633e8ad2703e700271e224756df8074d2c361",
+    "size_bytes": 2821,
+    "format": "syntunia-sft-row/v1"
+  },
+  "sft": {
+    "max_steps": 3,
+    "batch_size": 1,
+    "gradient_accumulation_steps": 1,
+    "learning_rate": "0.0001",
+    "max_seq_length": 2048,
+    "seed": 7,
+    "save_steps": 3,
+    "save_total_limit": 1,
+    "lora_rank": 8,
+    "lora_alpha": 16,
+    "lora_dropout": "0.0",
+    "lora_target_modules": [
+      "q_proj",
+      "v_proj"
+    ],
+    "use_dora": false,
+    "use_rslora": false,
+    "init_lora_weights": true,
+    "split_dataset": false,
+    "dataset_format": "raw_text",
+    "completion_only_loss": false,
+    "assistant_only_loss": false,
+    "use_preassigned_splits": true,
+    "packing": false,
+    "bf16": true,
+    "fp16": false
+  }
+}
