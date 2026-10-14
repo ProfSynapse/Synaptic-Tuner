@@ -967,6 +967,15 @@ qualification are required before a GPU smoke.
 wheel/trainer-reference check before child launch; it is not a measurement of
 the parent's interpreter or complete installed runtime. `CALL_CHILD_RESULT`
 covers child invocation, timeout, bounded output read, or a non-admitted result.
+Fresh host qualifications also report closed `CALL_RELEASE_ADMISSION`,
+`CALL_INPUT_FD`, `CALL_INPUT_WRITE`, `CALL_INPUT_SEAL`, `CALL_FIXTURE_SETUP`,
+`CALL_FIXTURE_WRITE`, `CALL_TRANSPORT`, `CALL_POST_CHILD_CUSTODY` and
+`CALL_CLEANUP` boundaries. These identify the operation that failed, without
+exception text or a claim about its cause. Cleanup attempts all registered owned
+resources and preserves an earlier failure; `CALL_CLEANUP` is emitted only when
+cleanup is the primary failure. Historical generic `CALL_INSTALLED_CHILD` cannot
+be retrospectively narrowed by this change. The raw-call maintenance diagnostic
+continues to recognize only its documented historical serialized frames.
 Neither label warrants relaxing the child's exact interpreter or installed-package
 checks. Keep the generic/local child qualifier parent-process-agnostic. Modal
 training additionally admits the Function parent, so its CPU self-check must

@@ -27,6 +27,7 @@ on:
       - "tests/execution/providers/test_modal_terminal_status_sdk154.py"
       - "tests/training/test_modal_cold_cancellation.py"
       - "tests/training/test_modal_cold_cancellation_process.py"
+      - "tests/runtime/test_packaged_cpu_parent_diagnostics.py"
       - "tuner/handlers/modal_job_config_handler.py"
       - "Trainers/image_profiles/qwen35_4b_conversation_sft_candidate_v1/**"
       - "tests/contract/test_data_conversation_sft_handoff_v1.py"
@@ -1103,6 +1104,7 @@ jobs:
               "training/test_modal_post_training_compilation.py",
               "runtime/cpu_qualification_image.py",
               "runtime/test_packaged_cpu_methods.py",
+              "runtime/test_packaged_cpu_parent_diagnostics.py",
               "runtime/test_packaged_training_worker.py",
               "execution/providers/test_modal_grpo_cpu_qualification.py",
               "execution/providers/test_modal_runtime_release_qualification.py",
@@ -1148,6 +1150,7 @@ jobs:
               str(root / "tests/trainers/grpo/test_packaged_artifacts.py"),
               str(root / "tests/execution/providers/test_modal_packaged_grpo_routing.py"),
               str(root / "tests/runtime/test_packaged_cpu_methods.py"),
+              str(root / "tests/runtime/test_packaged_cpu_parent_diagnostics.py"),
               str(root / "tests/runtime/test_packaged_training_worker.py"),
               str(root / "tests/execution/providers/test_modal_grpo_cpu_qualification.py"),
               str(root / "tests/training/test_modal_grpo_standalone_runner.py"),
