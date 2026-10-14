@@ -6,19 +6,24 @@ Group Relative Policy Optimization — optimizes model behavior using reward fun
 
 The provider-neutral `TrainingInputV1` accepts explicit method `grpo` with
 `synaptic-grpo-hyperparameters/v1` and rewards `{items, documents, schema}`.
-This lane supports **CPU preparation and pure developer compilation only**.
+This lane supports **CPU preparation, pure compilation and gated host planning**.
 It does not enable public provider execution, establish model/image compatibility,
 or qualify GRPO training. The legacy trainer commands below remain separate. The generic Modal private-copy
 helper can preserve an already verified GRPO prompt publication through these
-ports, but this does not enable normal Modal GRPO recipe planning or start.
+ports. A strict normal Modal recipe can report a core-only preplan when the host
+supplies an explicitly compatible named GRPO profile; no ordinary candidate
+profile/image is shipped or qualified yet. Missing or incompatible profiles reject.
+Ordinary GRPO execution, CPU qualification and provider quotation remain disabled
+before bootstrap in this integration slice.
 
 The host material boundary can also validate an explicitly supplied packaged GRPO
 configuration against the exact G1 core, original public `TrainingInputV1`, actual
 runtime-release context and finite child limit. Its fixed lazy method selector
 preserves the SFT projection and requires the original retained context for cold
-material readback. This CPU material capability does not add a normal GRPO recipe,
-provider dispatch, log/evaluation capability or live qualification. The default
-recipe registry remains unchanged. Hosts must not fabricate a runtime release to
+material readback. This CPU material capability does not enable provider dispatch,
+log/evaluation capability or live qualification. The default recipe registry
+remains unchanged; the host request bridge lazily registers the existing GRPO
+recipe only for an explicit GRPO request. Hosts must not fabricate a runtime release to
 produce a final packaged plan before runtime qualification.
 
 The fixed Modal parent worker can parse an exact signed GRPO dispatch and route
@@ -34,9 +39,38 @@ The installed CPU control joins the actual owned child and native verifier to
 real HMAC completion and actual reader streams, using explicit ML/image/provider
 substitutes. Fresh reader objects preserve the original binding and key. This is
 not cold public-host SQLite recovery or provider/GPU qualification. Normal
-recipe/start integration and its retained Foundation assessment controls remain
+start integration and its retained Foundation assessment controls remain
 separate dependent work; no logs, cancellation or reconciliation capability is
 promoted by the fixed-worker routing node.
+
+For the existing `train --job-config <recipe> --plan --json` surface, a GRPO recipe
+uses `target: cloud`, `provider: modal`, `method: grpo`,
+`run: {method: grpo, dry_run: false}`, existing bounded `job` fields, and the exact
+canonical public GRPO object under `training_input`. Its `dataset` declares only
+`local_file`, `schema_version: synaptic-grpo-prompts/v1`, `expected_digest` and
+`expected_row_count`; no SFT split or target fields. `limits.child_max_seconds`
+is a finite isolated-child budget distinct from the provider job timeout. Rewards
+remain declared `{items, documents, schema}`; no ambient directory fallback.
+Post-training evaluation, observation capture and environment rollout are outside
+this initial recipe scope.
+
+Planning checks the actual original JSONL bytes through the existing bounded
+same-descriptor publication inspector and core admission. It reports only the
+core fingerprint, immutable prepared identity, named build intent and child limit,
+with an explicit unsupported execution status; it cannot report the final wrapped
+workload/configuration digest before an actual release exists. The existing
+`--prepare-local` mode remains local source-wheel/bootstrap preparation, subject
+to the normal pinned launcher and accepted engine source requirements.
+
+The internal final-material hook requires the genuine retained local preparation,
+revalidates its original profile/source/intent, and compares the supplied actual
+release's material exactly before deriving the final wrapper and public planning
+inputs. Keep those local inputs open through final binding. CPU tests use explicit
+synthetic host profile/runtime observations and a scripted wheel builder, then the
+real public load/resolve/plan/preflight and SQLite planning-store close/reopen.
+This proves saved plan/context readback only, not a restored provider host,
+training resume or a working model/image. Existing normal execute/qualify gates
+remain closed until the full provider composition is accepted.
 
 Use the existing generic preparation service with explicit host-owned roots:
 
