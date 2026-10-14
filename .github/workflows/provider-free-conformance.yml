@@ -79,6 +79,8 @@ on:
       - "synaptic_tuner/api/v1/reference/publication_store.py"
       - "synaptic_tuner/api/v1/reference/local_publication.py"
       - "tests/execution/coordinator_v1/test_local_publication.py"
+      - "synaptic_tuner/api/v1/reference/publication_sources.py"
+      - "tests/training/test_local_run_artifact_publication.py"
       - "tests/contract/test_provider_neutral_foundation_v1.py"
       - "tests/conftest.py"
       - "tests/training/**"
@@ -731,15 +733,17 @@ jobs:
           import tuner.execution.providers.docker_provider_v1.preparation as preparation
           import tuner.execution.providers.docker_provider_v1.local_source as source
           import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
+          import synaptic_tuner.api.v1.reference.publication_sources as publication_sources
 
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (composition, authority, preparation, source, sqlite_store):
+          for module in (composition, authority, preparation, source, sqlite_store, publication_sources):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
           root = Path(os.environ["RUNNER_TEMP"]) / "installed-docker-host-tests"
           for name in (
               "training/test_docker_host_composition.py",
+              "training/test_local_run_artifact_publication.py",
               "examples/test_docker_training_qualification.py",
               "execution/providers/docker_provider_v1/conftest.py",
               "execution/providers/docker_provider_v1/test_local_source.py",
@@ -763,7 +767,8 @@ jobs:
           os.chdir(root)
           raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
               str(root / "tests/training/test_docker_host_composition.py"),
-              str(root / "tests/examples/test_docker_training_qualification.py")]))
+              str(root / "tests/examples/test_docker_training_qualification.py"),
+              str(root / "tests/training/test_local_run_artifact_publication.py")]))
           PYCODE
 
       - name: Exercise installed public GRPO declarations, preparation and host material

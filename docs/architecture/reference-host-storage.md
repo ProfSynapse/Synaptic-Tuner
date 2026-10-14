@@ -195,8 +195,8 @@ Actual SQLite/public-operation tests kill a producer before and after that marke
 The first fresh database opener uses the existing lookup-only recovery permit:
 without a marker it remains ambiguous; with the original valid marker it verifies
 without destination writes or source reopening. These tests use signed test-owned
-source bytes, not a composed verified RunsAPI source. That source join and any HF
-destination remain separate implementation/qualification nodes.
+source bytes, not a composed verified RunsAPI source. The native RunsAPI join below has separate CPU evidence; an HF destination
+and live publication qualification remain separate nodes.
 
 Retained descriptors and named identity checks detect observed path replacement,
 symlinks, special files, ownership/permission changes, hardlinks and mutation during
@@ -206,3 +206,50 @@ are not an atomic filesystem transaction, security sandbox, network-filesystem
 qualification or physical I/O termination. Deadlines are cooperative and never
 reset; filesystem calls may themselves block. Local fsync is not remote durability
 or a live publication qualification claim.
+
+
+## Optional verified run source join
+
+`reference.publication_sources.RunsArtifactSourceV1` describes a source using
+only `RunsAPI.show`. The trusted RunsAPI must expose artifact inventories in
+stored outcomes only after native verification, as the reference implementation
+does. A successful state alone is insufficient: the manifest must be nonempty.
+The adapter signs the existing verified-source descriptor with the caller's
+original publication authority. Its deterministic verification digest commits
+the stored public run/state/artifact projection; it is **not** a native receipt
+digest or a new verification/assessment. No provider observation, training start,
+reverification or source preparation happens during description.
+
+The adapter opens each role through `RunsAPI.artifacts` and checks equality with
+the current stored manifest. Existing public streams and publication materializing
+operations enforce exact run/role/bounds, chunk order, sizes, hashes and EOF.
+A changed native artifact is refused before any destination write.
+
+`compose_publication_artifacts` joins the caller-owned store, spool, registry,
+RunsAPI, publication authority and clock into the existing `ArtifactsAPI`:
+
+```python
+from synaptic_tuner.api.v1.reference.publication_sources import compose_publication_artifacts
+from synaptic_tuner.api.v1.artifacts_facade import PublicationRequest
+
+artifacts = compose_publication_artifacts(
+    runs=runs, store=publication_store, spool=spool, destinations=registry,
+    authority_ref="host-publication", authority=publication_authority, clock=clock,
+)
+result = artifacts.publish(PublicationRequest(verified_run, destination_ref))
+```
+
+The caller retains all object lifetimes, connections, original keys and explicit
+local configuration. The constructor closes nothing and does not alter default
+empty destinations or create a new database. Existing-only cold stores/local
+adapters can verify/list or recover an original marker without reopening a spool
+or native source streams; source description remains a stored show-only read.
+
+CPU tests join actual public TrainingAPI/native verification of five SFT roles,
+public artifact streams and real local publication. Provider CLI replies and ML
+outputs are scripted fixtures. Marker-boundary tests use real `SIGKILL`, forked
+processes with retained fixture host inputs, and the first newly opened SQLite
+connection/host in another process. Postmarker lookup verifies without native
+streams, provider calls, grant binding or destination writes; premarker remains
+ambiguous. This does not reconstruct an independent remote provider, qualify
+live training/publication or establish arbitrary interrupted-work continuation.
