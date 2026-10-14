@@ -901,6 +901,23 @@ not establish physical termination. The two cases passed against the accepted
 PR212 installed wheel; this change adds tests and permanent installed CI coverage
 without changing production code.
 
+### GRPO closure regression correction
+
+The broad core suite caught a reverse import from the shared SFT manifest parser
+into GRPO. GRPO now supplies its private fixed identity and inventory to the
+shared parser; SFT keeps its original fixed defaults and rejects overrides.
+Bootstrap and inference static closure audits pass without widening inventories.
+The schema test resolves resources from the actual installed production package,
+including editable installations, and the package-data test includes all four
+reviewed manifests.
+
+All 59 targeted controls and 341 installed SFT/GRPO controls pass after correction.
+The fresh sdist-built wheel is
+`5d7a451b1d92d406f022aa278decc74342edf1610147d195c704e35467531703`;
+its base-only consumer passes and both changed production files are byte-exact.
+Independent review confirms only required source hashes, sizes and aggregate
+digests changed in the fixed inventories; all six checks are current.
+
 ### Packaged GRPO material admission
 
 The existing host material boundary now selects the exact GRPO core and packaged

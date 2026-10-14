@@ -331,3 +331,33 @@ def test_closure_authenticates_a_member_recording_100755_without_the_bit(
     )
 
     assert any(member.git_mode == "100755" for member in closure.members)
+
+
+def test_shared_parser_requires_private_grpo_identity_without_sft_override():
+    document = json.loads(_MANIFEST.read_bytes())
+    kwargs = {
+        "manifest_path": _MANIFEST,
+        "expected_digest": document["closure_digest"],
+    }
+    with pytest.raises(OfflineSFTWorkerError, match="identity is required"):
+        offline_sft_worker._parse_manifest(document, method="grpo", **kwargs)
+    with pytest.raises(OfflineSFTWorkerError, match="SFT worker identity is fixed"):
+        offline_sft_worker._parse_manifest(document, _method_identity=("changed",), **kwargs)
+
+
+@pytest.mark.parametrize("change", ["schema", "entrypoint", "member"])
+def test_grpo_parser_rejects_changed_fixed_identity_and_inventory(change):
+    from tuner.runtime import offline_grpo_worker as grpo
+
+    path = _ROOT / "tuner/runtime/manifests/offline-grpo-worker-v1.json"
+    document = json.loads(path.read_bytes())
+    if change == "schema":
+        document["schema_version"] = "synaptic-offline-sft-worker-closure/v1"
+    elif change == "entrypoint":
+        document["entrypoint"] = "Trainers/sft/runtime_v1.py"
+    else:
+        document["members"][0]["path"] = "SynthChat/changed.py"
+    document["closure_digest"] = closure_digest(document)
+    payload = offline_sft_worker._canonical_json(document) + b"\n"
+    with pytest.raises(OfflineSFTWorkerError):
+        grpo.parse_offline_grpo_worker_manifest(payload)

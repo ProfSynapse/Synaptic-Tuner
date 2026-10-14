@@ -164,7 +164,10 @@ def parse_offline_grpo_worker_manifest(payload, *, source_ref=GRPO_PACKAGED_SOUR
     path = Path(GRPO_PACKAGED_SOURCE) if manifest_path is None else manifest_path
     closure = _parse_manifest(document, manifest_path=path,
         expected_digest=document.get("closure_digest") if expected_digest is None else expected_digest,
-        method="grpo")
+        method="grpo",
+        _method_identity=(GRPO_CLOSURE_SCHEMA, GRPO_CLOSURE_REF, GRPO_ENTRYPOINT,
+                          GRPO_TRAINER_ENTRYPOINT, GRPO_BOOTSTRAP),
+        _method_members=GRPO_OFFLINE_MEMBERS)
     if any(member.git_mode != "100644" for member in closure.members):
         raise OfflineSFTWorkerError("GRPO source modes are unsupported")
     return OfflineSFTWorkerManifestV1(source_ref=source_ref, canonical_bytes=payload,
