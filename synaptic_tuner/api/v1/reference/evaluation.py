@@ -430,7 +430,7 @@ class MeteredPaidBackendV1:
 
     __slots__ = (
         "_backend", "_api_key", "_secrets", "_account_ref", "_namespace_ref",
-        "_timeout", "_retries", "_maximum_cost_minor_units", "_currency",
+        "_timeout", "_retries", "_maximum_cost_minor_units", "_currency", "_http_options",
     )
 
     def __init__(
@@ -445,6 +445,9 @@ class MeteredPaidBackendV1:
         retries: int = 2,
         maximum_cost_minor_units: int | None = None,
         currency: str | None = None,
+        max_request_bytes: int | None = None,
+        max_response_bytes: int | None = None,
+        deadline: float | None = None,
     ) -> None:
         if backend not in PAID_BACKENDS:
             raise ValueError("backend must be one of the paid backends")
@@ -454,6 +457,11 @@ class MeteredPaidBackendV1:
         # Validates the refs and the cap pairing before any run can start.
         SpendScopeV1(backend, account_ref, namespace_ref)
         AuthorizationRequirement(EVALUATION_START_OPERATION, True, maximum_cost_minor_units, currency)
+        from shared.llm.base import BaseLLMClient
+        BaseLLMClient._http_controls(timeout, max_request_bytes, max_response_bytes, deadline)
+        self._http_options = {name: value for name, value in (
+            ("max_request_bytes", max_request_bytes), ("max_response_bytes", max_response_bytes),
+            ("deadline", deadline)) if value is not None}
         self._backend = backend
         self._api_key = api_key
         self._secrets = secrets
@@ -481,11 +489,11 @@ class MeteredPaidBackendV1:
 
         api_key = self._secrets.resolve(self._api_key)
         if self._backend == "openrouter":
-            client = OpenRouterClient(api_key, model.model_ref, timeout_seconds=self._timeout)
+            client = OpenRouterClient(api_key, model.model_ref, timeout_seconds=self._timeout, **self._http_options)
             return SharedOpenRouterAdapter(
                 OpenRouterSettings(model=model.model_ref), timeout=self._timeout, retries=self._retries, client=client,
             )
-        client = OpenAIResponsesClient(api_key, model.model_ref, timeout_seconds=self._timeout)
+        client = OpenAIResponsesClient(api_key, model.model_ref, timeout_seconds=self._timeout, **self._http_options)
         return SharedOpenAIResponsesAdapter(
             OpenAIResponsesSettings(model=model.model_ref), timeout=self._timeout, retries=self._retries, client=client,
         )
@@ -494,8 +502,9 @@ class MeteredPaidBackendV1:
 class MeteredPaidJudgeV1:
     """Host-configured paid judge; credentials are resolved only at construction.
 
-    Uses existing provider transports, which do not promise finite HTTP byte
-    caps here. Rubrics/config are copied; no ambient paths or configuration are
+    Optional HTTP bounds apply to completion POSTs; deadlines bound caller
+    observation, not physical request termination. Rubrics/config are copied;
+    no ambient paths or configuration are
     consulted. The reference injects its metered client into JudgeValidator.
     """
 
@@ -503,7 +512,8 @@ class MeteredPaidJudgeV1:
                  secrets: SecretResolverPort, account_ref: str, namespace_ref: str,
                  rubrics, judge_config, default_judge_mode: str = "and",
                  timeout: float = 60.0, maximum_cost_minor_units: int | None = None,
-                 currency: str | None = None) -> None:
+                 currency: str | None = None, max_request_bytes: int | None = None,
+                 max_response_bytes: int | None = None, deadline: float | None = None) -> None:
         from copy import deepcopy
         import math
         from shared.judge import JudgeConfig, RubricDef
@@ -524,6 +534,11 @@ class MeteredPaidJudgeV1:
             raise TypeError("exact rubric definitions required")
         if default_judge_mode not in ("and", "or", "judge_only"):
             raise ValueError("unsupported judge mode")
+        from shared.llm.base import BaseLLMClient
+        BaseLLMClient._http_controls(timeout, max_request_bytes, max_response_bytes, deadline)
+        self._http_options = {name: value for name, value in (
+            ("max_request_bytes", max_request_bytes), ("max_response_bytes", max_response_bytes),
+            ("deadline", deadline)) if value is not None}
         self._backend, self._model, self._api_key, self._secrets = backend, model, api_key, secrets
         self._scope = SpendScopeV1(backend, account_ref, namespace_ref)
         self._requirement = AuthorizationRequirement(EVALUATION_JUDGE_OPERATION, True, maximum_cost_minor_units, currency)
@@ -545,9 +560,9 @@ class MeteredPaidJudgeV1:
             raise ValueError("judge credential unavailable")
         if self._backend == "openrouter":
             from shared.llm.providers.openrouter import OpenRouterClient
-            return OpenRouterClient(key, self._model.model_ref, timeout_seconds=self._timeout)
+            return OpenRouterClient(key, self._model.model_ref, timeout_seconds=self._timeout, **self._http_options)
         from shared.llm.providers.openai_responses import OpenAIResponsesClient
-        return OpenAIResponsesClient(key, self._model.model_ref, timeout_seconds=self._timeout)
+        return OpenAIResponsesClient(key, self._model.model_ref, timeout_seconds=self._timeout, **self._http_options)
 
     def open_with_client(self, client):
         from copy import deepcopy
