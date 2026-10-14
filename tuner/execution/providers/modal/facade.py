@@ -23,6 +23,8 @@ _MAX_READ_CHUNK_BYTES = 1_048_576
 class ModalFunctionCallState(str, Enum):
     PENDING = "pending"
     RETURNED = "returned"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
     UNKNOWN = "unknown"
 
 
@@ -279,6 +281,87 @@ class ExplicitModal154ReadFacade:
                 return ModalFunctionCallState.PENDING
             return ModalFunctionCallState.UNKNOWN
         return ModalFunctionCallState.UNKNOWN
+
+    def observe_known_call_status(
+        self, provider_job_ref: str, *, deadline: float,
+    ) -> ModalFunctionCallState:
+        """Read index zero without consuming or deserializing provider output.
+
+        The response size/cardinality limits apply after SDK receipt, not to
+        transport allocation. TERMINATED attests this input's terminal status,
+        not cancellation causality or termination of its hosting container.
+        """
+        import asyncio
+        import os
+        import time
+
+        try:
+            from modal._utils.async_utils import synchronizer
+            from modal_proto import api_pb2
+
+            provider_job_ref = safe_ref(provider_job_ref, "provider_job_ref")
+            call = self.sdk.FunctionCall.from_id(provider_job_ref, client=self.client)
+
+            async def read(raw_call, raw_client):
+                # Pinned SDK direct() may replace a snapshotted client with
+                # Client.from_env. Reject that path rather than changing identity.
+                if (raw_client._snapshotted is not False
+                        or raw_client._owner_pid != os.getpid()):
+                    raise ValueError
+                hydrated = await raw_call.hydrate(raw_client)
+                if (hydrated is not raw_call or raw_call.client is not raw_client
+                        or raw_call.object_id != provider_job_ref
+                        or raw_call.is_hydrated is not True):
+                    raise ValueError
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ValueError
+                request = api_pb2.FunctionGetOutputsRequest(
+                    function_call_id=provider_job_ref, timeout=0,
+                    last_entry_id="0-0", clear_on_success=False,
+                    requested_at=time.time(), start_idx=0, end_idx=0,
+                )
+                method = raw_client.stub.FunctionGetOutputs
+                if method.client is not raw_client:
+                    raise ValueError
+                # direct() has no SDK retry policy. The original absolute
+                # deadline also bounds the wait on the existing SDK event loop.
+                response = await asyncio.wait_for(
+                    method.direct(request, timeout=remaining), timeout=remaining,
+                )
+                if (raw_client._snapshotted is not False
+                        or raw_client._owner_pid != os.getpid()
+                        or method.client is not raw_client):
+                    raise ValueError
+                return response
+
+            response = synchronizer.create_blocking(read)(call, self.client)
+            if (time.monotonic() >= deadline
+                    or type(response) is not api_pb2.FunctionGetOutputsResponse
+                    or response.ByteSize() > _MAX_READ_CHUNK_BYTES
+                    or response.num_unfinished_inputs not in {0, 1}
+                    or len(response.outputs) > 1
+                    or tuple(response.idxs) not in {(), (0,)}):
+                return ModalFunctionCallState.UNKNOWN
+            if not response.outputs:
+                if response.idxs:
+                    return ModalFunctionCallState.UNKNOWN
+                return (ModalFunctionCallState.PENDING
+                        if response.num_unfinished_inputs > 0
+                        else ModalFunctionCallState.UNKNOWN)
+            output = response.outputs[0]
+            if (output.idx != 0 or not output.HasField("result")
+                    or response.num_unfinished_inputs != 0):
+                return ModalFunctionCallState.UNKNOWN
+            return {
+                api_pb2.GenericResult.GENERIC_STATUS_SUCCESS: ModalFunctionCallState.RETURNED,
+                api_pb2.GenericResult.GENERIC_STATUS_TERMINATED: ModalFunctionCallState.CANCELLED,
+                api_pb2.GenericResult.GENERIC_STATUS_FAILURE: ModalFunctionCallState.FAILED,
+                api_pb2.GenericResult.GENERIC_STATUS_INIT_FAILURE: ModalFunctionCallState.FAILED,
+                api_pb2.GenericResult.GENERIC_STATUS_TIMEOUT: ModalFunctionCallState.FAILED,
+            }.get(output.result.status, ModalFunctionCallState.UNKNOWN)
+        except Exception:
+            return ModalFunctionCallState.UNKNOWN
 
     def observe_function_call(self, provider_job_ref: str) -> ModalFunctionCallState:
         """Poll one exact call without treating its result as completion evidence."""

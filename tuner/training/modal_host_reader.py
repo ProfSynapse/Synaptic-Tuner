@@ -171,6 +171,14 @@ class ModalPackagedCoordinatorReaderV1:
                     or binding.command_digest != request.provider_run.command_digest
                     or self._binding_authority.authenticate(binding) is not True):
                 raise ValueError
+            scope_reader = getattr(self._facade, "bound_scope", None)
+            if callable(scope_reader):
+                expected = binding.provider_facts.client_binding
+                if scope_reader() != (
+                    expected.account_ref, expected.workspace_ref,
+                    expected.environment_ref, expected.client_ref,
+                ):
+                    raise ValueError
             return binding
         except Exception:
             raise ModalPackagedReadUnavailable("modal_packaged_read_authentication_failed") from None
@@ -202,6 +210,20 @@ class ModalPackagedCoordinatorReaderV1:
                             provider_job_ref: str, *,
                             deadline: float | None = None) -> tuple[ModalFunctionCallState, str | None]:
         try:
+            read_deadline = min(time.monotonic() + 30,
+                                deadline if deadline is not None else float("inf"))
+            status_reader = getattr(self._facade, "observe_known_call_status", None)
+            if callable(status_reader):
+                state = _bounded(
+                    lambda: status_reader(provider_job_ref, deadline=read_deadline),
+                    deadline=read_deadline, code="modal_packaged_call_read_unavailable",
+                )
+                if state in {ModalFunctionCallState.CANCELLED,
+                             ModalFunctionCallState.FAILED,
+                             ModalFunctionCallState.PENDING}:
+                    return state, None
+                if state is not ModalFunctionCallState.RETURNED:
+                    raise ModalPackagedReadUnavailable("modal_packaged_call_unknown")
             no_output = object()
             def read_call():
                 call = self._facade.sdk.FunctionCall.from_id(
@@ -219,8 +241,7 @@ class ModalPackagedCoordinatorReaderV1:
                     raise
 
             result = _bounded(
-                read_call, deadline=min(time.monotonic() + 30,
-                                        deadline if deadline is not None else float("inf")),
+                read_call, deadline=read_deadline,
                 code="modal_packaged_call_read_unavailable",
             )
             if result is no_output:
@@ -261,7 +282,19 @@ class ModalPackagedCoordinatorReaderV1:
         source = self._source_workflow(request)
         ref = request.provider_run.reference
         polled = self._poll_packaged_call(binding, ref.provider_job_ref)
-        if polled[0] is ModalFunctionCallState.PENDING:
+        if polled[0] in {ModalFunctionCallState.CANCELLED, ModalFunctionCallState.FAILED}:
+            phase = (ProviderRunPhaseV1.CANCELLED
+                     if polled[0] is ModalFunctionCallState.CANCELLED
+                     else ProviderRunPhaseV1.FAILED)
+            evidence = canonical_bytes({
+                "schema_version": "synaptic-modal-packaged-terminal-status-observation/v1",
+                "command_digest": binding.command_digest,
+                "provider_job_ref": ref.provider_job_ref,
+                "status": polled[0].value,
+                "execution_binding_digest": binding.execution_binding.binding_digest,
+                "basis": "provider_input_terminal_status",
+            })
+        elif polled[0] is ModalFunctionCallState.PENDING:
             # No-change observations perform no CAS. Recheck the source on the
             # owning thread so a concurrent revision during polling is closed.
             source = self._source_workflow(request)
@@ -283,13 +316,20 @@ class ModalPackagedCoordinatorReaderV1:
                 "completion_digest": completion.completion_digest,
                 "execution_binding_digest": completion.execution_binding_digest,
             })
+        # Provider work runs on a bounded worker; all current Foundation and
+        # workflow checks remain on the journal's owning thread, after the last
+        # provider read and before signing either terminal or pending evidence.
+        if self._binding(request, ProviderReadPurposeV1.OBSERVE) != binding:
+            raise ModalPackagedReadUnavailable("modal_packaged_binding_mismatch")
+        self._source_workflow(request)
         content = ProviderRunObservationContentV1(
             "synaptic-provider-run-observation-content/v1", request.request_digest,
             request.source_workflow_record_digest, request.source_revision,
             request.run, request.provider_run.binding_digest,
             ref.provider_id, ref.profile_ref, ref.account_ref, ref.namespace_ref,
             ref.provider_job_ref, phase, evidence,
-            None, "modal-packaged-host-reader", "0.1.0", self._clock.now(),
+            ("modal_provider_input_failed" if phase is ProviderRunPhaseV1.FAILED else None),
+            "modal-packaged-host-reader", "0.1.0", self._clock.now(),
         )
         return self._authority.observation(content)
 
