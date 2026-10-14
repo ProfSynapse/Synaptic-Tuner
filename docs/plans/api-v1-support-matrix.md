@@ -6,7 +6,7 @@ updated: 2026-10-14
 
 # API v1 support and qualification matrix
 
-This is the current support view of merged main `1603b60b` through
+This dated checkpoint records merged main `1603b60b` through
 [#249](https://github.com/ProfSynapse/Synaptic-Tuner/pull/249) and the separately
 reviewed local HF staging/diagnostic and portable CPU fixes on 2026-10-14, not stable release certification.
 PRs #238–#249 passed all 18 checks on their accepted heads; merged trees match

@@ -34,7 +34,7 @@ Version **1.1.0** is the intended stable package version. Its classifier records
 that intended channel, not completed acceptance. The first stable GitHub release
 will bind exact source, wheel, sdist, checksums and qualification scope after the
 gates below pass; no PyPI publication is promised. The dated evidence at this
-checkpoint remains scoped, with final live provider/lifecycle gates open. Main is `1603b60b` through merged [#249](https://github.com/ProfSynapse/Synaptic-Tuner/pull/249).
+checkpoint remains scoped, with final live provider/lifecycle gates open. At that checkpoint, main was `1603b60b` through merged [#249](https://github.com/ProfSynapse/Synaptic-Tuner/pull/249).
 HF publication [#238](https://github.com/ProfSynapse/Synaptic-Tuner/pull/238),
 launcher closure [#239](https://github.com/ProfSynapse/Synaptic-Tuner/pull/239),
 cold HF cancellation [#240](https://github.com/ProfSynapse/Synaptic-Tuner/pull/240),
@@ -43,8 +43,7 @@ HF material preparation [#242](https://github.com/ProfSynapse/Synaptic-Tuner/pul
 Modal capture diagnostics #243, configured Modal lifecycle #244 and finite
 CPU-parent diagnostics #245, orphaned-cancel observation #246, same-model consumer
 #247, its token-default repair #248 and source-root fixture correction #249 each
-passed all 18 checks on their accepted heads; each merged tree matches its reviewed head. No stable version,
-tag or package publication has been selected. The dated log below retains exact
+passed all 18 checks on their accepted heads; each merged tree matches its reviewed head. No stable tag or package publication has occurred. The dated log below retains exact
 source/wheel hashes, failures and evidence limits; older unavailable/baseline
 summaries are historical rather than current backend verdicts. Counts below are
 overlapping installed lane totals, not a cumulative unique-test count.
