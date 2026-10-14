@@ -31,11 +31,13 @@ The Python API is a library contract, not a deployed HTTP/MCP service.
 ## Current release status — 2026-10-14
 
 The source distribution is still **1.1.0 / Beta**, not a stable release. At this
-checkpoint, main is `0a66bb11` through merged [#241](https://github.com/ProfSynapse/Synaptic-Tuner/pull/241).
+checkpoint, main is `76842ecb` through merged [#243](https://github.com/ProfSynapse/Synaptic-Tuner/pull/243).
 HF publication [#238](https://github.com/ProfSynapse/Synaptic-Tuner/pull/238),
 launcher closure [#239](https://github.com/ProfSynapse/Synaptic-Tuner/pull/239),
 cold HF cancellation [#240](https://github.com/ProfSynapse/Synaptic-Tuner/pull/240)
-and native GRPO publication #241 each passed all 18 checks on their accepted
+native GRPO publication [#241](https://github.com/ProfSynapse/Synaptic-Tuner/pull/241),
+HF material preparation [#242](https://github.com/ProfSynapse/Synaptic-Tuner/pull/242)
+and Modal capture diagnostics #243 each passed all 18 checks on their accepted
 heads; each merged tree matches its reviewed head. No stable version,
 tag or package publication has been selected. The dated log below retains exact
 source/wheel hashes, failures and evidence limits; older unavailable/baseline
@@ -77,15 +79,34 @@ The fresh CPU qualification attempt D on exact `4b77bd1f` stopped with
 `CAPTURE_OUTPUT / INSPECTOR_REJECTED` and no qualification receipt. Its consumed
 claim and local records remain retained. That code identifies the failed
 inspection boundary, not its underlying cause or confirmed cleanup; no GPU
-training or model preparation was performed. Diagnose this exact attempt before
-reviewing any fresh attempt.
+training or model preparation was performed. Its retained evidence cannot locate
+the underlying failure more precisely.
 A separate isolated CPU experiment reproduced a build defect: the captured base
 already contains Hyperframe 6.1.0, and pip skips its same-version local wheel
-under the current install flags, leaving the required wheel provenance absent.
+under the former install flags, leaving the required wheel provenance absent.
 Adding `--force-reinstall` produced the exact local-wheel URI/hash and nine
 byte-identical installed members. This supports the installer correction; it
 does not retrospectively establish attempt D's cause. The correction and bounded
-inspector diagnostics still require implementation review and CI.
+inspector diagnostics are merged in #243: **630 installed controls** passed on
+wheel `9bf5bdd67076d49e76405a6c24dd527dc6882db62b804704bae687c1a1c5b3dd`,
+with all 18 checks green on accepted source `4c15db98`.
+
+Fresh CPU qualification E used that exact source and failed once at
+`CALL_INSTALLED_CHILD / UNAVAILABLE`. The exact returned failure frame establishes
+that image capture/build, deployment and parent-runtime inspection completed,
+then an unclassified installed-child qualification operation failed. No CPU
+qualification receipt, native child code or specific failing operation was
+retained; the underlying cause remains unknown. Preserve its consumed claims and
+known call. There was no model download or GPU training. More precise finite-stage
+diagnostics, followed by a separately bound fresh attempt, remain necessary.
+
+The Modal lifecycle candidate joins recipe opt-in and current caller permission
+to the existing public cancellation/reconciliation operations. Acknowledgment is
+distinct from an independent provider terminal observation. If an acknowledged
+cancel loses its Foundation receipt before persistence, the current composition
+retains the consumed effect and refuses replay; trusted quiescence recovery for
+that gap is unavailable. Do not claim arbitrary crash recovery or live cancellation
+qualification from the local process tests.
 No new grant, lifecycle DTO, store or scenario CRUD framework is required merely
 to close this plan. Supported host composition and installed/source prerequisites
 are detailed in the [operation matrix](api-v1-support-matrix.md) and
