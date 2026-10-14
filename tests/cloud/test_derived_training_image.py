@@ -223,12 +223,12 @@ def test_windows_build_environment_rejects_path_separator_in_docker_directory(
         )
 
 
+@pytest.mark.parametrize("windows", [False, True])
 def test_build_and_capture_bind_buildkit_digest_and_runtime_provenance(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, windows: bool,
 ) -> None:
-    # Exercise the Docker Desktop (Windows) layout, where Buildx is bound
-    # through a private config directory, on every host platform.
-    monkeypatch.setattr(derived_image, "_WINDOWS", True)
+    # Both platforms must isolate normal Buildx state from Docker authority.
+    monkeypatch.setattr(derived_image, "_WINDOWS", windows)
     profile_path = _profile(tmp_path / "profile.yaml")
     profile = load_profile(profile_path)
     resources = tmp_path / "docker-install" / "resources"
@@ -252,9 +252,17 @@ def test_build_and_capture_bind_buildkit_digest_and_runtime_provenance(
             command_config = Path(spec.argv[spec.argv.index("--config") + 1])
             private_build_configs.append(command_config)
             assert command_config != docker_config
-            assert json.loads(
-                (command_config / "config.json").read_text(encoding="ascii")
-            ) == {"cliPluginsExtraDirs": [str(buildx.parent.resolve())]}
+            if windows:
+                assert json.loads(
+                    (command_config / "config.json").read_text(encoding="ascii")
+                ) == {"cliPluginsExtraDirs": [str(buildx.parent.resolve())]}
+            else:
+                assert not any(command_config.iterdir())
+            if not windows:
+                # Actual operational writes observed on the Linux attempt.
+                (command_config / ".token_seed").write_bytes(b"synthetic-state")
+                (command_config / "buildx").mkdir()
+                (command_config / "buildx" / "current").write_bytes(b"synthetic-state")
             assert spec.env["PATH"] == derived_image.os.defpath
             metadata = Path(spec.argv[spec.argv.index("--metadata-file") + 1])
             metadata.write_text(
@@ -846,3 +854,32 @@ def test_same_version_derived_install_restores_exact_wheel_provenance(tmp_path):
     assert document["url"] == wheel.as_uri()
     assert document["archive_info"]["hashes"]["sha256"] == digest
     assert (Path(purelib) / "synaptic_provenance_fixture.py").read_bytes() == members["synaptic_provenance_fixture.py"]
+
+
+@pytest.mark.parametrize("change", ["populate", "replace", "binary"])
+def test_linux_build_preserves_original_docker_config_authority(tmp_path, monkeypatch, change):
+    monkeypatch.setattr(derived_image, "_WINDOWS", False)
+    profile = _profile(tmp_path / "profile.yaml")
+    docker = tmp_path / "docker"
+    docker.write_bytes(b"docker")
+    original = tmp_path / "docker-config"
+    original.mkdir()
+
+    def runner(command):
+        operational = Path(command.argv[command.argv.index("--config") + 1])
+        assert operational != original
+        (operational / ".token_seed").write_bytes(b"synthetic-state")
+        if change == "populate":
+            (original / "changed").write_bytes(b"changed")
+        elif change == "replace":
+            original.rename(tmp_path / "original-retained")
+            original.mkdir()
+        else:
+            docker.write_bytes(b"replacement-docker")
+        return CommandResult()
+
+    output = tmp_path / "receipt.json"
+    with pytest.raises(DerivedTrainingImageError, match="DOCKER_AUTHORITY_CHANGED"):
+        build_derived_image(profile_path=profile, docker=docker, docker_config=original,
+                            tag="qualification/trainer:candidate", output=output, runner=runner)
+    assert not output.exists()

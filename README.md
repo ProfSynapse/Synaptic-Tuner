@@ -21,16 +21,18 @@
   <sub><i>Training is powered by <a href="https://github.com/unslothai/unsloth">Unsloth</a> — huge thanks to their team.</i></sub>
 </div>
 
-## Public API and host consumers (Beta)
+## Public API and host consumers
 
 `synaptic_tuner.api.v1` provides Data generation/improvement/validation,
 evaluation and report comparison, training, known-run observation/verification,
 and verified artifact download/publication through caller-configured ports.
-The source package is **1.1.0 / Beta**; see the [support matrix](docs/plans/api-v1-support-matrix.md)
-and [release plan](docs/plans/stable-v1-release.md) for current acceptance.
+Version **1.1.0** targets the stable API v1 contract. The [support matrix](docs/plans/api-v1-support-matrix.md)
+records scoped acceptance, and [GitHub releases](https://github.com/ProfSynapse/Synaptic-Tuner/releases)
+record published artifacts and qualification evidence. The [release plan](docs/plans/stable-v1-release.md) defines promotion gates.
 The [API v1 policy](docs/architecture/api-v1-compatibility.md) defines public compatibility.
 
-Install a reviewed wheel into your environment and inspect the packaged CLI:
+Download a reviewed wheel from its GitHub release, then install that exact file
+and inspect the packaged CLI:
 
 ```sh
 python -m pip install /absolute/path/synaptic_tuner-1.1.0-py3-none-any.whl

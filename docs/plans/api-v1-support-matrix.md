@@ -6,7 +6,7 @@ updated: 2026-10-14
 
 # API v1 support and qualification matrix
 
-This is the current support view of merged main `1603b60b` through
+This dated checkpoint records merged main `1603b60b` through
 [#249](https://github.com/ProfSynapse/Synaptic-Tuner/pull/249) and the separately
 reviewed local HF staging/diagnostic and portable CPU fixes on 2026-10-14, not stable release certification.
 PRs #238–#249 passed all 18 checks on their accepted heads; merged trees match
@@ -51,6 +51,11 @@ Status vocabulary:
 
 The [API v1 compatibility policy](../architecture/api-v1-compatibility.md) defines
 public compatibility; this matrix records operational support and qualification.
+
+Package version `1.1.0` and its intended stable classifier do not certify every
+composition. This dated matrix records scoped evidence; [GitHub release records](https://github.com/ProfSynapse/Synaptic-Tuner/releases)
+bind published source/artifacts and final accepted operations. The distribution
+route is reviewed GitHub wheel/sdist assets, not an unverified PyPI install.
 
 ## Included workflow operations
 
