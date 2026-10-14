@@ -1,0 +1,33 @@
+{
+  "provider": "hf_jobs",
+  "state_root": "/ABSOLUTE/UNUSED/PRIVATE/ATTEMPT",
+  "request_file": {"path": "/ABSOLUTE/REQUEST.json", "size_bytes": 1, "sha256": "REPLACE_WITH_ACTUAL_REQUEST_SHA256"},
+  "host": {
+    "authority_secret": {"provider": "env", "name": "QUALIFICATION_AUTHORITY_KEY"},
+    "evidence_secret": {"provider": "env", "name": "QUALIFICATION_READER_KEY"},
+    "grant_ref": "HOST_SELECTED_ONE_SHOT_GRANT",
+    "allowed_requirements": [{"operation": "training.start", "paid_effect": true, "maximum_cost_minor_units": 100, "currency": "USD"}]
+  },
+  "hf_jobs": {
+    "provider": {"provider_id": "hf_jobs", "profile_ref": "HOST_SELECTED_PROFILE_REFERENCE"},
+    "material_file": {"path": "/ABSOLUTE/COORDINATOR_MATERIAL.json", "size_bytes": 1, "sha256": "REPLACE_WITH_ACTUAL_MATERIAL_SHA256"},
+    "prepared_file": {"path": "/ABSOLUTE/PREPARED_INPUT.jsonl", "size_bytes": 1, "sha256": "REPLACE_WITH_ACTUAL_INPUT_SHA256"},
+    "runtime_profile": {"name": "qwen35-sft-v1", "root": "/ABSOLUTE/INSTALLED/Trainers/runtime_profiles", "sha256": "REPLACE_WITH_ACTUAL_PROFILE_SHA256"},
+    "selection": {
+      "scope": {"account_ref": "HOST_SELECTED_ACCOUNT", "namespace_ref": "HOST_SELECTED_NAMESPACE"},
+      "bucket_id": "HOST_SELECTED_NAMESPACE/EXISTING_BUCKET",
+      "source_prefix": "source/UNUSED_ATTEMPT",
+      "run_prefix": "runs/UNUSED_ATTEMPT",
+      "flavor": "HOST_SELECTED_FLAVOR",
+      "timeout_seconds": 300,
+      "host_token": {"provider": "env", "name": "HF_TOKEN"},
+      "job_token": {"provider": "env", "name": "HF_TOKEN"},
+      "quote_digest": "REPLACE_WITH_REVIEWED_QUOTE_COMMITMENT"
+    },
+    "reader_authority_ref": "HOST_SELECTED_READER_AUTHORITY_REFERENCE",
+    "reader_key_ref": "HOST_SELECTED_READER_KEY_REFERENCE",
+    "maximum_cost_minor_units": 100,
+    "currency": "USD",
+    "read_seconds": 30
+  }
+}

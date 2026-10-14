@@ -1329,3 +1329,28 @@ test was corrected to accept both supported closed rejection outcomes observed
 on Python 3.12 and 3.14; runtime behavior did not change. All seven maintenance
 checks remain current and skill mirrors match. Concrete destinations, a durable
 spool, verified-run composition and live publication remain separate gates.
+
+
+### Installed public SFT consumer acceptance — 2026-10-14
+
+The checkout-owned shared launcher and Docker/HF adapters exercise existing
+TrainingAPI/RunsAPI with original named keys and caller-owned SQLite. The root
+integration of reviewed source `4869cb7e`/`db21073b` and their CI changes passed
+the exact installed Docker lifecycle lane (**61 tests**) and pinned Hub 1.33.0
+lane (**80 tests**) under CPython 3.12.15. Both ran from neutral directories with
+explicit checkout example/test copies and installed production-origin assertions.
+The unchanged engine wheel is SHA256
+`11e5c7c5f5a1ff3806870eed928117490ee8214a12adb261f7183e80cccc9d78`;
+these example, test, workflow and guidance additions change no production engine
+module or runtime lock. The root initially selected Python 3.14 for the Docker
+lane; its native-artifact fixture correctly refused the existing portable SFT
+runtime requirement (`>=3.11,<3.14`). That failed run remains retained; acceptance
+uses the supported interpreter without changing the requirement.
+
+The tests exercise public planning/preflight/start, create-only attempts, known
+reads, native five-role verification/download and uncertain-submit non-replay.
+Docker cancellation preserves acknowledgment versus observed completion and
+unpromoted capability refusals. Docker cold reads still require original image
+qualification assets and mount roots; HF cold reads use the retained reader and
+remain read-only. These CPU controls do not establish live SFT provider parity,
+GPU training, provider billing, physical cancellation or model quality.
