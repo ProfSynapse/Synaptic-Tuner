@@ -39,4 +39,3 @@ Cancellation acknowledgment, requested cancellation and observed terminal state 
 A supported installation claim names its Python/platform and tested paths. Base imports/assets/help on Linux Python 3.10–3.14 and Windows/macOS Python 3.12 are separate from POSIX stores/workers, portable SFT requirements and exact effectful Modal CPython 3.11.14/SDK pins. Wheel metadata is not execution qualification. Checkout-owned examples and source build inputs remain explicit prerequisites.
 
 Publish stable support only after the selected release's contract/installed gates and independently scoped live qualifications pass. Evidence names its exact source, wheel, configuration and limits; historical or scripted success cannot promote current capabilities. Keep experimental/unqualified combinations and disabled operations visible in the support matrix rather than describing them as universal v1 support.
-
