@@ -1,0 +1,547 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-grpo-workload-v1.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "synaptic-grpo-workload/v1"
+    },
+    "method": {
+      "const": "grpo"
+    },
+    "entrypoint": {
+      "const": "Trainers/grpo/runtime_v1.py"
+    },
+    "configuration_schema": {
+      "const": "synaptic-grpo-config/v1"
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "object",
+          "properties": {
+            "model_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "lora_path": {
+              "const": null
+            },
+            "max_seq_length": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "dtype": {
+              "const": null
+            },
+            "load_in_4bit": {
+              "type": "boolean"
+            },
+            "chat_template": {
+              "const": "native"
+            }
+          },
+          "required": [
+            "model_name",
+            "lora_path",
+            "max_seq_length",
+            "dtype",
+            "load_in_4bit",
+            "chat_template"
+          ],
+          "additionalProperties": false
+        },
+        "lora": {
+          "type": "object",
+          "properties": {
+            "r": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "lora_alpha": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "lora_dropout": {
+              "type": "number",
+              "minimum": 0,
+              "exclusiveMaximum": 1
+            },
+            "bias": {
+              "const": "none"
+            },
+            "target_modules": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "use_gradient_checkpointing": {
+              "const": "unsloth"
+            },
+            "random_state": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "use_rslora": {
+              "type": "boolean"
+            },
+            "use_dora": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "r",
+            "lora_alpha",
+            "lora_dropout",
+            "bias",
+            "target_modules",
+            "use_gradient_checkpointing",
+            "random_state",
+            "use_rslora",
+            "use_dora"
+          ],
+          "additionalProperties": false
+        },
+        "training": {
+          "type": "object",
+          "properties": {
+            "output_dir": {
+              "const": "checkpoints"
+            },
+            "optim": {
+              "const": "adamw_8bit"
+            },
+            "lr_scheduler_type": {
+              "const": "linear"
+            },
+            "num_train_epochs": {
+              "const": 1
+            },
+            "report_to": {
+              "const": "none"
+            },
+            "use_gspo": {
+              "const": false
+            },
+            "extra_args": {
+              "const": {}
+            },
+            "num_generations": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 4096
+            },
+            "max_steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "max_prompt_length": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "max_completion_length": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "learning_rate": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "temperature": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 10
+            },
+            "beta": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "weight_decay": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "warmup_ratio": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_grad_norm": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 100
+            },
+            "logging_steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "save_steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "save_total_limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "fp16": {
+              "type": "boolean"
+            },
+            "bf16": {
+              "type": "boolean"
+            },
+            "per_device_train_batch_size": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "gradient_accumulation_steps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "chat_template_kwargs": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 64
+            }
+          },
+          "required": [
+            "output_dir",
+            "optim",
+            "lr_scheduler_type",
+            "num_train_epochs",
+            "report_to",
+            "use_gspo",
+            "extra_args",
+            "num_generations",
+            "max_steps",
+            "max_prompt_length",
+            "max_completion_length",
+            "learning_rate",
+            "temperature",
+            "beta",
+            "weight_decay",
+            "warmup_ratio",
+            "max_grad_norm",
+            "logging_steps",
+            "save_steps",
+            "save_total_limit",
+            "fp16",
+            "bf16",
+            "per_device_train_batch_size",
+            "gradient_accumulation_steps"
+          ],
+          "additionalProperties": false
+        },
+        "dataset": {
+          "type": "object",
+          "properties": {
+            "dataset_name": {
+              "const": null
+            },
+            "dataset_file": {
+              "const": null
+            },
+            "local_file": {
+              "const": null
+            },
+            "num_proc": {
+              "const": 1
+            },
+            "prompt_column": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "dataset_name",
+            "dataset_file",
+            "local_file",
+            "num_proc",
+            "prompt_column"
+          ],
+          "additionalProperties": false
+        },
+        "rewards": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "weight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "name",
+                  "weight"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "custom": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "const": false
+                }
+              },
+              "required": [
+                "enabled"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "items",
+            "custom"
+          ],
+          "additionalProperties": false
+        },
+        "pivot": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "const": false
+            }
+          },
+          "required": [
+            "enabled"
+          ],
+          "additionalProperties": false
+        },
+        "wandb": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "const": false
+            }
+          },
+          "required": [
+            "enabled"
+          ],
+          "additionalProperties": false
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "model",
+        "lora",
+        "training",
+        "dataset",
+        "rewards",
+        "pivot",
+        "wandb",
+        "seed"
+      ],
+      "additionalProperties": false
+    },
+    "model": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "tokenizer_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "model_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "required": [
+        "revision",
+        "tokenizer_revision",
+        "model_id"
+      ],
+      "additionalProperties": false
+    },
+    "prepared_input": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string",
+          "pattern": "^prepared://sha256/[0-9a-f]{64}$"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "content_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "format": {
+          "const": "synaptic-grpo-prompts/v1"
+        }
+      },
+      "required": [
+        "ref",
+        "revision",
+        "content_digest",
+        "size_bytes",
+        "format"
+      ],
+      "additionalProperties": false
+    },
+    "reward_documents": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 32,
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "scope": {
+            "const": "response"
+          },
+          "validation": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "const": "regex"
+                },
+                "match": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "type",
+                "match"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "scoring": {
+            "type": "object",
+            "properties": {
+              "strategy": {
+                "const": "binary"
+              },
+              "on_pass": {
+                "type": "number",
+                "minimum": -100,
+                "maximum": 100
+              },
+              "on_fail": {
+                "type": "number",
+                "minimum": -100,
+                "maximum": 100
+              }
+            },
+            "required": [
+              "strategy",
+              "on_pass",
+              "on_fail"
+            ],
+            "additionalProperties": false
+          },
+          "type": {
+            "const": "rubric"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "name",
+          "scope",
+          "validation",
+          "scoring"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "reward_schema": {
+      "type": "object",
+      "maxProperties": 0
+    },
+    "config_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "dataset_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "rewards_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "execution_source": {
+      "$ref": "https://schemas.synapticlabs.ai/synaptic-execution-source-v1.schema.json"
+    }
+  },
+  "required": [
+    "schema_version",
+    "method",
+    "entrypoint",
+    "configuration_schema",
+    "config",
+    "model",
+    "prepared_input",
+    "reward_documents",
+    "reward_schema",
+    "config_sha256",
+    "dataset_sha256",
+    "rewards_sha256"
+  ],
+  "additionalProperties": false
+}

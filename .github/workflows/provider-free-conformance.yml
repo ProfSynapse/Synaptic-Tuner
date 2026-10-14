@@ -673,6 +673,54 @@ jobs:
               str(root / "tests/training/test_docker_host_composition.py")]))
           PYCODE
 
+      - name: Exercise installed public GRPO declarations and preparation
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-import-venv/bin/python" -I -B - <<'PYCODE'
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import jsonschema
+          import synaptic_tuner
+          import synaptic_tuner.api.v1.training_input as inputs
+          import tuner.training.grpo_compilation as compilation
+          import tuner.training.grpo_preparation as preparation
+          import tuner.training.methods.grpo as recipe
+          import tuner.training.input_preparation as generic
+          import Trainers.grpo.runtime_v1 as core
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          for module in (inputs, compilation, preparation, recipe, generic, core):
+              location = Path(module.__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
+          installed = Path(synaptic_tuner.__file__).resolve().parent.parent
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-grpo-public-tests"
+          names = (
+              "contract/test_grpo_training_input_v1.py",
+              "contract/test_grpo_preparation_v1.py",
+              "contract/test_public_training_input_v1.py",
+              "contract/test_public_training_input_loader_v1.py",
+          )
+          for name in (*names, "training/test_sft_compilation.py"):
+              target = root / "tests" / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(checkout / "tests" / name, target)
+          schemas = root / "schemas"
+          schemas.mkdir()
+          for name in ("synaptic-grpo-hyperparameters-v1.schema.json",
+                       "synaptic-grpo-config-v1.schema.json",
+                       "synaptic-grpo-workload-v1.schema.json"):
+              shutil.copy2(installed / "schemas" / name, schemas / name)
+          # Only tests and installed schema data enter the neutral root.
+          import pytest
+          sys.path.insert(0, str(root))
+          os.chdir(root)
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
+              *(str(root / "tests" / name) for name in names)]))
+          PYCODE
+
       - name: Exercise installed GRPO retained-input core
         if: matrix.suite == 'core'
         working-directory: ${{ runner.temp }}
