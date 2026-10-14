@@ -2,7 +2,7 @@
 
 This dedicated host branch is not an engine PR. Its real engine Gitlink is
 d4940634d0b278358fd9b851605f84986d3da57d, with the declared
-`release/derived-bootstrap-integration` branch hint (PR253). Local Git
+`release/derived-bootstrap-integration` branch hint (PR254). Local Git
 inspection proves the actual checkout/gitlink and clean source; it does not
 prove this host has been pushed. Root reviews/pushes the host and verifies exact
 remote refs before source authentication or provider effects.
