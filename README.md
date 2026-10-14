@@ -1,8 +1,8 @@
 # HF SFT qualification host fixture
 
 This dedicated host branch is not an engine PR. Its engine Gitlink is exactly
-4b77bd1f8e8a0abd664907a575166bfa41f11a7d, with the actual pushed
-`release/grpo-model-publication-integration` branch hint. A credential-disabled
+bea87f9dba59f7f73c20ef91b7bbb542d85d01c2, with the actual pushed
+`release/nontraining-same-model-integration` branch hint. A credential-disabled
 public ls-remote observed that exact branch HEAD during preparation. Do not use
 `main` as its source hint: main has a different commit despite identical tree.
 The host itself must be reviewed/pushed and its exact branch verified before
@@ -33,7 +33,7 @@ Portable preparation templates intentionally retain unresolved absolute paths,
 source-key references, actual bucket, fresh prefixes, live quote and current
 host-grant inputs. They are not operational consumer config or ready evidence.
 Use the accepted host-owned prepare_hf.py example from PR242 alongside the
-installed engine, since this exact runtime Gitlink predates that additive helper.
+installed engine, using the same final engine source and installed accepted wheel.
 Its genuine source verifier and compiler must accept actual completed inputs
 before it publishes consumer.json. Do not copy fabricated quote hashes or bucket
 IDs into the template. Named source key remains distinct from HF_TOKEN; original
@@ -52,3 +52,5 @@ was used instead, with named credentials through explicit dotenv CLI.
 
 No Job, bucket creation/upload, model download, image build or paid training was
 performed. Existing capability defaults and lost-reply/no-replay rules remain.
+
+Final-source candidate rebind preserves the original7df0a0bf host history and exact eight authored rows. Current enginebea87f9d is the actual pushed PR247 source; CI is pending and this host is not live qualification. Owner selected private professorsynapse/toolset-training-artifacts, but no job/upload/model download is authorized by this host. Fresh local source/authority/reader keys and caller config remain private, outside tracked files.

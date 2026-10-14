@@ -8,7 +8,7 @@ import json
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "synaptic-tuner"
-PIN = "4b77bd1f8e8a0abd664907a575166bfa41f11a7d"
+PIN = "bea87f9dba59f7f73c20ef91b7bbb542d85d01c2"
 ORIGIN = "https://github.com/ProfSynapse/Synaptic-Tuner.git"
 
 if ENGINE.resolve(strict=True) != ENGINE:
@@ -58,7 +58,7 @@ class ConsumerSourceTests(unittest.TestCase):
         self.assertEqual(source.engine_source.commit, PIN)
         self.assertEqual(source.engine_source.gitlink_commit, PIN)
         self.assertEqual(source.engine_source.submodule_path, "synaptic-tuner")
-        self.assertEqual(source.engine_source.branch, "release/grpo-model-publication-integration")
+        self.assertEqual(source.engine_source.branch, "release/nontraining-same-model-integration")
         self.assertFalse(source.project_source.dirty)
         self.assertFalse(source.engine_source.dirty)
         self.assertFalse(source.project_source.pushed)
