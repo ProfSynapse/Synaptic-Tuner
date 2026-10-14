@@ -1,0 +1,72 @@
+# Source/host-owned candidate build intent, excluded from its referenced wheel.
+# Real accepted wheel anchor; current-source mode binds the actual replacement wheel.
+# CPU capture of registry base does not qualify the augmented image or GPU.
+schema_version: synaptic-derived-training-image-profile/v1
+name: smollm2-135m-packaged-grpo-candidate-v1
+platform: linux/amd64
+base_image: docker.io/unsloth/unsloth@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39
+python_executable: /opt/conda/bin/python3
+packages: []
+packaged_runtime:
+  wheel:
+    filename: synaptic_tuner-1.1.0-py3-none-any.whl
+    distribution: synaptic-tuner
+    version: 1.1.0
+    sha256: 30d5f1b1b92f6826c2b624ca88daa32d0e8437595adfd93f689ae813d7fad863
+  bootstrap:
+  - filename: grpclib-0.4.9-py3-none-any.whl
+    distribution: grpclib
+    version: 0.4.9
+    sha256: 7762ec1c8ed94dfad597475152dd35cbd11aecaaca2f243e29702435ca24cf0e
+  - filename: h2-4.4.1-py3-none-any.whl
+    distribution: h2
+    version: 4.4.1
+    sha256: 0e25f1462b23c9cb82d9eb02e28bc706dac2a68cb457c6a0d74d63c8a2a5d0e6
+  - filename: hpack-4.2.0-py3-none-any.whl
+    distribution: hpack
+    version: 4.2.0
+    sha256: 858ac0b02280fa582b5080d68db0899c62a80375e0e5413a74970c5e518b6986
+  - filename: hyperframe-6.1.0-py3-none-any.whl
+    distribution: hyperframe
+    version: 6.1.0
+    sha256: b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5
+  - filename: modal-1.5.4-py3-none-any.whl
+    distribution: modal
+    version: 1.5.4
+    sha256: 3e54e26037c445af42f9a9ef9862b66bdd2e0b1faeced5fcc7adf3e5f59e44ed
+  - filename: synchronicity-0.12.5-py3-none-any.whl
+    distribution: synchronicity
+    version: 0.12.5
+    sha256: fdbbb10d437bc08a6b0f814fc66fddd1b58ffed314533d42f1ab555801e781af
+  - filename: toml-0.10.2-py2.py3-none-any.whl
+    distribution: toml
+    version: 0.10.2
+    sha256: 806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b
+  - filename: types_certifi-2021.10.8.3-py3-none-any.whl
+    distribution: types-certifi
+    version: 2021.10.8.3
+    sha256: b2d1e325e69f71f7c78e5943d410e650b4707bb0ef32e4ddf3da37f54176e88a
+  - filename: types_toml-0.10.8.20260518-py3-none-any.whl
+    distribution: types-toml
+    version: 0.10.8.20260518
+    sha256: 0e564ab05f6fde62a315b3b5a9b6624fda569399795d30a37e64705a70459303
+  python:
+    implementation: cpython
+    version: 3.11.14
+    executable: /opt/conda/bin/python3
+    executable_digest: 06950bbe281eade6c8c0a9c6c70e6a9a338e6fb63b641dc3a71b1854e74fc859
+    purelib: /opt/conda/lib/python3.11/site-packages
+    platlib: /opt/conda/lib/python3.11/site-packages
+  capabilities:
+    compatibility:
+      methods:
+      - grpo
+      models:
+      - ref: HuggingFaceTB/SmolLM2-135M-Instruct
+        revision: a91318be21aeaf0879874faa161dcb40c68847e9
+      dataset_formats:
+      - synaptic-grpo-prompts/v1
+    contracts:
+      workload_schema: synaptic-packaged-grpo-workload/v1
+      prepared_input_schema: synaptic-prepared-training-input/v1
+      artifact_contract_schema: synaptic-grpo-artifacts/v1
