@@ -264,8 +264,16 @@ _OBS[WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED] = {
  ProviderRunPhaseV1.FAILED: WorkflowPhaseV1.FAILED,
  ProviderRunPhaseV1.CANCELLED: WorkflowPhaseV1.CANCELLED,
 }
+# An orphaned cancel intent does not revoke the original FOUND submit read authority.
+_OBS[WorkflowPhaseV1.CANCEL_INTENT_RECORDED] = {
+ ProviderRunPhaseV1.QUEUED: WorkflowPhaseV1.CANCEL_INTENT_RECORDED,
+ ProviderRunPhaseV1.RUNNING: WorkflowPhaseV1.CANCEL_INTENT_RECORDED,
+ ProviderRunPhaseV1.SUCCEEDED: WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,
+ ProviderRunPhaseV1.FAILED: WorkflowPhaseV1.FAILED,
+ ProviderRunPhaseV1.CANCELLED: WorkflowPhaseV1.CANCELLED,
+}
 _READ_PHASES={
- ProviderReadPurposeV1.OBSERVE:{WorkflowPhaseV1.QUEUED,WorkflowPhaseV1.RUNNING,WorkflowPhaseV1.CANCEL_REQUESTED,WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED},
+ ProviderReadPurposeV1.OBSERVE:{WorkflowPhaseV1.CANCEL_INTENT_RECORDED,WorkflowPhaseV1.QUEUED,WorkflowPhaseV1.RUNNING,WorkflowPhaseV1.CANCEL_REQUESTED,WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED},
  ProviderReadPurposeV1.LOGS:{WorkflowPhaseV1.QUEUED,WorkflowPhaseV1.RUNNING,WorkflowPhaseV1.CANCEL_INTENT_RECORDED,WorkflowPhaseV1.CANCEL_REQUESTED,WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED,WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,WorkflowPhaseV1.VERIFICATION_FAILED,WorkflowPhaseV1.VERIFIED,WorkflowPhaseV1.FAILED,WorkflowPhaseV1.CANCELLED},
  ProviderReadPurposeV1.ARTIFACTS:{WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,WorkflowPhaseV1.VERIFICATION_FAILED,WorkflowPhaseV1.VERIFIED},
 }

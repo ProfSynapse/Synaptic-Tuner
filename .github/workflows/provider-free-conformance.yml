@@ -28,6 +28,8 @@ on:
       - "tests/training/test_modal_cold_cancellation.py"
       - "tests/training/test_modal_cold_cancellation_process.py"
       - "tests/runtime/test_packaged_cpu_parent_diagnostics.py"
+      - "tests/training/test_modal_orphaned_cancel_observation.py"
+      - "tests/execution/coordinator_v1/test_orphaned_cancel_observation.py"
       - "tuner/handlers/modal_job_config_handler.py"
       - "Trainers/image_profiles/qwen35_4b_conversation_sft_candidate_v1/**"
       - "tests/contract/test_data_conversation_sft_handoff_v1.py"
@@ -722,10 +724,11 @@ jobs:
           import tuner.execution.providers.docker_provider_v1.local_source as source
           import tuner.execution.providers.docker_provider_v1.reader as reader
           import tuner.execution.coordinator_v1.operations as operations
+          import tuner.execution.coordinator_v1.model as coordinator_model
           import tuner.execution.coordinator_v1.state_machine as state_machine
           import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (artifacts, reader, cancellation, source, operations, state_machine, sqlite_store):
+          for module in (artifacts, reader, cancellation, source, operations, coordinator_model, state_machine, sqlite_store):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -744,6 +747,7 @@ jobs:
               "execution/coordinator_v1/test_operational_cas.py",
               "execution/coordinator_v1/test_operations_service.py",
               "execution/coordinator_v1/test_uncertain_cancel_observation.py",
+              "execution/coordinator_v1/test_orphaned_cancel_observation.py",
               "execution/foundation_v2/helpers.py",
           ):
               target = root / "tests" / name
@@ -761,7 +765,9 @@ jobs:
               str(root / "tests/execution/providers/docker_provider_v1/test_cancellation_transport.py"),
               str(root / "tests/execution/providers/docker_provider_v1/test_local_source.py"),
               str(root / "tests/execution/coordinator_v1/test_state_machine.py") + "::test_uncertain_cancel_observes_known_run_without_receipt_repair",
-              str(root / "tests/execution/coordinator_v1/test_uncertain_cancel_observation.py")]))
+              str(root / "tests/execution/coordinator_v1/test_uncertain_cancel_observation.py"),
+              str(root / "tests/execution/coordinator_v1/test_orphaned_cancel_observation.py"),
+              str(root / "tests/execution/coordinator_v1/test_state_machine.py") + "::test_unadvanced_cancel_preserves_intent_during_independent_observation"]))
           PYCODE
 
       - name: Exercise installed Docker public host lifecycle
@@ -1118,6 +1124,7 @@ jobs:
               "training/test_modal_grpo_process_restart.py",
               "training/test_uncertain_cancel_modal_observation.py",
               "training/test_modal_cold_cancellation_process.py",
+              "training/test_modal_orphaned_cancel_observation.py",
           )
           for relative in helpers:
               target = root / "tests" / relative
@@ -1156,7 +1163,8 @@ jobs:
               str(root / "tests/training/test_modal_grpo_standalone_runner.py"),
               str(root / "tests/training/test_modal_grpo_process_restart.py"),
               str(root / "tests/training/test_uncertain_cancel_modal_observation.py"),
-              str(root / "tests/training/test_modal_cold_cancellation_process.py")]))
+              str(root / "tests/training/test_modal_cold_cancellation_process.py"),
+              str(root / "tests/training/test_modal_orphaned_cancel_observation.py")]))
           PYCODE
 
       - name: Exercise installed bounded GRPO evidence with pinned CPU Torch

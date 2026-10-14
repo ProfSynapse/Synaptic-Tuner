@@ -706,10 +706,14 @@ A lost SDK reply consumes the original cancel intent. Cold reconciliation may
 remain indeterminate and never reissues that effect; independent native success
 can still settle the run while preserving the uncertain cancellation history.
 A distinct post-ACK Foundation receipt gap can leave the consumed effect
-`ORPHANED_UNPROVEN` and workflow `CANCEL_INTENT_RECORDED`. This join keeps that
-case closed (`state_conflict`/unavailable quiescence) and does not expand phase
-admission or claim complete receipt recovery. Preserve its original records;
-current permission is not quiescence evidence.
+`ORPHANED_UNPROVEN` and workflow `CANCEL_INTENT_RECORDED`. Its authenticated
+original `FOUND` submit permits known-run reads and independent terminal
+observation. Pending preserves the intent; native success can verify and stream
+five artifacts. Failure/cancellation preserves the unadvanced cancel history,
+without inventing an acknowledgment or cancellation receipt. Cancel/reconcile
+remain refused for this orphaned intent, even after an observed terminal state.
+Preserve its original records; neither current permission nor a provider input
+terminal status establishes physical quiescence or receipt recovery.
 
 Original key custody remains a host responsibility. A changed authority key
 rejects authenticated replay before provider access. Reader keys authenticate
@@ -1881,8 +1885,10 @@ completion remains success.
 The original uncertain cancellation intent and Foundation history remain intact.
 Observation creates no cancellation acknowledgment, `FOUND` receipt or bound
 cancellation reference, and never repeats cancel, authorizes a new effect or
-renews submission authority. Unknown submission, an uncommitted cancel intent,
-stale or mismatched evidence and read failures remain closed. Ordinary capability
+renews submission authority. The same known-submit read authority permits an
+orphaned `cancel_intent_recorded` phase; pending retains that phase and cancel or
+reconcile stays refused while its receipt is absent. Unknown submission, stale
+or mismatched evidence and read failures remain closed. Ordinary capability
 gates and sealed log restrictions do not change.
 
 Provider-free tests cover cold SQLite public outcomes and a killed Modal host with

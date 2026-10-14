@@ -52,7 +52,7 @@ from tuner.training.packaged_boundary import derive_packaged_coordinator_materia
 _TERMINAL = frozenset({
     WorkflowPhaseV1.SUCCEEDED_UNVERIFIED, WorkflowPhaseV1.VERIFIED, WorkflowPhaseV1.VERIFICATION_FAILED,
 })
-_ACTIVE = frozenset({WorkflowPhaseV1.QUEUED, WorkflowPhaseV1.RUNNING,
+_ACTIVE = frozenset({WorkflowPhaseV1.CANCEL_INTENT_RECORDED, WorkflowPhaseV1.QUEUED, WorkflowPhaseV1.RUNNING,
                      WorkflowPhaseV1.CANCEL_REQUESTED,
                      WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED})
 _NON_ARTIFACT_TERMINAL = frozenset({WorkflowPhaseV1.FAILED, WorkflowPhaseV1.CANCELLED})
@@ -149,14 +149,20 @@ class _CancellationEffects(ModalPackagedHostEffectsV1):
 
 
 class _CancellationOperations(_RetainedOperations):
-    def cancel(self, run, reason):
+    def _check_lifecycle(self, run):
         self._check(run)
+        cancel = self._workflows.get(run).cancel
+        if cancel is not None and not cancel.advanced:
+            raise RunOperationError(RunOperationCode.READ_INELIGIBLE)
+
+    def cancel(self, run, reason):
+        self._check_lifecycle(run)
         if self._workflows.get(run).phase in _NON_ARTIFACT_TERMINAL:
             return self._operations.show(run)
         return self._operations.cancel(run, reason)
 
     def reconcile(self, run):
-        self._check(run)
+        self._check_lifecycle(run)
         if self._workflows.get(run).cancel is None:
             raise RunOperationError(RunOperationCode.READ_INELIGIBLE)
         if self._workflows.get(run).phase in _NON_ARTIFACT_TERMINAL:
