@@ -35,10 +35,12 @@ def diagnose(phase,error):
 child._classified_failure=diagnose
 result=child.main()
 payload=json.loads(Path(grp_args[1]).read_bytes())
-paths=sorted({str(Path(module.__file__).absolute().relative_to(source))
- for module in tuple(sys.modules.values()) if getattr(module,'__file__',None)
- and Path(module.__file__).is_file() and Path(module.__file__).absolute().is_relative_to(source)
- and not Path(module.__file__).absolute().is_relative_to(source/'tests')})
+from tuner.runtime.packaged_sft_child import _OWNED_PREFIXES
+owned=[(name,Path(module.__file__).absolute())
+ for name,module in tuple(sys.modules.items())
+ if name.split('.')[0] in _OWNED_PREFIXES and getattr(module,'__file__',None)]
+assert all(path.is_file() and path.is_relative_to(source) for name,path in owned)
+paths=sorted({str(path.relative_to(source)) for name,path in owned})
 Path(payload['paths']['tracking'],'cpu-owned-imports.json').write_text(json.dumps(paths))
 raise SystemExit(result)
 """
