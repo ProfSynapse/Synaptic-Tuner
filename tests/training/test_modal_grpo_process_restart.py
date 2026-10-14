@@ -39,8 +39,46 @@ _child(sys.argv[3], Path(sys.argv[4]), Path(sys.argv[2]))
 """
 
 
+def _cancel_descriptor_fixture(patch):
+    from dataclasses import replace
+    from tuner.training import modal_host_composition as composition
+
+    original = composition._modal_packaged_descriptor
+
+    def descriptor(**kwargs):
+        value = original(**kwargs)
+        return replace(
+            value, capabilities=replace(value.capabilities, cancel=True, reconcile=True)
+        )
+
+    patch.setattr(composition, "_modal_packaged_descriptor", descriptor)
+    patch.setattr(reader, "_modal_packaged_descriptor", descriptor)
+
+
 def _producer(root):
     patch = pytest.MonkeyPatch()
+    uncertain_cancel = (root / "uncertain-cancel").exists()
+    captured = []
+    if uncertain_cancel:
+        _cancel_descriptor_fixture(patch)
+        from tuner.training import modal_host_composition as composition
+
+        original_generic = composition.compose_reference_host
+        patch.setattr(
+            composition,
+            "compose_reference_host",
+            lambda **kwargs: original_generic(
+                **kwargs, allow_current_cancel_authorization=True
+            ),
+        )
+        original_compose = runner.compose_modal_packaged_reference_host
+
+        def compose(**kwargs):
+            value = original_compose(**kwargs)
+            captured.append(value)
+            return value
+
+        patch.setattr(runner, "compose_modal_packaged_reference_host", compose)
     host = root / "host"
     host.mkdir(mode=0o700)
     # The parent owns fixture storage even when this producer is abruptly killed.
@@ -67,6 +105,22 @@ def _producer(root):
             host / "state/synaptic-training" / run.run_id, expected_run=run
         )
         sdk = sys.modules["modal"]
+        if uncertain_cancel:
+
+            def lost_cancel(call, *, terminate_containers):
+                assert terminate_containers is True and call.object_id == call_ref
+                raise RuntimeError("controlled cancellation reply loss")
+
+            patch.setattr(sdk.FunctionCall, "cancel", lost_cancel, raising=False)
+            assert (
+                captured[0].api.runs.cancel(run, "stop").state.value
+                == "reconcile_required"
+            )
+            workflow = captured[0].composition.stores.workflow_store.get(run)
+            assert workflow.bound_cancellation is None
+            expected_cancel = workflow.cancel.to_dict()
+        else:
+            expected_cancel = None
         actual_result = sdk.FunctionCall.from_id(call_ref, client=None).get(timeout=0)
         assert actual_result["status_code"] == "completed"
         facts = binding.provider_facts
@@ -98,6 +152,10 @@ def _producer(root):
             root / "provider.json",
             {
                 "phase": "pending",
+                "expected_state": "reconcile_required"
+                if uncertain_cancel
+                else "queued",
+                "expected_cancel": expected_cancel,
                 "facts": facts.to_dict(),
                 "client_binding": retained.inputs["client_binding"],
                 "volume_names": retained.inputs["volume_names"],
@@ -146,6 +204,8 @@ def _child(role, root, expected_source):
     if role == "producer":
         _producer(root)
     else:
+        if (root / "uncertain-cancel").exists():
+            _cancel_descriptor_fixture(pytest.MonkeyPatch())
         print(json.dumps(process._consumer(root, role)), flush=True)
 
 
@@ -164,9 +224,13 @@ def _command(root, role):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="SIGKILL process proof requires POSIX")
-def test_grpo_killed_producer_then_three_fresh_public_readers(tmp_path):
+def test_grpo_killed_producer_then_three_fresh_public_readers(
+    tmp_path, *, uncertain_cancel=False
+):
     root = tmp_path / "grpo-process-proof"
     root.mkdir(mode=0o700)
+    if uncertain_cancel:
+        (root / "uncertain-cancel").touch(mode=0o600)
     scratch = root / "scratch"
     scratch.mkdir(mode=0o700)
     environment = {"PATH": os.defpath, "TMPDIR": str(scratch)}
@@ -272,10 +336,13 @@ def test_grpo_killed_producer_then_three_fresh_public_readers(tmp_path):
     pending, completed, verified = observed
     assert len({producer.pid, *(item["pid"] for item in observed)}) == 4
     assert (
-        pending["state"] == "queued"
+        pending["state"] == ("reconcile_required" if uncertain_cancel else "queued")
         and pending["census_digest"] == ready["census_digest"]
     )
-    assert completed["before"] == "queued" and completed["state"] == "succeeded"
+    assert (
+        completed["before"] == ("reconcile_required" if uncertain_cancel else "queued")
+        and completed["state"] == "succeeded"
+    )
     assert completed["verified_artifacts"] == verified["verified_artifacts"] == 5
     assert completed["census_digest"] != ready["census_digest"]
     assert (

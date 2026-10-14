@@ -181,14 +181,14 @@ def _consumer(root, role):
         before = view.runs.show(run).state.value
         if role == 'pending':
             outcome = view.runs.outcome(run)
-            assert outcome.state.value == before == 'queued'
+            assert outcome.state.value == before == state.get('expected_state', 'queued')
             assert reads == ['poll']
         elif role == 'mismatch':
             from synaptic_tuner.api.v1.runs_facade import RunOperationError
             with pytest.raises(RunOperationError) as failure:
                 view.runs.outcome(run)
             assert failure.value.code.value == 'provider_read_invalid'
-            assert view.runs.show(run).state.value == before == 'queued'
+            assert view.runs.show(run).state.value == before == state.get('expected_state', 'queued')
             assert not view.runs.show(run).artifacts
         elif role == 'verified':
             restored = view.runs.show(run)
@@ -209,6 +209,10 @@ def _consumer(root, role):
                 observed[artifact_role] = hashlib.sha256(path.read_bytes()).hexdigest()
             assert observed == state['artifact_hashes']
         restored = view.runs.show(run)
+        if state.get('expected_cancel') is not None:
+            original = view.runs._operations._workflows.get(run)
+            assert original.cancel.to_dict() == state['expected_cancel']
+            assert original.bound_cancellation is None
     return {'pid': os.getpid(), 'before': before, 'state': restored.state.value,
             'verified_artifacts': len(restored.artifacts), 'reads': reads,
             'census_digest': _census_digest(root, run.to_dict())}

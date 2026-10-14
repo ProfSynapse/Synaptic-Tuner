@@ -201,3 +201,30 @@ def test_rejected_verification_is_retained_and_replays_after_failure():
  failed=apply_artifact_verification(done,manifest,receipt,Verifier())
  assert failed.phase is WorkflowPhaseV1.VERIFICATION_FAILED and failed.verification_receipts==(receipt,)
  assert apply_artifact_verification(failed,manifest,receipt,Verifier()) is failed
+
+@pytest.mark.parametrize("provider_phase,target", [
+ (ProviderRunPhaseV1.QUEUED, WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED),
+ (ProviderRunPhaseV1.RUNNING, WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED),
+ (ProviderRunPhaseV1.SUCCEEDED, WorkflowPhaseV1.SUCCEEDED_UNVERIFIED),
+ (ProviderRunPhaseV1.FAILED, WorkflowPhaseV1.FAILED),
+ (ProviderRunPhaseV1.CANCELLED, WorkflowPhaseV1.CANCELLED),
+])
+def test_uncertain_cancel_observes_known_run_without_receipt_repair(provider_phase, target):
+ q, foundation = queued_evidence()
+ raw = intent("cancel")
+ uncertain = apply_cancel_effect_record(record_cancel_intent(q, raw), record(raw, EffectState.INDETERMINATE), Auth())
+ request, envelope = observation(uncertain, foundation, provider_phase, {"phase": provider_phase.value},
+     "provider_run_failed" if provider_phase is ProviderRunPhaseV1.FAILED else None)
+ result = apply_provider_observation(uncertain, request, envelope, ObservationAuth())
+ stale = read_request_variant(request, source_revision=request.source_revision + 1)
+ with pytest.raises(WorkflowTransitionError):
+  apply_provider_observation(uncertain, stale, envelope, ObservationAuth())
+ assert result.phase is target
+ assert result.cancel == uncertain.cancel and result.submit == uncertain.submit
+ assert result.bound_cancellation is None and result.pre_cancel_phase == uncertain.pre_cancel_phase
+ if target is WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED:
+  assert result is uncertain
+ else:
+  assert result.run_observation_digests and result.revision == uncertain.revision + 1
+ with pytest.raises(WorkflowTransitionError):
+  apply_provider_observation(uncertain, request, envelope, ObservationAuth(False))

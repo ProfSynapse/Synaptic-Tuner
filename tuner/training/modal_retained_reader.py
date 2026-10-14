@@ -53,7 +53,8 @@ _TERMINAL = frozenset({
     WorkflowPhaseV1.SUCCEEDED_UNVERIFIED, WorkflowPhaseV1.VERIFIED, WorkflowPhaseV1.VERIFICATION_FAILED,
 })
 _ACTIVE = frozenset({WorkflowPhaseV1.QUEUED, WorkflowPhaseV1.RUNNING,
-                     WorkflowPhaseV1.CANCEL_REQUESTED})
+                     WorkflowPhaseV1.CANCEL_REQUESTED,
+                     WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED})
 _READABLE = _TERMINAL | _ACTIVE
 
 

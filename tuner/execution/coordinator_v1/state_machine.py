@@ -256,8 +256,16 @@ def apply_cancel_effect_record(c,r,assessment,a,assessor):
  return WorkflowRecordV1(c.schema_version,c.run,c.plan_fingerprint,c.preflight_digest,c.provider,c.provider_context_digest,c.provider_descriptor_digest,target,c.revision+1,c.preparation_digest,c.stage,c.submit,cancel,c.provider_stage_ref,c.provider_run_ref,ref if o.disposition is FoundationDispositionV1.FOUND else None,c.pre_cancel_phase,c.run_observation_digests,None,None,(),(),(),codes,c.provider_run_observations)
 
 _OBS={WorkflowPhaseV1.QUEUED:{ProviderRunPhaseV1.QUEUED:WorkflowPhaseV1.QUEUED,ProviderRunPhaseV1.RUNNING:WorkflowPhaseV1.RUNNING,ProviderRunPhaseV1.SUCCEEDED:WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,ProviderRunPhaseV1.FAILED:WorkflowPhaseV1.FAILED,ProviderRunPhaseV1.CANCELLED:WorkflowPhaseV1.CANCELLED},WorkflowPhaseV1.RUNNING:{ProviderRunPhaseV1.RUNNING:WorkflowPhaseV1.RUNNING,ProviderRunPhaseV1.SUCCEEDED:WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,ProviderRunPhaseV1.FAILED:WorkflowPhaseV1.FAILED,ProviderRunPhaseV1.CANCELLED:WorkflowPhaseV1.CANCELLED},WorkflowPhaseV1.CANCEL_REQUESTED:{ProviderRunPhaseV1.QUEUED:WorkflowPhaseV1.CANCEL_REQUESTED,ProviderRunPhaseV1.RUNNING:WorkflowPhaseV1.CANCEL_REQUESTED,ProviderRunPhaseV1.SUCCEEDED:WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,ProviderRunPhaseV1.FAILED:WorkflowPhaseV1.FAILED,ProviderRunPhaseV1.CANCELLED:WorkflowPhaseV1.CANCELLED}}
+# A known run can settle independently of an uncertain cancellation receipt.
+_OBS[WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED] = {
+ ProviderRunPhaseV1.QUEUED: WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED,
+ ProviderRunPhaseV1.RUNNING: WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED,
+ ProviderRunPhaseV1.SUCCEEDED: WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,
+ ProviderRunPhaseV1.FAILED: WorkflowPhaseV1.FAILED,
+ ProviderRunPhaseV1.CANCELLED: WorkflowPhaseV1.CANCELLED,
+}
 _READ_PHASES={
- ProviderReadPurposeV1.OBSERVE:{WorkflowPhaseV1.QUEUED,WorkflowPhaseV1.RUNNING,WorkflowPhaseV1.CANCEL_REQUESTED},
+ ProviderReadPurposeV1.OBSERVE:{WorkflowPhaseV1.QUEUED,WorkflowPhaseV1.RUNNING,WorkflowPhaseV1.CANCEL_REQUESTED,WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED},
  ProviderReadPurposeV1.LOGS:{WorkflowPhaseV1.QUEUED,WorkflowPhaseV1.RUNNING,WorkflowPhaseV1.CANCEL_INTENT_RECORDED,WorkflowPhaseV1.CANCEL_REQUESTED,WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED,WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,WorkflowPhaseV1.VERIFICATION_FAILED,WorkflowPhaseV1.VERIFIED,WorkflowPhaseV1.FAILED,WorkflowPhaseV1.CANCELLED},
  ProviderReadPurposeV1.ARTIFACTS:{WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,WorkflowPhaseV1.VERIFICATION_FAILED,WorkflowPhaseV1.VERIFIED},
 }

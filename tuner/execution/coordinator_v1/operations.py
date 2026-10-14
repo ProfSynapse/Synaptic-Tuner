@@ -208,6 +208,7 @@ class RunOperationsV1:
             WorkflowPhaseV1.QUEUED,
             WorkflowPhaseV1.RUNNING,
             WorkflowPhaseV1.CANCEL_REQUESTED,
+            WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED,
         }
     )
 
