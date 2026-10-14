@@ -94,6 +94,7 @@ on:
       - "scripts/regenerate_offline_sft_worker_closure.py"
       - "scripts/regenerate_grpo_worker_closures.py"
       - "scripts/regenerate_hf_parent_closure.py"
+      - "tests/execution/providers/test_modal_training_base_capture.py"
       - "scripts/capture_modal_inference_runtime.py"
       - "scripts/inspect_modal_inference_runtime.py"
       - "scripts/ci_pytest_shard.sh"
@@ -1351,8 +1352,8 @@ jobs:
           assert version("protobuf") == "6.33.6"
           PY
 
-      - name: Run packaged-call and progress contracts with the pinned SDK
-        run: python -B -m pytest -q -p no:cacheprovider tests/training/test_inspect_modal_packaged_call.py tests/execution/providers/test_modal_sdk_progress_handle.py tests/execution/providers/test_modal_sdk_cancel_handle.py
+      - name: Run packaged-call, progress and base-capture contracts with the pinned SDK
+        run: python -B -m pytest -q -p no:cacheprovider tests/training/test_inspect_modal_packaged_call.py tests/execution/providers/test_modal_sdk_progress_handle.py tests/execution/providers/test_modal_sdk_cancel_handle.py tests/execution/providers/test_modal_training_base_capture.py
 
   conformance-gate:
     name: CPython 3.12 / pytest 8
