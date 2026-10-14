@@ -13,6 +13,16 @@ candidate supports final native SFT artifacts, prepared v1 inputs up to 2 MiB
 and no checkpoint retention. Hugging Face model publication is implemented and
 fake-tested only. RunPod is not an execution provider through this API.
 
+The ordinary HF host also has provider-free cancellation and reconciliation
+machinery behind disabled default capabilities. A host may explicitly opt into
+current cancel-only authorization while preserving the original submit
+commitments. Exact SDK acknowledgment is retained once; a lost reply remains
+indeterminate and cannot issue another cancel. Provider terminal observations
+preserve natural completion or failure and do not prove physical shutdown or
+causal cancellation. The SQLite tests reopen stores with the original
+preparation object; source-free fresh-process host reconstruction and live
+qualification remain separate gates.
+
 The protected HF source/bootstrap lane and the older `cloud-run`,
 `cloud-pipeline`, and experiment commands documented below are legacy or
 migration surfaces. They are not fallback implementations of the public v1 API

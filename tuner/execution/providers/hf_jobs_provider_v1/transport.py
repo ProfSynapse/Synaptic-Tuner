@@ -75,6 +75,12 @@ class HFJobsTransport:
         members = [{"path": path.removeprefix("parent/"), "size_bytes": len(raw), "sha256": sha(raw)}
                    for path, raw in sorted(preparation.source_files.items()) if path.startswith("parent/")]
         self.parent_inventory = {"members": members}
+        self._cancel_access = None
+
+    def bind_cancel_access(self, access):
+        if self._cancel_access is not None or not callable(access):
+            raise HFJobsError("input_invalid")
+        self._cancel_access = access
 
     def _root(self):
         info = self.scratch_root.lstat()
@@ -91,13 +97,22 @@ class HFJobsTransport:
     def _key(self, kind, digest):
         return "hf-jobs/" + self.preparation.material_digest + "/" + kind + "/" + digest
 
-    def _claim(self, command):
-        value = document_bytes({"schema_version": "synaptic-hf-attempt/v1",
+    def _claim_document(self, command):
+        return document_bytes({"schema_version": "synaptic-hf-attempt/v1",
             "material_digest": self.preparation.material_digest,
             "command_digest": command.digest, "kind": command.operation.effect.kind.value})
+
+    def _claim(self, command):
+        value = self._claim_document(command)
         if self.records.create(partition=StoragePartition.EFFECTS.value,
             key=self._key("claim", command.operation.effect.kind.value), canonical=value) is not True:
             raise HFJobsError("submit_indeterminate")
+
+    def _check_claim(self, command):
+        retained = self.records.read(partition=StoragePartition.EFFECTS.value,
+            key=self._key("claim", command.operation.effect.kind.value))
+        if retained is None or retained.canonical != self._claim_document(command):
+            raise HFJobsError("binding_mismatch")
 
     def _retain(self, kind, command, document):
         raw = document_bytes(document)
@@ -288,6 +303,91 @@ class HFJobsTransport:
                         command.preparation.run_id, command.preparation.project_ref), self.preparation.binding)
                 or command.payload != self.preparation.payload(command.preparation, kind)):
             raise HFJobsError("binding_mismatch")
+        if kind is EffectKind.CANCEL:
+            return self._cancel_target(command)
+
+    def _cancel_target(self, command):
+        if self._cancel_access is None:
+            raise HFJobsError("binding_mismatch")
+        submit = self._cancel_access(command)
+        self._validate(submit, EffectKind.SUBMIT)
+        receipt = self.retained("submit", submit.digest)
+        target = command.to_dict()["cancellation"]
+        if receipt["job_id"] != target["provider_job_ref"]:
+            raise HFJobsError("binding_mismatch")
+        return submit, receipt
+
+    def _cancel_receipt(self, command, submit, job_id):
+        record = self.records.read(partition=StoragePartition.EFFECTS.value,
+            key=self._key("cancel", command.digest))
+        if record is None:
+            return None
+        self._check_claim(command)
+        expected = {"schema_version": "synaptic-hf-cancel-receipt/v1",
+            "command_digest": command.digest, "material_digest": self.preparation.material_digest,
+            "submit_command_digest": submit.digest, "job_id": job_id,
+            "reason_digest": command.to_dict()["cancellation"]["reason_digest"],
+            "acknowledged": True}
+        if record.canonical != document_bytes(expected):
+            raise HFJobsError("binding_mismatch")
+        return expected
+
+    def cancel(self, command):
+        """One acknowledged request, not a terminal/physical-stop assertion.
+
+        The absolute deadline bounds provider work, not synchronous host store
+        callbacks. A late provider thread cannot write the owning-thread journal.
+        """
+        submit, receipt = self._validate(command, EffectKind.CANCEL)
+        retained = self._cancel_receipt(command, submit, receipt["job_id"])
+        if retained is not None:
+            return retained
+        deadline = time.monotonic() + self.deadline_seconds
+        phase, _ = self.observe(submit.digest, deadline=deadline)
+        if phase == "DELETED":
+            raise HFJobsError("read_unavailable")
+        token = self._secret(self.selection.host_token)
+        self._claim(command)
+        acknowledged = _bounded(lambda: self.api.cancel_job(job_id=receipt["job_id"],
+            namespace=self.selection.scope.namespace_ref, token=token), deadline)
+        if acknowledged is not None:
+            raise HFJobsError("read_unavailable")
+        value = {"schema_version": "synaptic-hf-cancel-receipt/v1",
+            "command_digest": command.digest, "material_digest": self.preparation.material_digest,
+            "submit_command_digest": submit.digest, "job_id": receipt["job_id"],
+            "reason_digest": command.to_dict()["cancellation"]["reason_digest"],
+            "acknowledged": True}
+        return self._retain("cancel", command, value)
+
+    def lookup(self, command):
+        """Read retained exact receipts only; absence never permits replay."""
+        kind = command.operation.effect.kind
+        target = self._validate(command, kind)
+        if kind is EffectKind.CANCEL:
+            submit, receipt = target
+            acknowledged = self._cancel_receipt(command, submit, receipt["job_id"])
+            if acknowledged is None:
+                return None
+            # Revalidate the original provider target without another stop.
+            phase, _ = self.observe(submit.digest)
+            return None if phase == "DELETED" else acknowledged
+        record = self.records.read(partition=StoragePartition.EFFECTS.value,
+            key=self._key(kind.value, command.digest))
+        if record is None:
+            return None
+        self._check_claim(command)
+        receipt = self.retained(kind.value, command.digest)
+        if kind is EffectKind.SUBMIT:
+            phase, _ = self.observe(command.digest)
+            return None if phase == "DELETED" else receipt
+        expected = {"schema_version": "synaptic-hf-stage-receipt/v1",
+            "command_digest": command.digest, "material_digest": self.preparation.material_digest,
+            "stage_ref": "hf-stage-" + command.digest, "effect_id": command.operation.effect.effect_id}
+        index = self.records.read(partition=StoragePartition.EFFECTS.value,
+            key=self._key("stage-effect", command.operation.effect.effect_id))
+        if receipt != expected or index is None or index.canonical != document_bytes(expected):
+            raise HFJobsError("binding_mismatch")
+        return receipt
 
     def job_request(self, command):
         prep = self.preparation
@@ -350,7 +450,7 @@ class HFJobsTransport:
                     value.to_dict() if hasattr(value, "to_dict") else value for value in request["volumes"]]):
             raise HFJobsError("binding_mismatch")
 
-    def observe(self, command_digest):
+    def observe(self, command_digest, *, deadline=None):
         receipt = self.retained("submit", command_digest)
         catalog = self.retained("command", command_digest)
         command = parse_exact_command(base64.b64decode(catalog["command_base64"], validate=True))
@@ -362,7 +462,7 @@ class HFJobsTransport:
         token = self._secret(self.selection.host_token)
         job = _bounded(lambda: self.api.inspect_job(job_id=receipt["job_id"],
             namespace=self.selection.scope.namespace_ref, token=token),
-            time.monotonic() + self.deadline_seconds)
+            time.monotonic() + self.deadline_seconds if deadline is None else deadline)
         self._check_job(job, receipt["request"])
         if job.id != receipt["job_id"]:
             raise HFJobsError("binding_mismatch")
