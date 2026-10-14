@@ -312,6 +312,39 @@ and record image/engine commit as operator selections only: the base probe has
 not installed that engine commit and does not attest the final image. Do not
 turn candidate metadata into production pins without independent review.
 
+For an explicitly reviewed **training-base inventory candidate**, the same
+maintenance command accepts `--training-base --interpreter /absolute/python
+--image-builder-version 2025.06`, with an exact
+`docker.io/unsloth/unsloth@sha256:...` image, app/environment and source selection.
+There is no ambient interpreter selection. This mode refuses
+`--isolated-python`, `--modal-additions`, engine-wheel options, private chat
+checks, runtime-lock verification, distribution-diagnostic and read-Sandbox
+modes before SDK/credential access. The vLLM default retains its existing image
+restriction and behavior.
+
+The CLI rejects a conflicting `MODAL_IMAGE_BUILDER_VERSION`, sets the explicit
+pin once before opening the SDK, and keeps it for its process lifetime. Library
+callers must already bind that environment for their entire operation lifetime.
+Pinned Modal 1.5.4 resolves this setting before registry setup; its pure setup
+commands must be exactly `FROM <selected-image>`. Older builder setup installs
+packages and is refused. This is not a global SDK patch or permission to change
+another process's builder setting.
+
+The training inspector observes the exact selected executable, its physical
+identity/hash, Python version and sysconfig roots, and the complete bounded
+installed distribution inventory. It **imports Torch** to observe
+`torch.version.cuda`, checking Torch's version against distribution metadata;
+it does not import Unsloth/Transformers trainers, load model weights or train.
+Metadata and executable facts are rechecked after that probe. The output uses
+`syntunia-python-distribution-inventory/v1` for the observed inventory. The
+script-copy layer is a derived inspection image: capture reports retain both
+the selected registry base and the derived Modal image ID and do not attest
+byte identity with the base. There are no Python/package installation commands
+in this mode. Provider-free tests, including real pinned SDK setup controls,
+are not an actual image capture, model/GPU compatibility or live qualification.
+No ordinary GRPO profile/inventory/approval is generated or promoted by the
+command; author those only from reviewed genuine capture and final wheel facts.
+
 The capture launcher has a 600-second host wait plus an independent bounded
 cleanup attempt, with no automatic create retry. Ambiguous creation is not
 absence. A delayed returned handle is retained for exact-target cleanup while
