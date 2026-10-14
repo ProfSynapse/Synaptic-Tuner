@@ -1277,3 +1277,32 @@ reviewed source, wheel and installation exactly. The fixed 131/13 inventories
 and non-hash policy are unchanged, all seven maintenance checks are current,
 and skill mirrors match. No live model or training-provider effects occurred.
 Live account/model qualification and stable release acceptance remain open.
+
+### Public nontraining consumer
+
+The checkout-owned `examples/nontraining` consumer composes the existing public
+Data and Evaluation APIs, host SQLite store, fixed filesystem worker, named
+credentials and metered provider clients. Planning performs no model calls or
+durable writes. Execution creates private attempt state, generates and validates
+one row, improves the unchanged generated artifact, validates the improved row,
+and runs two bounded evaluations. Existing attempt state refuses replay.
+
+Readback opens existing storage without model clients or credential resolution.
+Retained public Data plans bind each output path to its original run and artifact
+hash/size. Both changed bytes and swapped generated/improved files reject.
+Evaluation comparisons follow the two distinct configured model references,
+independent of list order. Unknown upstream usage stops downstream execution;
+the shared call budget and explicit output-token ceiling include judge calls.
+External judge comparison remains unverified, and no active-request recovery,
+security sandbox, invoice cap or model-quality claim is made.
+
+Independent review resolved output ownership, comparison ordering and checkout
+import-shadowing issues before acceptance. Seventeen focused controls passed.
+The unchanged HTTP wheel
+`30d5f1b1b92f6826c2b624ca88daa32d0e8437595adfd93f689ae813d7fad863`
+passed all 337 installed evaluation/consumer controls in 39.58 seconds from a
+neutral directory under isolated Python. Only the example and tests were copied;
+engine production modules came from the installed wheel. The example is a
+checkout consumer, not a newly packaged engine entrypoint. No runtime source,
+dependency, asset or lock inventory changed. Live account/model qualification
+and the overall stable release gate remain open.

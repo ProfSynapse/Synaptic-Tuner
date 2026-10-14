@@ -1,0 +1,104 @@
+# Host-owned TEMPLATE: replace all REPLACE_* values before planning.
+# Credential identifiers are allowed; credential values and approvals are not.
+project_ref: REPLACE_PROJECT
+state_root: /absolute/private/REPLACE_NEW_ATTEMPT
+provider:
+  backend: openrouter  # or openai_responses
+  credential: {provider: env, name: OPENROUTER_API_KEY}
+  account_ref: REPLACE_VERIFIED_ACCOUNT_REF
+  namespace_ref: REPLACE_NAMESPACE_REF
+bounds:
+  max_calls: 32
+  max_output_tokens: 4096
+  max_request_bytes: 1048576
+  max_response_bytes: 1048576
+  timeout_seconds: 30
+  duration_seconds: 120
+inputs:
+  # Repeat for EVERY YAML/JSON member under the four configuration roots,
+  # plus the exact three environment host dependency files below.
+  - path: /absolute/private/REPLACE_CONFIG_MEMBER
+    sha256: REPLACE_ACTUAL_SHA256
+    size_bytes: 1  # replace with actual byte size
+
+data:
+  config_dir: /absolute/private/REPLACE_SYNTHCHAT_CONFIG
+  scenarios_dir: /absolute/private/REPLACE_SCENARIOS
+  rubrics_dir: /absolute/private/REPLACE_RUBRICS
+  environment_files:
+    host:tool-schema: /absolute/private/REPLACE_TOOL_SCHEMA.json
+    host:policy: /absolute/private/REPLACE_EXECUTION_POLICY.json
+    host:fixture-schema: /absolute/private/REPLACE_FIXTURE_SCHEMA.json
+  environment_binding:
+    schema_version: synaptic-environment-binding/v1
+    selection: {profile_ref: REPLACE_PROFILE, mode: execute}
+    backend_ref: REPLACE_FIXED_WORKER_BACKEND_REF
+    backend_revision: REPLACE_ACTUAL_SHA256
+    scope_ref: REPLACE_PRIVATE_FIXTURE_SCOPE
+    bounds:
+      max_rows: 1
+      max_turns: 5
+      max_tool_calls: 8
+      max_fixture_files: 10
+      max_fixture_bytes: 1048576
+      max_output_bytes: 1048576
+      max_snapshot_bytes: 1048576
+      max_seconds: 20
+    allowed_actions: [read, write]
+    dependencies:
+      - {role: tool_schema, ref: 'host:tool-schema', sha256: REPLACE_ACTUAL_SHA256, size_bytes: 1}
+      - {role: execution_policy, ref: 'host:policy', sha256: REPLACE_ACTUAL_SHA256, size_bytes: 1}
+      - {role: fixture_schema, ref: 'host:fixture-schema', sha256: REPLACE_ACTUAL_SHA256, size_bytes: 1}
+  generate:
+    request_id: REPLACE_STABLE_GENERATE_ID
+    project_ref: REPLACE_PROJECT
+    mode: generate
+    backend: openrouter
+    model: REPLACE_SELECTED_DATA_MODEL
+    output_ref: /absolute/private/REPLACE_NEW_ATTEMPT/generated.jsonl
+    scenarios: [{scenario_ref: REPLACE_SCENARIO, rows: 1}]
+    input_dataset_ref: null
+    rubric_refs: []
+    max_iterations: 2
+    tags: []
+    environment_selection: {profile_ref: REPLACE_PROFILE, mode: execute}
+  improve:
+    request_id: REPLACE_STABLE_IMPROVE_ID
+    project_ref: REPLACE_PROJECT
+    mode: improve
+    backend: openrouter
+    model: REPLACE_SELECTED_DATA_MODEL
+    output_ref: /absolute/private/REPLACE_NEW_ATTEMPT/improved.jsonl
+    scenarios: []
+    input_dataset_ref: /absolute/private/REPLACE_NEW_ATTEMPT/generated.jsonl
+    rubric_refs: [REPLACE_REPAIR_RUBRIC]
+    max_iterations: 2
+    tags: []
+    environment_selection: {profile_ref: REPLACE_PROFILE, mode: execute}
+
+evaluation:
+  config_root: /absolute/private/REPLACE_EVALUATOR_CONFIG
+  requests:
+    - request_id: REPLACE_STABLE_REFERENCE_EVAL_ID
+      project_ref: REPLACE_PROJECT
+      model: {model_ref: REPLACE_REFERENCE_MODEL, model_revision: REPLACE_MODEL_REVISION}
+      backend: openrouter
+      scenario_refs: [REPLACE_EVALUATION_SCENARIO.yaml]
+      preset: null
+      tags: []
+      case_limit: 2
+    - request_id: REPLACE_STABLE_CANDIDATE_EVAL_ID
+      project_ref: REPLACE_PROJECT
+      model: {model_ref: REPLACE_CANDIDATE_MODEL, model_revision: REPLACE_MODEL_REVISION}
+      backend: openrouter
+      scenario_refs: [REPLACE_EVALUATION_SCENARIO.yaml]
+      preset: null
+      tags: []
+      case_limit: 2
+  # Remove judge entirely for assertion-only evaluation. Paid external judgment
+  # is measured but remains an unverified comparison input.
+  judge:
+    model: {model_ref: REPLACE_JUDGE_MODEL, model_revision: REPLACE_MODEL_REVISION}
+    rubrics_dir: /absolute/private/REPLACE_EVALUATOR_RUBRICS
+    rubric_refs: [REPLACE_EVALUATOR_RUBRIC]
+    config: {max_tokens: 512, temperature: null, reasoning_effort: null}

@@ -71,6 +71,16 @@ before training; structural row validation does not establish that identity.
 
 ## Public metered workflow evidence
 
+The checkout-owned `examples/nontraining/qualification.py` is a config-first
+public Data/evaluation consumer with `plan`, create-only `execute` and retained
+`readback`. Use its README/template rather than rebuilding the composition.
+Generation validates before improvement, which consumes its unchanged JSONL
+and configured `metadata.resolved_environment_config` projection. The improved
+row validates before evaluation. Configuration commitments are rechecked
+between stages; unknown upstream outcomes stop downstream calls. Existing state
+is inspected, never automatically replayed. The example adds no engine runtime
+or provider qualification, active-request recovery, sandbox or invoice cap.
+
 Installed CPU tests join Data generation and improvement with the fixed local
 worker, measured scripted judge/improver calls, one spend closure per run and
 SQLite retained readback after input removal. Missing usage remains
