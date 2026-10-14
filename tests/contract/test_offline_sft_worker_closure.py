@@ -133,6 +133,8 @@ def test_manifest_is_declared_as_tuner_runtime_package_data() -> None:
     assert pyproject["tool"]["setuptools"]["package-data"]["tuner.runtime"] == [
         "manifests/offline-sft-worker-v1.json",
         "manifests/packaged-training-worker-v1.json",
+        "manifests/offline-grpo-worker-v1.json",
+        "manifests/packaged-grpo-worker-v1.json",
     ]
 
 
