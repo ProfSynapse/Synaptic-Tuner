@@ -403,7 +403,7 @@ def run_local_cpu_child(args):
     import stat
     from tuner.runtime.packaged_training_worker import (
         LOCAL_CPU_PROTOCOL, LOCAL_CPU_DATA, LOCAL_CPU_MODEL, local_cpu_environment,
-        local_cpu_result, admit_packaged_training_release,
+        local_cpu_result, admit_packaged_training_release, _local_cpu_method,
     )
     from tuner.runtime.packaged_sft_execution import _canonical, _document, _digest, _inspect_release, _HeldDirectory, _HeldModelFile
     from tuner.runtime.releases import parse_packaged_runtime_release
@@ -413,9 +413,12 @@ def run_local_cpu_child(args):
     payload = _document(raw)
     if set(payload) != {"schema_version", "release", "input_fd", "root", "root_identity", "member"} or payload["schema_version"] != LOCAL_CPU_PROTOCOL: raise ValueError
     release = parse_packaged_runtime_release(payload["release"])
-    release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=release.manifest_digest)
+    method = _local_cpu_method(release)
+    options = {"method": method} if method == "grpo" else {}
+    release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=release.manifest_digest,
+        **options)
     _check_local_cpu_environment(release)
-    trainer = _inspect_release(release)
+    trainer = _inspect_release(release, **options)
     fd = payload["input_fd"]
     seals = fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
     if type(fd) is not int or fd < 3 or fcntl.fcntl(fd, fcntl.F_GET_SEALS) & seals != seals or os.pread(fd, len(LOCAL_CPU_DATA) + 1, 0) != LOCAL_CPU_DATA: raise ValueError
@@ -431,7 +434,7 @@ def run_local_cpu_child(args):
                 or member["path"] != "fixture.json" or member["size_bytes"] != len(LOCAL_CPU_MODEL)
                 or member["sha256"] != _digest(LOCAL_CPU_MODEL)): raise ValueError
         leaf = _HeldModelFile(root / "fixture.json", held, member)
-        guard = _installed_import_guard(release, trainer)
+        guard = _installed_import_guard(release, trainer, **options)
         _check_no_gpu_devices()
         _OwnedSourceLoader("__main__", str(trainer), guard.members[trainer]).get_code("__main__")
         _check_no_gpu_devices()

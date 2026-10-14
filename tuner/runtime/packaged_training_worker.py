@@ -152,8 +152,33 @@ def local_cpu_result(release, trainer_digest):
             "training_executed": False, "gpu_qualified": False, "provider_qualified": False}
 
 
+def _local_cpu_method(release):
+    """Select the fixed CPU path only from reconstructed release contracts."""
+    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2
+    if type(release) not in (PackagedTrainingRuntimeReleaseV1, PackagedTrainingRuntimeReleaseV2):
+        raise ValueError("PACKAGED_CPU_METHOD_REJECTED")
+    release = parse_packaged_runtime_release(release.to_dict())
+    if (release.prepared_input_schema != "synaptic-prepared-training-input/v1"
+            or release.worker_entrypoint != PACKAGED_TRAINING_WORKER_ENTRYPOINT):
+        raise ValueError("PACKAGED_CPU_METHOD_REJECTED")
+    if release.workload_schema == "synaptic-packaged-grpo-workload/v1":
+        if (release.compatible_methods != ("grpo",)
+                or release.compatible_dataset_formats != ("synaptic-grpo-prompts/v1",)
+                or release.artifact_contract_schema != "synaptic-grpo-artifacts/v1"):
+            raise ValueError("PACKAGED_CPU_METHOD_REJECTED")
+        return "grpo"
+    if (release.workload_schema in {"synaptic-sft-workload/v1", "synaptic-packaged-sft-workload/v1"}
+            and release.compatible_methods == ("sft",)
+            and "synaptic-grpo-prompts/v1" not in release.compatible_dataset_formats
+            and release.artifact_contract_schema == "synaptic-sft-artifacts/v1"):
+        return "sft"
+    raise ValueError("PACKAGED_CPU_METHOD_REJECTED")
+
+
 def _parent_trainer_reference(release) -> str:
     """Derive only the pinned trainer reference; installed admission belongs to -I child."""
+    method = _local_cpu_method(release)
+    trainer_member = _TRAINER_MEMBER if method == "sft" else "Trainers/grpo/runtime_v1.py"
     raw = stable_read(Path("/opt/synaptic-runtime/build-inputs.json"), _MAX_BUILD_INPUTS_BYTES)
     def reject_constant(_value):
         raise ValueError
@@ -178,7 +203,7 @@ def _parent_trainer_reference(release) -> str:
         members = archive.infolist()
         if not members or len(members) > 10000:
             raise ValueError
-        trainer = [member for member in members if member.filename == _TRAINER_MEMBER]
+        trainer = [member for member in members if member.filename == trainer_member]
         if len(trainer) != 1 or trainer[0].is_dir() or not 0 < trainer[0].file_size <= _MAX_TRAINER_BYTES:
             raise ValueError
         raw_trainer = archive.read(trainer[0])
@@ -195,7 +220,9 @@ def qualify_installed_child(release_document):
     import tempfile
     from tuner.runtime.packaged_sft_execution import _canonical, _digest, _HeldDirectory, _HeldModelFile
     release = parse_packaged_runtime_release(release_document)
-    release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=release.manifest_digest)
+    method = _local_cpu_method(release)
+    release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=release.manifest_digest,
+        **({"method": method} if method == "grpo" else {}))
     try:
         trainer_digest = _parent_trainer_reference(release)
     except BaseException:

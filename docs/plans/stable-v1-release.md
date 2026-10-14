@@ -981,3 +981,27 @@ an independently parsed view of the same retained bytes before final identity
 checks; SFT, conversation and GRPO callback controls pass together. Independent
 source and integrated CI review passed. These CPU controls establish planning
 and custody behavior, not cold full-host recovery or provider qualification.
+
+### Method-aware packaged CPU qualification
+
+The existing CPU self-check derives SFT or GRPO from the validated release
+contracts, admits the corresponding fixed closure, and compiles the selected
+trainer source from the pinned wheel. Parent and child use the same method;
+legacy SFT remains supported. Unknown or mixed contracts reject before spawning.
+The CPU protocol and signed receipt do not change.
+
+Fresh sdist-built wheel
+`42893dda1a7305d68115393685bec7afa2b1c6aca866f4278ea184c58c5448a2`
+passed the base-only consumer. All 140 focused source controls passed. Locally,
+393 installed controls passed on Python 3.14, whose real sealing constants allow
+the isolated CPU protocol; the remaining portable SFT control correctly rejected
+3.14 and passed separately against the same wheel on supported Python 3.12.
+Permanent CI runs all 394 together on Python 3.12 without exclusions. All three
+production modules matched source bytes. All six lock checks are current;
+independent review confirms fixed inventories and non-hash pins are unchanged.
+
+The tests exercise the actual isolated protocol, sealed input, root custody,
+import guard and source compilation with explicit package/image/device-namespace
+observations. They do not prove container isolation, live image compatibility or
+training. Ordinary GRPO runner integration and cold full-host recovery remain
+separate gates.

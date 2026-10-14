@@ -389,11 +389,14 @@ def test_real_diagnostic_dispatch_checks_devices_before_and_after_compile(tmp_pa
     from contextlib import nullcontext
     from tuner.runtime import packaged_training_worker as worker
     from tuner.runtime import packaged_sft_execution as seam
-    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1, PACKAGED_RUNTIME_RELEASE_SCHEMA
+    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1
+    from tests.runtime.test_packaged_runtime_releases import _release_values
     events = []
-    release = SimpleNamespace(manifest_digest="a" * 64, python_executable="/opt/python/bin/python",
-                              canonical_bytes=lambda: b"release")
-    monkeypatch.setattr(PackagedTrainingRuntimeReleaseV1, "from_dict", lambda _: release)
+    # Method admission is real; only image/namespace boundaries are doubled.
+    release = PackagedTrainingRuntimeReleaseV1.build(**_release_values(
+        worker_entrypoint=worker.PACKAGED_TRAINING_WORKER_ENTRYPOINT,
+        python_executable="/opt/python/bin/python",
+    ))
     monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *a, **k: release)
     trainer = tmp_path / "trainer.py"
     trainer.write_text("raise AssertionError('trainer execution forbidden')\n")
@@ -403,7 +406,7 @@ def test_real_diagnostic_dispatch_checks_devices_before_and_after_compile(tmp_pa
     root = Path("/tmp/qualification-fixture")
     transport = root / "transport.json"
     payload = {"schema_version": worker.LOCAL_CPU_PROTOCOL,
-        "release": {"schema_version": PACKAGED_RUNTIME_RELEASE_SCHEMA}, "input_fd": 3,
+        "release": release.to_dict(), "input_fd": 3,
         "root": str(root), "root_identity": [1, 2], "member": {"path": "fixture.json",
         "size_bytes": len(worker.LOCAL_CPU_MODEL), "sha256": _digest(worker.LOCAL_CPU_MODEL), "device": 1, "inode": 4}}
     raw = seam._canonical(payload)
@@ -469,10 +472,12 @@ def test_native_local_child_diagnostic_authenticates_without_executing_ml(monkey
     from types import SimpleNamespace
     from tuner.runtime import packaged_training_worker as worker
     from tuner.runtime import packaged_sft_execution as seam
-    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1, PACKAGED_RUNTIME_RELEASE_SCHEMA
-    release = SimpleNamespace(manifest_digest="a" * 64, python_executable=sys.executable,
-                              canonical_bytes=lambda: b"release")
-    monkeypatch.setattr(PackagedTrainingRuntimeReleaseV1, "from_dict", lambda _: release)
+    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1
+    from tests.runtime.test_packaged_runtime_releases import _release_values
+    release = PackagedTrainingRuntimeReleaseV1.build(**_release_values(
+        worker_entrypoint=worker.PACKAGED_TRAINING_WORKER_ENTRYPOINT,
+        python_executable=sys.executable,
+    ))
     monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *a, **k: release)
     monkeypatch.setattr(sys, "flags", SimpleNamespace(isolated=1, optimize=0))
     monkeypatch.setattr(os, "environ", worker.local_cpu_environment(release))
@@ -497,7 +502,7 @@ def test_native_local_child_diagnostic_authenticates_without_executing_ml(monkey
             fixture.chmod(0o400)
             info = fixture.stat()
             payload = {"schema_version": worker.LOCAL_CPU_PROTOCOL,
-                "release": {"schema_version": PACKAGED_RUNTIME_RELEASE_SCHEMA}, "input_fd": fd,
+                "release": release.to_dict(), "input_fd": fd,
                 "root": str(root), "root_identity": [root.stat().st_dev, root.stat().st_ino],
                 "member": {"path": "fixture.json", "size_bytes": len(worker.LOCAL_CPU_MODEL),
                     "sha256": _digest(worker.LOCAL_CPU_MODEL), "device": info.st_dev, "inode": info.st_ino}}
