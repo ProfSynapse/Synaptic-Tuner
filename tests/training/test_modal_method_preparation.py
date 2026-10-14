@@ -26,7 +26,22 @@ PROFILES = ROOT / "Trainers/runtime_profiles"
 CONVERSATION = "synaptic-conversation-sft-row/v1"
 
 
+def _fixture_source_identity(monkeypatch):
+    """One synthetic Git observation; installed wheels have no engine checkout."""
+    from tuner.execution.providers.modal import runtime_build
+    original = runtime_build.subprocess.run
+    engine_root = Path(runtime_build.__file__).resolve().parents[4]
+    expected = ["git", "-C", str(engine_root), "rev-parse", "HEAD"]
+    def observed(command, *args, **kwargs):
+        if command == expected:
+            return runtime_build.subprocess.CompletedProcess(command, 0,
+                stdout=("1" * 40 + "\n").encode("ascii"), stderr=b"")
+        return original(command, *args, **kwargs)
+    monkeypatch.setattr(runtime_build.subprocess, "run", observed)
+
+
 def conversation_recipe(tmp_path, monkeypatch, *, profile="qwen35-conversation-sft-candidate-v1"):
+    _fixture_source_identity(monkeypatch)
     root = tmp_path / ".tracking" / "datasets"
     root.mkdir(parents=True, mode=0o700)
     published = publish_conversation_dataset(root, build())
@@ -251,3 +266,20 @@ def test_normal_runner_conversation_reaches_real_public_prepare_resolve_start(tm
             resources=object(), storage=object(), effect_id="unused", modal_profile="explicit",
             modal_environment="main", builder_cache_root=tmp_path)
     assert events == []
+
+
+def test_planning_source_fixture_intercepts_only_exact_engine_head(monkeypatch):
+    from tuner.execution.providers.modal import runtime_build
+    calls = []
+    sentinel = object()
+    def original(command, *args, **kwargs):
+        calls.append((command, args, kwargs))
+        return sentinel
+    monkeypatch.setattr(runtime_build.subprocess, "run", original)
+    _fixture_source_identity(monkeypatch)
+    engine_root = Path(runtime_build.__file__).resolve().parents[4]
+    result = runtime_build.subprocess.run(["git", "-C", str(engine_root), "rev-parse", "HEAD"], capture_output=True)
+    assert result.stdout == ("1" * 40 + "\n").encode("ascii") and calls == []
+    alternate = ["git", "-C", "/declared-unrelated-root", "rev-parse", "HEAD"]
+    assert runtime_build.subprocess.run(alternate, timeout=3) is sentinel
+    assert calls == [(alternate, (), {"timeout": 3})]
