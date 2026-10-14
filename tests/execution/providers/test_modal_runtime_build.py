@@ -149,10 +149,25 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
     inspector = Path(runtime_build.__file__).resolve().parents[4] / "tuner/runtime/modal_build_inspector.py"
     with zipfile.ZipFile(source_wheel, "w") as archive:
         archive.writestr("tuner/runtime/modal_build_inspector.py", inspector.read_bytes())
+    # This is an explicit host build-source input, not an imported engine copy.
+    # Installed site-packages is deliberately not assumed to be a Git checkout.
+    source_root = tmp_path / "engine-source"
+    source_inspector = source_root / "tuner/runtime/modal_build_inspector.py"
+    source_inspector.parent.mkdir(parents=True)
+    source_inspector.write_bytes(inspector.read_bytes())
+    for arguments in (
+        ("init", "-q"), ("add", "."),
+        ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "-c", "commit.gpgsign=false", "commit", "-qm", "fixture inspector source"),
+    ):
+        subprocess.run(["git", "-C", str(source_root), *arguments],
+                       check=True, capture_output=True, timeout=30)
+    source_commit = runtime_build.current_clean_source_commit(source_root)
     events: list[str] = []
 
     def prepare(_source, destination, *, expected_source_commit, builder_cache_root):
-        assert len(expected_source_commit) == 40
+        assert _source == source_root
+        assert expected_source_commit == source_commit
         assert builder_cache_root is None
         target = destination / source_wheel.name
         target.write_bytes(source_wheel.read_bytes())
@@ -253,7 +268,7 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
     SDK.Sandbox = Sandbox
 
     client = object()
-    intent = plan_modal_build_material(profile)["intent_digest"]
+    intent = plan_modal_build_material(profile, source_root=source_root)["intent_digest"]
     if mutate_lock_after_capture:
         original = runtime_build.builder_lock_bytes()
         reads = iter((original, original + b"changed", original + b"changed"))
@@ -262,7 +277,7 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
             capture_modal_build_candidate(
                 sdk=SDK(), client=client, profile_path=profile,
                 build_claim=lambda: events.append("claim"), app_name="training-build",
-                environment_name="production", expected_intent_digest=intent,
+                environment_name="production", expected_intent_digest=intent, source_root=source_root,
             )
         assert (caught.value.stage, caught.value.reason) == ("BUILD_INPUTS", "INVALID")
         assert events == []
@@ -272,7 +287,7 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
             capture_modal_build_candidate(
                 sdk=SDK(), client=client, profile_path=profile,
                 build_claim=lambda: events.append("claim"), app_name="training-build",
-                environment_name="production", expected_intent_digest=intent,
+                environment_name="production", expected_intent_digest=intent, source_root=source_root,
             )
         assert (caught.value.stage, caught.value.reason) == ("CAPTURE_OUTPUT", "INSPECTOR_REJECTED")
         assert caught.value.capture_diagnostic == {
@@ -286,7 +301,7 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
     candidate = capture_modal_build_candidate(
         sdk=SDK(), client=client, profile_path=profile,
         build_claim=lambda: events.append("claim"), app_name="training-build",
-        environment_name="production", expected_intent_digest=intent,
+        environment_name="production", expected_intent_digest=intent, source_root=source_root,
     )
     assert candidate.image_id == "im-exact"
     assert events == ["claim", "lookup", "image", "install", "build", "sandbox", "terminate", "poll"]
