@@ -42,7 +42,8 @@ authority/reader keys must remain stable for source-free known-run recovery.
 Read-only pinned Hub1.33 CLI on 2026-10-14 confirmed professorsynapse, memberships
 SynapticLabs and unsloth-jobs, no buckets listed under SynapticLabs, and existing
 personal buckets professorsynapse/toolset-training-bootstrap and
-professorsynapse/toolset-training-artifacts. These are candidates, not selected
+professorsynapse/toolset-training-artifacts, plus org bucket
+unsloth-jobs/jobs-artifacts. These are candidates, not selected
 qualification destinations or verified empty attempt prefixes. Owner billing,
 namespace/destination selection and fresh finite quote remain open. The repo
 bucket CLI refused before provider access due to optional transformers import;

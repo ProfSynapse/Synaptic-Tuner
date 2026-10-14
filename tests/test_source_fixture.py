@@ -69,7 +69,7 @@ class ConsumerSourceTests(unittest.TestCase):
         digest = "7aa26aba079ac1210466c5c2cdf747f00c764b5bc4ed366e2f67af7ffa0d3770"
         publication = ROOT / "data/hf-sft-v1/prepared" / ("dataset-" + digest)
         verified, raw = snapshot_prepared_dataset_v1(publication)
-        self.assertEqual(verified.dataset_digest, digest)
+        self.assertEqual(verified.semantic_identity.dataset_digest, digest)
         self.assertEqual(len(raw), 2821)
         rows = [json.loads(line) for line in raw.decode().splitlines()]
         self.assertEqual(len(rows), 8)
