@@ -166,6 +166,8 @@ def main(argv=None):
     config = load(args.config)
     original = launch.read_committed(config["consumer"], maximum=4 << 20)
     consumer = launch.load_config(config["consumer"]["path"])
+    if consumer != launch._json(original):
+        raise ValueError("loaded consumer differs from authenticated bytes")
     if consumer["provider"] != "hf_jobs" or consumer["run"] != config["run"]:
         raise ValueError("original HF run required")
     if launch.read_committed(config["consumer"], maximum=4 << 20) != original:
