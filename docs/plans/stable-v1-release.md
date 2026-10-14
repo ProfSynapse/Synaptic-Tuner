@@ -73,6 +73,12 @@ merged; final supported-composition review remains open. Live qualification rema
 three providers, GRPO on one, genuine paid nontraining workflows and the admitted
 publication destination. Then complete the existing final contract/platform/
 distribution review and choose a stable release.
+The fresh CPU qualification attempt D on exact `4b77bd1f` stopped with
+`CAPTURE_OUTPUT / INSPECTOR_REJECTED` and no qualification receipt. Its consumed
+claim and local records remain retained. That code identifies the failed
+inspection boundary, not its underlying cause or confirmed cleanup; no GPU
+training or model preparation was performed. Diagnose this exact attempt before
+reviewing any fresh attempt.
 No new grant, lifecycle DTO, store or scenario CRUD framework is required merely
 to close this plan. Supported host composition and installed/source prerequisites
 are detailed in the [operation matrix](api-v1-support-matrix.md) and
