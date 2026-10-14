@@ -1,0 +1,43 @@
+{
+  "provider": "docker",
+  "state_root": "/absolute/private/REPLACE_NEW_ATTEMPT",
+  "request_file": {
+    "path": "/absolute/private/REPLACE_CANONICAL_REQUEST.json",
+    "sha256": "REPLACE_ACTUAL_SHA256",
+    "size_bytes": 1
+  },
+  "host": {
+    "authority_secret": {"provider": "env", "name": "DOCKER_HOST_AUTHORITY"},
+    "evidence_secret": {"provider": "env", "name": "DOCKER_HOST_EVIDENCE"},
+    "grant_ref": "REPLACE_EXISTING_HOST_GRANT_REFERENCE",
+    "allowed_requirements": [
+      {"operation": "training.start", "paid_effect": false, "maximum_cost_minor_units": null, "currency": null}
+    ]
+  },
+  "docker": {
+    "material_file": {"path": "/absolute/private/REPLACE_COORDINATOR_MATERIAL.json", "sha256": "REPLACE_ACTUAL_SHA256", "size_bytes": 1},
+    "profile_file": {"path": "/absolute/private/REPLACE_DOCKER_PROFILE.json", "sha256": "REPLACE_ACTUAL_SHA256", "size_bytes": 1},
+    "image_profile_file": {"path": "/absolute/private/REPLACE_DERIVED_IMAGE_PROFILE.yaml", "sha256": "REPLACE_ACTUAL_SHA256", "size_bytes": 1},
+    "image_verification_file": {"path": "/absolute/private/REPLACE_VERIFICATION_REPORT.json", "sha256": "REPLACE_ACTUAL_SHA256", "size_bytes": 1},
+    "executable": "/absolute/REPLACE_DOCKER_EXECUTABLE",
+    "config_directory": "/absolute/private/REPLACE_DOCKER_CONFIG",
+    "endpoint": "unix:///REPLACE_LOCAL_DAEMON_SOCKET",
+    "daemon_id": "REPLACE_ACTUAL_DAEMON_ID",
+    "source_host_root": "/absolute/private/REPLACE_NEW_ATTEMPT/source",
+    "source_container_root": "/source",
+    "artifact_host_root": "/absolute/private/REPLACE_NEW_ATTEMPT/artifacts",
+    "artifact_container_root": "/artifacts",
+    "control_container_root": "/source/control",
+    "prepared_publication": "/absolute/private/REPLACE_VERIFIED_PUBLICATION.jsonl",
+    "role_paths": {
+      "final_model": "REPLACE_COMPILED_OUTPUT_RELATIVE_PATH",
+      "tokenizer": "REPLACE_COMPILED_OUTPUT_RELATIVE_PATH",
+      "training_lineage": "REPLACE_COMPILED_OUTPUT_RELATIVE_PATH",
+      "training_metrics": "REPLACE_COMPILED_OUTPUT_RELATIVE_PATH",
+      "workload_record": "REPLACE_COMPILED_OUTPUT_RELATIVE_PATH"
+    },
+    "command_seconds": 120,
+    "read_seconds": 60,
+    "allow_current_cancel_authorization": false
+  }
+}
