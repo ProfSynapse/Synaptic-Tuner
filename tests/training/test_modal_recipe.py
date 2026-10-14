@@ -313,3 +313,35 @@ def test_train_quote_reports_only_validated_scoped_gpu_rates(monkeypatch, capsys
     assert "gpu_hour_cost_a100_80gb" in output
     assert "read-only observation" in output
     assert "token" not in output.lower()
+
+
+@pytest.mark.parametrize("tracking", [".synaptic/tracking", ".synaptic/custom-tracking"])
+def test_host_manifest_publication_is_planned_from_declared_tracking(tmp_path, monkeypatch, tracking):
+    from tuner.project import load_project_manifest
+    from tuner.training import modal_recipe
+
+    manifest = yaml.safe_load((ROOT / "examples/host-project/synaptic.yaml").read_text())
+    manifest["paths"]["tracking"] = "project://" + tracking
+    manifest_path = tmp_path / "synaptic.yaml"
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    context = load_project_manifest(manifest_path).create_context(engine_root=ROOT)
+    _, _, _, dataset_config = _config(tmp_path / "source")
+    try:
+        published = prepare_dataset_v2(dataset_config, context.tracking_root / "datasets")
+    except DatasetPublicationUncertainV1:
+        published = prepare_dataset_v2(dataset_config, context.tracking_root / "datasets")
+    semantic = published.semantic_identity
+    document = yaml.safe_load(RECIPE.read_text())
+    document["dataset"].update(
+        local_file=str(published.path.relative_to(tmp_path) / "dataset.jsonl"),
+        expected_digest=semantic.dataset_digest,
+        expected_split_counts=dict(semantic.split_counts),
+    )
+    monkeypatch.setattr(modal_recipe, "load_recipe", lambda *_: document)
+    plan = plan_modal_sft_recipe(RECIPE, project_root=tmp_path, profiles_root=PROFILES)
+    assert plan.prepared_identity.revision == semantic.dataset_digest
+    assert not (tmp_path / ".tracking").exists()
+    manifest["paths"]["tracking"] = "project://.synaptic/other-tracking"
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    with pytest.raises(FileNotFoundError):
+        plan_modal_sft_recipe(RECIPE, project_root=tmp_path, profiles_root=PROFILES)

@@ -140,13 +140,27 @@ class ModalSFTRecipePlanV1:
         }
 
 
+def _prepared_dataset_root(project_root: Path, source_root: Path | None) -> Path:
+    from tuner.project import ProjectContext, load_project_manifest
+
+    manifest = project_root / "synaptic.yaml"
+    if manifest.exists():
+        context = load_project_manifest(manifest).create_context(
+            engine_root=source_root or Path(__file__).resolve().parents[2],
+            invocation_cwd=project_root,
+        )
+    else:
+        context = ProjectContext.standalone(engine_root=project_root)
+    return (context.tracking_root / "datasets").resolve(strict=True)
+
+
 def plan_modal_sft_recipe(recipe_path: Path, *, project_root: Path,
                           profiles_root: Path, source_root: Path | None = None) -> ModalSFTRecipePlanV1:
     """Resolve and verify one publication without any provider or host mutation."""
     from tuner.dataset_prep.publication import snapshot_prepared_dataset_v2
 
     recipe = load_modal_sft_recipe(recipe_path, profiles_root=profiles_root)
-    root = (project_root / ".tracking" / "datasets").resolve(strict=True)
+    root = _prepared_dataset_root(project_root, source_root)
     locator = project_root / recipe.dataset_locator
     directory = locator.parent if locator.name == "dataset.jsonl" else locator
     directory = directory.resolve(strict=True)
@@ -493,7 +507,7 @@ def plan_modal_recipe(path, *, project_root, profiles_root, source_root=None):
     from tuner.training.grpo_compilation import admit_grpo_snapshot, compile_grpo_input
     locator = (project_root / recipe.dataset_locator).absolute()
     directory = locator.parent if locator.name == "dataset.jsonl" else locator
-    if directory.resolve(strict=True).parent != (project_root / ".tracking/datasets").resolve(strict=True):
+    if directory.resolve(strict=True).parent != _prepared_dataset_root(project_root, source_root):
         raise ValueError("GRPO publication outside project dataset root")
     def validate(manifest, raw):
         identity = _verified_identity(manifest, recipe.prepared_format)
