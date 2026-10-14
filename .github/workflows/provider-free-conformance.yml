@@ -502,9 +502,11 @@ jobs:
           import tuner.training.modal_recipe as recipe
           import tuner.training.modal_host_prepared_copy as prepared_copy
           import tuner.training.grpo_preparation as grpo_preparation
+          import tuner.execution.providers.modal.runtime_build as runtime_build
+          import tuner.training.modal_local_preparation as local_preparation
 
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (retention, runner, sqlite_store, retained_reader, runs_handler, recipe, prepared_copy, grpo_preparation):
+          for module in (retention, runner, sqlite_store, retained_reader, runs_handler, recipe, prepared_copy, grpo_preparation, runtime_build, local_preparation):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -514,6 +516,7 @@ jobs:
               "dataset_prep/test_conversation_messages.py",
               "contract/test_grpo_training_input_v1.py",
               "training/test_modal_method_preparation.py",
+              "training/test_modal_source_handoff.py",
               "execution/providers/test_modal_runtime_build.py",
               "execution/test_observation_logs.py",
               "training/test_modal_standalone_runner.py",
@@ -570,6 +573,7 @@ jobs:
           raise SystemExit(pytest.main([
               "-q", "-p", "no:cacheprovider",
               str(root / "tests/training/test_modal_method_preparation.py"),
+              str(root / "tests/training/test_modal_source_handoff.py"),
               str(root / "tests/training/test_modal_standalone_runner.py") + "::test_cli_v2_fake_transcript_prepares_submits_verifies_and_downloads",
               str(root / "tests/training/test_modal_run_retention_io.py"),
               str(root / "tests/training/test_modal_run_retention_integration.py"),
