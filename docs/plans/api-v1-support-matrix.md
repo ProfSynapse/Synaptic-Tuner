@@ -6,10 +6,11 @@ updated: 2026-10-14
 
 # API v1 support and qualification matrix
 
-This is the current support view of the locally accepted preparation stack
-through merged PR #237 plus installed-accepted HF publication #238 and launcher
-closure #239 on 2026-10-14, not a stable release certification. Main is
-`e915e105` through #237; #238–239 exact CI/merge remains pending. Configured cold
+This is the current support view of the accepted preparation stack through
+merged PR #241 on 2026-10-14, not a stable release certification. Main is
+`0a66bb11`; HF publication #238, launcher closure #239, cold HF cancellation
+#240 and native GRPO publication #241 each passed all 18 checks on their accepted
+heads, with merged trees equal to those heads. Configured cold
 HF cancellation passed 133 installed HF controls and 163 paired installed Modal
 controls on fresh-wheel source `5c8542f2`; these are overlapping lane totals,
 not additional unique-test counts. Native GRPO publication is installed accepted with synthetic CPU model files;
