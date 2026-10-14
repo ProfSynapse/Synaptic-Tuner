@@ -163,9 +163,20 @@ def _command(root, role):
     ]
 
 
+def _trusted_proof_root(request):
+    # Provider VolumeRootBinding validates every ancestor, so pytest's /tmp
+    # tree cannot host these simulated provider mounts. The parent owns this
+    # trusted private tree and its cleanup even when the producer is SIGKILLed.
+    temporary = tempfile.TemporaryDirectory(
+        prefix="modal-grpo-process-", dir=Path.home()
+    )
+    request.addfinalizer(temporary.cleanup)
+    return Path(temporary.name)
+
+
 @pytest.mark.skipif(os.name != "posix", reason="SIGKILL process proof requires POSIX")
-def test_grpo_killed_producer_then_three_fresh_public_readers(tmp_path):
-    root = tmp_path / "grpo-process-proof"
+def test_grpo_killed_producer_then_three_fresh_public_readers(request):
+    root = _trusted_proof_root(request) / "grpo-process-proof"
     root.mkdir(mode=0o700)
     scratch = root / "scratch"
     scratch.mkdir(mode=0o700)
