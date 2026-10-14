@@ -149,7 +149,7 @@ def _consumer(root, role):
                     yield SimpleNamespace(path=path, size=len(base64.b64decode(encoded)), type=1, mtime=1)
     class Call:
         is_hydrated = True
-        object_id = 'fc-owned'
+        object_id = state.get('call_ref', 'fc-owned')
         def hydrate(self, supplied):
             assert supplied is client
             return self
@@ -162,7 +162,7 @@ def _consumer(root, role):
     class Calls:
         @staticmethod
         def from_id(reference, *, client):
-            assert reference == 'fc-owned'
+            assert reference == state.get('call_ref', 'fc-owned')
             return Call()
     sdk = SimpleNamespace(__version__='1.5.4', Volume=Volume, FunctionCall=Calls)
     patch = pytest.MonkeyPatch()
@@ -183,10 +183,20 @@ def _consumer(root, role):
             outcome = view.runs.outcome(run)
             assert outcome.state.value == before == 'queued'
             assert reads == ['poll']
+        elif role == 'mismatch':
+            from synaptic_tuner.api.v1.runs_facade import RunOperationError
+            with pytest.raises(RunOperationError) as failure:
+                view.runs.outcome(run)
+            assert failure.value.code.value == 'provider_read_invalid'
+            assert view.runs.show(run).state.value == before == 'queued'
+            assert not view.runs.show(run).artifacts
         elif role == 'verified':
             restored = view.runs.show(run)
             assert restored.state.value == 'succeeded'
             assert {item.role: item.sha256 for item in restored.artifacts} == state['artifact_hashes']
+            from synaptic_tuner.api.v1.runs_facade import RunListRequest
+            page = view.runs.list(RunListRequest(run.project_ref))
+            assert len(page.outcomes) == 1 and page.outcomes[0].run == run
             assert not reads
         else:
             assert view.runs.outcome(run).state.value == 'succeeded'
@@ -195,7 +205,7 @@ def _consumer(root, role):
             observed = {}
             for artifact_role in state['artifact_hashes']:
                 path = download_verified_modal_artifact(view.runs, run, role=artifact_role,
-                    output_root=root / 'downloads', maximum_bytes=4096)
+                    output_root=root / 'downloads', maximum_bytes=state.get('maximum_artifact_bytes', 4096))
                 observed[artifact_role] = hashlib.sha256(path.read_bytes()).hexdigest()
             assert observed == state['artifact_hashes']
         restored = view.runs.show(run)
