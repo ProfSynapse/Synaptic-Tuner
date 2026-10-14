@@ -22,6 +22,8 @@ on:
       - "tests/contract/test_nontraining_metered_join_v1.py"
       - "tests/contract/test_paid_evaluation_judge_v1.py"
       - "tests/contract/test_paid_http_bounds_v1.py"
+      - "tests/contract/test_nontraining_qualification_consumer.py"
+      - "examples/nontraining/**"
       - "shared/llm/base.py"
       - "shared/llm/providers/openrouter.py"
       - "shared/llm/providers/openai_responses.py"
@@ -1137,6 +1139,7 @@ jobs:
               "contract/test_nontraining_metered_join_v1.py",
               "contract/test_paid_evaluation_judge_v1.py",
               "contract/test_paid_http_bounds_v1.py",
+              "contract/test_nontraining_qualification_consumer.py",
               "contract/test_metered_uncertain_calls_v1.py",
               "evaluator/test_compare.py",
               "evaluator/test_comparison_basis.py",
@@ -1149,6 +1152,11 @@ jobs:
               target.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(checkout / "tests" / name, target)
           schemas = root / "schemas"
+          # This is a checkout-owned consumer, not packaged engine source.
+          consumer = root / "examples/nontraining/qualification.py"
+          consumer.parent.mkdir(parents=True)
+          shutil.copy2(checkout / "examples/nontraining/qualification.py", consumer)
+          assert not consumer.resolve().is_relative_to(checkout), consumer
           schemas.mkdir()
           for name in ("synaptic-evaluation-plan-v1.schema.json", "synaptic-evaluation-result-v1.schema.json"):
               shutil.copy2(installed / "schemas" / name, schemas / name)
@@ -1157,7 +1165,8 @@ jobs:
               assert source.is_relative_to(Path(sys.prefix)), source
               shutil.copytree(source, root / "SynthChat" / name,
                               ignore=shutil.ignore_patterns("*.py", "__pycache__"))
-          # Copy only tests and installed non-Python fixtures. No checkout production code.
+          # Tests, installed assets and the explicit checkout-owned consumer only.
+          # No checkout engine production modules are copied.
           import pytest
           sys.path.insert(0, str(root))
           os.chdir(root)
