@@ -139,3 +139,28 @@ head/history integration is scoped to the four stores named above.
 Complete training recovery, provider call catalogs, durable artifact
 publication and end-to-end host migrations remain separate release gates.
 See the [stable release plan](../plans/stable-v1-release.md).
+
+## Optional durable publication records
+
+`reference.publication_store.DurablePublicationStoreV1(records, lock_root,
+create=True)` supplies the existing publication-store port. The caller owns
+the generic record store, including its connection, and an existing private
+0700 local POSIX lock directory. Publication records use the existing canonical
+codec/transition kernel and generic effects-partition CAS; no second database
+or state machine is introduced. The adapter is thread/process affine.
+
+Nonblocking OS locks retain each transfer's file descriptor until completion,
+uncertainty relinquishment or owner close. Private root and lock-inode records
+prevent another opener from silently selecting a different lock root or a
+replacement lock file. Stable lock files are never deleted. Closing or process
+death releases local ownership; a fresh reader can fence an orphan only for
+existing lookup recovery, never another transfer. Active owners cannot be
+fenced. `create=False` requires original root/lock bindings and refuses missing
+setup instead of creating it during cold reads.
+
+Real SQLite/process controls cover an active competing opener, producer
+`SIGKILL`, the first fresh database opener, authenticated fixture receipt lookup,
+terminal reads and no repeated transfer. This qualifies local record/ownership
+plumbing, not a concrete destination, durable artifact spool, live publication,
+network-filesystem locks or distributed ownership. Default reference artifact
+composition still has no publication destination; those adapters remain separate.

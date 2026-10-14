@@ -67,6 +67,8 @@ on:
       - "tests/contract/test_reference_data_v1.py"
       - "tests/contract/test_dataset_validation_bounds_v1.py"
       - "tests/contract/test_public_publication_v1.py"
+      - "tests/execution/coordinator_v1/test_durable_publication_store.py"
+      - "synaptic_tuner/api/v1/reference/publication_store.py"
       - "tests/contract/test_provider_neutral_foundation_v1.py"
       - "tests/conftest.py"
       - "tests/training/**"
@@ -410,11 +412,13 @@ jobs:
           import synaptic_tuner.api.v1.reference.environment_sessions as sessions
           import synaptic_tuner.api.v1.reference.sqlite_store as sqlite_store
           import synaptic_tuner.api.v1.reference.repositories as repositories
+          import synaptic_tuner.api.v1.reference.publication_store as publication_store
+          import tuner.execution.coordinator_v1.publication as publication_kernel
           import shared.environments.local_worker as worker
           import shared.environments.bounded_local_runtime as bounded_runtime
 
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (SynthChat, data, sessions, worker, bounded_runtime, sqlite_store, repositories):
+          for module in (SynthChat, data, sessions, worker, bounded_runtime, sqlite_store, repositories, publication_store, publication_kernel):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -426,8 +430,13 @@ jobs:
                        "test_atomic_lifecycle_v1.py",
                        "test_reference_evaluation_v1.py", "test_reference_pipelines_v1.py",
                        "test_sqlite_store_v1.py", "test_atomic_workflow_store_v1.py",
-                       "test_sqlite_workflow_host_v1.py", "test_reference_composition_v1.py"):
+                       "test_sqlite_workflow_host_v1.py", "test_reference_composition_v1.py",
+                       "test_public_publication_v1.py"):
               shutil.copy2(checkout / "tests" / "contract" / name, tests / name)
+          publications = root / "tests" / "execution" / "coordinator_v1"
+          publications.mkdir(parents=True)
+          for name in ("test_publication.py", "test_durable_publication_store.py"):
+              shutil.copy2(checkout / "tests" / "execution" / "coordinator_v1" / name, publications / name)
           environments = root / "tests" / "environments"
           environments.mkdir()
           for name in ("test_local_worker.py", "test_bounded_local_runtime.py"):
@@ -444,7 +453,10 @@ jobs:
                           str(tests / "test_atomic_workflow_store_v1.py"),
                           str(tests / "test_sqlite_workflow_host_v1.py"),
                           str(environments / "test_local_worker.py"),
-                          str(environments / "test_bounded_local_runtime.py")], cwd=root, check=True)
+                          str(environments / "test_bounded_local_runtime.py"),
+                          str(tests / "test_public_publication_v1.py"),
+                          str(publications / "test_publication.py"),
+                          str(publications / "test_durable_publication_store.py")], cwd=root, check=True)
           PY
 
       - name: Exercise installed Modal durable host composition
