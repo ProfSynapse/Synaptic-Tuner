@@ -12,6 +12,15 @@ or qualify GRPO training. The legacy trainer commands below remain separate. The
 helper can preserve an already verified GRPO prompt publication through these
 ports, but this does not enable normal Modal GRPO recipe planning or start.
 
+The host material boundary can also validate an explicitly supplied packaged GRPO
+configuration against the exact G1 core, original public `TrainingInputV1`, actual
+runtime-release context and finite child limit. Its fixed lazy method selector
+preserves the SFT projection and requires the original retained context for cold
+material readback. This CPU material capability does not add a normal GRPO recipe,
+provider dispatch, log/evaluation capability or live qualification. The default
+recipe registry remains unchanged. Hosts must not fabricate a runtime release to
+produce a final packaged plan before runtime qualification.
+
 Use the existing generic preparation service with explicit host-owned roots:
 
 ```python

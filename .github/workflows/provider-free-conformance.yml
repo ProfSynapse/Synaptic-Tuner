@@ -706,7 +706,7 @@ jobs:
               str(root / "tests/training/test_docker_host_composition.py")]))
           PYCODE
 
-      - name: Exercise installed public GRPO declarations and preparation
+      - name: Exercise installed public GRPO declarations, preparation and host material
         if: matrix.suite == 'core'
         working-directory: ${{ runner.temp }}
         run: |
@@ -723,8 +723,11 @@ jobs:
           import tuner.training.methods.grpo as recipe
           import tuner.training.input_preparation as generic
           import Trainers.grpo.runtime_v1 as core
+          import tuner.training.packaged_boundary as boundary
+          import tuner.training.packaged_grpo_compilation as packaged_grpo
+          import tuner.training.modal_retained_reader as retained_reader
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (inputs, compilation, preparation, recipe, generic, core):
+          for module in (inputs, compilation, preparation, recipe, generic, core, boundary, packaged_grpo, retained_reader):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -733,13 +736,19 @@ jobs:
           names = (
               "contract/test_grpo_training_input_v1.py",
               "contract/test_grpo_preparation_v1.py",
+              "training/test_packaged_grpo_material.py",
               "contract/test_public_training_input_v1.py",
               "contract/test_public_training_input_loader_v1.py",
           )
-          for name in (*names, "training/test_sft_compilation.py"):
+          helpers = ("training/test_sft_compilation.py",
+                     "training/test_packaged_execution_material.py", "training/test_training_compiler.py",
+                     "runtime/test_packaged_grpo_compilation.py", "runtime/test_packaged_runtime_releases.py")
+          for name in (*names, *helpers):
               target = root / "tests" / name
               target.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(checkout / "tests" / name, target)
+          for package in ("tests", "tests/contract", "tests/training", "tests/runtime"):
+              (root / package / "__init__.py").touch()
           schemas = root / "schemas"
           schemas.mkdir()
           for name in ("synaptic-grpo-hyperparameters-v1.schema.json",
