@@ -8,7 +8,7 @@ import json
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "synaptic-tuner"
-PIN = "bea87f9dba59f7f73c20ef91b7bbb542d85d01c2"
+PIN = "cf049501b4cecdd2170d874588d70f97b2cbd955"
 ORIGIN = "https://github.com/ProfSynapse/Synaptic-Tuner.git"
 
 if ENGINE.resolve(strict=True) != ENGINE:

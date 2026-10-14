@@ -1,7 +1,7 @@
 # HF SFT qualification host fixture
 
 This dedicated host branch is not an engine PR. Its engine Gitlink is exactly
-bea87f9dba59f7f73c20ef91b7bbb542d85d01c2, with the actual pushed
+cf049501b4cecdd2170d874588d70f97b2cbd955, with the actual pushed
 `release/nontraining-same-model-integration` branch hint. A credential-disabled
 public ls-remote observed that exact branch HEAD during preparation. Do not use
 `main` as its source hint: main has a different commit despite identical tree.
@@ -53,4 +53,4 @@ was used instead, with named credentials through explicit dotenv CLI.
 No Job, bucket creation/upload, model download, image build or paid training was
 performed. Existing capability defaults and lost-reply/no-replay rules remain.
 
-Final-source candidate rebind preserves the original7df0a0bf host history and exact eight authored rows. Current enginebea87f9d is the actual pushed PR247 source; CI is pending and this host is not live qualification. Owner selected private professorsynapse/toolset-training-artifacts, but no job/upload/model download is authorized by this host. Fresh local source/authority/reader keys and caller config remain private, outside tracked files.
+Final-source candidate rebind preserves the original7df0a0bf host history and exact eight authored rows. Current enginecf049501 is the actual pushed PR247 source; CI is pending and this host is not live qualification. Owner selected private professorsynapse/toolset-training-artifacts, but no job/upload/model download is authorized by this host. Fresh local source/authority/reader keys and caller config remain private, outside tracked files.
