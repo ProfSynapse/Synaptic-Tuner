@@ -155,3 +155,21 @@ The response view must not map CLI commands to old manager tool ids or decide co
 - Use `--limit` and `--tags` for fast iteration.
 - Use `--validate-context` only when the scenario includes context fields that should be structurally checked.
 - Use `--env-backend local` or `e2b` only when you need runtime execution checks beyond response correctness.
+
+## Public paid judge accounting
+
+The reference Python host can supply `MeteredPaidJudgeV1` from
+`synaptic_tuner.api.v1.reference.evaluation` with an explicit model, named
+`SecretRef`/resolver, account and namespace, loaded rubric definitions and
+`JudgeConfig`. Credentials resolve only at client construction; no ambient
+config or rubric paths are loaded. New judge model refs are limited to 4096
+UTF-8 bytes. This adds no CLI qualification or live model evidence.
+
+Paid response and paid judge must use the same exact spend scope. Their
+measured calls share one spend effect. With a local response and paid judge,
+spend-linked usage contains only paid judge tokens. Paid response plus an
+unpaid judge retains response-only accounting. Missing usage, malformed
+completion values and uncertain paid construction cannot establish zero
+spend. A metered external judge remains an unverified comparison input.
+Existing provider transports here have no finite HTTP byte-cap guarantee;
+null output tokens do not promise unlimited context or elapsed time.

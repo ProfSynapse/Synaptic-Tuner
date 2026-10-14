@@ -46,12 +46,17 @@ when every call reported measured usage (the result then carries that one
 ``usage`` record, whose ``spend`` names the effect), ``definitely_absent``
 when no call was made, ``indeterminate`` when any call reported no usage, in
 which case the run finishes ``failed`` / ``spend_indeterminate`` and no found
-spend is claimed. A paid backend without a spend scope, and a paid judge, are
-still refused with ``backend_unmetered`` before any client is opened
+spend is claimed. A paid backend without a spend scope, or a paid judge
+without the optional measured construction methods, is refused with
+``backend_unmetered`` before any client is opened
 (``UnmeteredPaidBackendV1`` declares such a backend). A local backend claims
 no spend effect, so a run against it has zero effects and zero grants; its
 result carries ``usage`` only when every call reported measured usage. A
 backend the registry does not know is refused with ``backend_unavailable``.
+``MeteredPaidJudgeV1`` admits same-account paid response/judge calls into one
+spend. A local response plus paid judge records only paid judge tokens in its
+spend-linked usage; it never charges local tokens to the judge account. Existing
+local-only and paid-response/unpaid-judge accounting remains unchanged.
 
 Consumed by ``synaptic_tuner/api/v1/reference/composition.py`` and exported
 lazily through ``synaptic_tuner/api/v1/reference/__init__.py``.
@@ -156,6 +161,7 @@ EVALUATION_RESULTS_ROLE = "evaluation_results"
 EVALUATION_TRACE_ROLE = "evaluation_trace"
 EVALUATION_START_OPERATION = "evaluation.start"
 EVALUATION_JUDGE_OPERATION = "evaluation.judge"
+_MAX_JUDGE_MODEL_BYTES = 4096
 EVALUATION_SPEND_FAMILY = "evaluation"
 HISTORY_PAGE_LIMIT = 200
 APPEND_ATTEMPTS = 4
@@ -221,7 +227,12 @@ class EvaluationBackendRegistryPort(Protocol):
 
 
 class EvaluationJudgePort(Protocol):
-    """An LLM-as-judge a host offers; ``open`` returns an ``Evaluator`` ``JudgeValidator``."""
+    """Host judge construction; unpaid judges retain the legacy ``open`` method.
+
+    Paid judges additionally expose spend_scope/model_ref/create_client/
+    open_with_client. The reference supplies and checks the exact metered
+    client in the returned actual JudgeValidator; no private service mutation.
+    """
 
     def requirement(self) -> AuthorizationRequirement: ...
 
@@ -478,6 +489,76 @@ class MeteredPaidBackendV1:
         return SharedOpenAIResponsesAdapter(
             OpenAIResponsesSettings(model=model.model_ref), timeout=self._timeout, retries=self._retries, client=client,
         )
+
+
+class MeteredPaidJudgeV1:
+    """Host-configured paid judge; credentials are resolved only at construction.
+
+    Uses existing provider transports, which do not promise finite HTTP byte
+    caps here. Rubrics/config are copied; no ambient paths or configuration are
+    consulted. The reference injects its metered client into JudgeValidator.
+    """
+
+    def __init__(self, backend: str, model: EvaluationModelRef, *, api_key: SecretRef,
+                 secrets: SecretResolverPort, account_ref: str, namespace_ref: str,
+                 rubrics, judge_config, default_judge_mode: str = "and",
+                 timeout: float = 60.0, maximum_cost_minor_units: int | None = None,
+                 currency: str | None = None) -> None:
+        from copy import deepcopy
+        import math
+        from shared.judge import JudgeConfig, RubricDef
+        if backend not in PAID_BACKENDS:
+            raise ValueError("unsupported judge backend")
+        if type(model) is not EvaluationModelRef or type(api_key) is not SecretRef:
+            raise TypeError("exact model and secret references required")
+        if len(model.model_ref.encode("utf-8")) > _MAX_JUDGE_MODEL_BYTES:
+            raise ValueError("judge model reference too large")
+        require_methods(secrets, "resolve")
+        SpendScopeV1(backend, account_ref, namespace_ref)
+        AuthorizationRequirement(EVALUATION_JUDGE_OPERATION, True, maximum_cost_minor_units, currency)
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("finite positive timeout required")
+        if type(judge_config) is not JudgeConfig or type(rubrics) not in (tuple, list) or not rubrics:
+            raise TypeError("explicit judge config and rubrics required")
+        if any(type(item) is not RubricDef for item in rubrics):
+            raise TypeError("exact rubric definitions required")
+        if default_judge_mode not in ("and", "or", "judge_only"):
+            raise ValueError("unsupported judge mode")
+        self._backend, self._model, self._api_key, self._secrets = backend, model, api_key, secrets
+        self._scope = SpendScopeV1(backend, account_ref, namespace_ref)
+        self._requirement = AuthorizationRequirement(EVALUATION_JUDGE_OPERATION, True, maximum_cost_minor_units, currency)
+        self._rubrics, self._config = deepcopy(tuple(rubrics)), deepcopy(judge_config)
+        self._mode, self._timeout = default_judge_mode, float(timeout)
+
+    def requirement(self) -> AuthorizationRequirement:
+        return self._requirement
+
+    def spend_scope(self) -> SpendScopeV1:
+        return self._scope
+
+    def model_ref(self) -> str:
+        return self._model.model_ref
+
+    def create_client(self):
+        key = self._secrets.resolve(self._api_key)
+        if type(key) is not str or not key.strip():
+            raise ValueError("judge credential unavailable")
+        if self._backend == "openrouter":
+            from shared.llm.providers.openrouter import OpenRouterClient
+            return OpenRouterClient(key, self._model.model_ref, timeout_seconds=self._timeout)
+        from shared.llm.providers.openai_responses import OpenAIResponsesClient
+        return OpenAIResponsesClient(key, self._model.model_ref, timeout_seconds=self._timeout)
+
+    def open_with_client(self, client):
+        from copy import deepcopy
+        from Evaluator.judge_validator import JudgeValidator
+        return JudgeValidator(client, list(deepcopy(self._rubrics)), deepcopy(self._config),
+                              default_judge_mode=self._mode, judge_model=self._model.model_ref)
+
+    def open(self):
+        # Standalone construction remains usable; public execution always injects
+        # its metered wrapper through the separate constructor methods above.
+        return self.open_with_client(self.create_client())
 
 
 class _MeteredBackendClient:
@@ -1229,24 +1310,43 @@ class ReferenceEvaluationOperationsV1:
             raise TypeError("backend requirement must be exact AuthorizationRequirement")
         return tuple(items)
 
-    def _spend_scope(self, backend: EvaluationBackendPort) -> SpendScopeV1 | None:
-        """The paid backend's spend scope, or ``None`` when it cannot be metered.
+    def _paid_participants(self, backend: EvaluationBackendPort):
+        participants = []
+        if backend.requirement().paid_effect:
+            method = getattr(backend, "spend_scope", None)
+            scope = method() if callable(method) else None
+            if type(scope) is not SpendScopeV1:
+                return None
+            participants.append((scope, backend.requirement(), None))
+        judge = self._ports.judge
+        if judge is not None and judge.requirement().paid_effect:
+            for name in ("spend_scope", "model_ref", "create_client", "open_with_client"):
+                if not callable(getattr(type(judge), name, None)):
+                    return None
+            scope = judge.spend_scope()
+            model = judge.model_ref()
+            if type(scope) is not SpendScopeV1:
+                return None
+            try:
+                # Reuse existing public text validation; this validation-only
+                # revision is not retained or asserted as model provenance.
+                EvaluationModelRef(model, "validation-only")
+                if len(model.encode("utf-8")) > _MAX_JUDGE_MODEL_BYTES:
+                    return None
+            except (TypeError, ValueError):
+                return None
+            participants.append((scope, judge.requirement(), model))
+        if participants:
+            if any(item[0] != participants[0][0] for item in participants):
+                return None
+            currencies = {item[1].currency for item in participants if item[1].currency is not None}
+            if len(currencies) > 1:
+                return None
+        return tuple(participants)
 
-        A backend whose requirement is not paid has no scope. A paid backend is
-        metered only when it exposes ``spend_scope`` returning an exact
-        ``SpendScopeV1``; anything else is unmetered. A paid judge is not
-        metered in this slice, so it leaves the run unmetered too.
-        """
-        requirement = backend.requirement()
-        if type(requirement) is not AuthorizationRequirement or not requirement.paid_effect:
-            return None
-        if self._ports.judge is not None and self._ports.judge.requirement().paid_effect:
-            return None
-        scope_method = getattr(backend, "spend_scope", None)
-        if not callable(scope_method):
-            return None
-        scope = scope_method()
-        return scope if type(scope) is SpendScopeV1 else None
+    def _spend_scope(self, backend: EvaluationBackendPort) -> SpendScopeV1 | None:
+        participants = self._paid_participants(backend)
+        return participants[0][0] if participants else None
 
     def _unmetered(self, backend: EvaluationBackendPort) -> bool:
         """True when some requirement is paid and the run cannot claim a spend effect."""
@@ -1257,12 +1357,16 @@ class ReferenceEvaluationOperationsV1:
     def _spend_authorization(
         self, backend: EvaluationBackendPort, scope: SpendScopeV1, request: EvaluationRequest
     ) -> SpendAuthorizationV1:
-        requirement = backend.requirement()
-        return SpendAuthorizationV1(
-            scope.provider, scope.account_ref, (request.model.model_ref,),
-            None if requirement.maximum_cost_minor_units is None else int(requirement.maximum_cost_minor_units),
-            requirement.currency,
-        )
+        participants = self._paid_participants(backend)
+        if not participants or participants[0][0] != scope:
+            raise _error(EvaluationOperationCode.BACKEND_UNMETERED)
+        models = tuple(sorted({model if model is not None else request.model.model_ref
+                               for _, _, model in participants}))
+        caps = [requirement.maximum_cost_minor_units for _, requirement, _ in participants]
+        maximum = sum(int(cap) for cap in caps) if all(cap is not None for cap in caps) else None
+        currency = participants[0][1].currency if maximum is not None else None
+        return SpendAuthorizationV1(scope.provider, scope.account_ref, models, maximum, currency)
+
 
     # -- verbs -----------------------------------------------------------------------
 
@@ -1351,14 +1455,29 @@ class ReferenceEvaluationOperationsV1:
                     self._spend_authorization(backend, scope, request),
                 )
             try:
-                client = _MeteredBackendClient(backend.open(request.model), meter)
+                response_meter = meter if scope is None or backend.requirement().paid_effect else UsageAccumulator()
+                client = _MeteredBackendClient(backend.open(request.model), response_meter)
             except Exception:
+                if (spend is not None and backend.requirement().paid_effect
+                        and self._ports.judge is not None and self._ports.judge.requirement().paid_effect):
+                    meter.add(None)
                 raise _error(EvaluationOperationCode.BACKEND_UNAVAILABLE) from None
             judge = None
             if self._ports.judge is not None:
                 try:
-                    judge = self._ports.judge.open()
+                    if self._ports.judge.requirement().paid_effect:
+                        from shared.llm.metering import MeteredLLMClient
+                        from Evaluator.judge_validator import JudgeValidator
+                        inner = self._ports.judge.create_client()
+                        metered_judge_client = MeteredLLMClient(inner, meter)
+                        judge = self._ports.judge.open_with_client(metered_judge_client)
+                        if type(judge) is not JudgeValidator or judge.judge_service.llm_client is not metered_judge_client:
+                            raise TypeError("paid judge construction unavailable")
+                    else:
+                        judge = self._ports.judge.open()
                 except Exception:
+                    if spend is not None and self._ports.judge.requirement().paid_effect:
+                        meter.add(None)
                     raise _error(EvaluationOperationCode.JUDGE_FAILED) from None
             if validator_config is not None:
                 try:
@@ -1684,6 +1803,7 @@ __all__ = [
     "EvaluationJudgePort",
     "LocalHttpEvaluatorBackendV1",
     "MeteredPaidBackendV1",
+    "MeteredPaidJudgeV1",
     "ReferenceEvaluationOperationsV1",
     "ReferenceEvaluationPortsV1",
     "UnmeteredPaidBackendV1",
