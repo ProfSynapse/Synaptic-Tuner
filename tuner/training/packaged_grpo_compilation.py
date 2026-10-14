@@ -71,7 +71,8 @@ def _core(document):
     return recompiled
 
 
-def compile_packaged_grpo_workload(*, core_workload, context, child_max_seconds):
+def compile_packaged_grpo_workload(*, core_workload, context, child_max_seconds,
+                                   qualification_evidence=None):
     if type(core_workload) is not CompiledWorkload:
         raise TypeError("exact GRPO core workload required")
     core = _core(core_workload.document)
@@ -92,10 +93,14 @@ def compile_packaged_grpo_workload(*, core_workload, context, child_max_seconds)
         raise ValueError("PACKAGED_GRPO_CONTEXT_REJECTED")
     if type(child_max_seconds) is not int or not 1 <= child_max_seconds <= 86400:
         raise ValueError("PACKAGED_GRPO_LIMIT_REJECTED")
+    limits = {"child_max_seconds": child_max_seconds}
+    if qualification_evidence is not None:
+        from Trainers.grpo.runtime_v1 import validate_qualification_evidence_policy
+        limits["qualification_evidence"] = validate_qualification_evidence_policy(qualification_evidence)
     document = {
         "schema_version": PACKAGED_GRPO_WORKLOAD_SCHEMA, "method": "grpo",
         "entrypoint": PACKAGED_ENTRYPOINT, "core_workload": core.document,
-        "context": context, "limits": {"child_max_seconds": child_max_seconds},
+        "context": context, "limits": limits,
         "artifacts": {"schema_version": PACKAGED_GRPO_ARTIFACT_SCHEMA,
                       "requirements": [{"role": role, "minimum": 1, "maximum": 1}
                                        for role in ROLES]},
@@ -110,10 +115,15 @@ def parse_packaged_grpo_workload(raw):
     if (set(document) != {"schema_version", "method", "entrypoint", "core_workload",
                          "context", "limits", "artifacts"}
             or type(document["limits"]) is not dict
-            or set(document["limits"]) != {"child_max_seconds"}):
+            or set(document["limits"]) not in ({"child_max_seconds"},
+                {"child_max_seconds", "qualification_evidence"})):
         raise ValueError("PACKAGED_GRPO_WORKLOAD_REJECTED")
+    optional = {}
+    if "qualification_evidence" in document["limits"]:
+        from Trainers.grpo.runtime_v1 import validate_qualification_evidence_policy
+        optional["qualification_evidence"] = validate_qualification_evidence_policy(document["limits"]["qualification_evidence"])
     compiled = compile_packaged_grpo_workload(core_workload=_core(document["core_workload"]),
-        context=document["context"], child_max_seconds=document["limits"]["child_max_seconds"])
+        context=document["context"], child_max_seconds=document["limits"]["child_max_seconds"], **optional)
     if compiled.canonical_bytes != raw:
         raise ValueError("PACKAGED_GRPO_WORKLOAD_REJECTED")
     return compiled

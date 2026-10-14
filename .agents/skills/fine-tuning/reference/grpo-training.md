@@ -582,3 +582,30 @@ env-GRPO smoke job and confirm the run does not raise a length/logprob mismatch.
 ## Platform Note
 
 GRPO requires **WSL/Linux only** — native Windows is not supported.
+
+## Optional bounded training measurements
+
+Packaged GRPO limits may include `qualification_evidence` with exactly
+`max_trainable_bytes` (1–268435456), `max_trainable_tensors` (1–4096), and
+`max_reward_values` (1–1048576). Absence preserves existing workload bytes and
+behavior. Presence measures the entire supported trainable parameter population
+at actual trainer begin/end callbacks, transferring at most 1 MiB per CPU chunk
+under the original child-only deadline. Raw weights and reward vectors are not
+persisted. Unsupported tensor layouts, distributed populations, exhausted bounds,
+and nonfinite values reject rather than sample or silently truncate.
+
+The existing lineage and metrics roles retain parameter fingerprints and actual
+reward callback statistics. Grouped variation requires complete pinned-TRL
+`group`/`none` statistics with positive reward standard deviation and a zero-group
+fraction below one; batch-wide statistics are inconclusive. Signed zero changes
+do not count as parameter changes. Unchanged parameters, missing grouped evidence,
+or zero variation yield truthful `inconclusive` measurements without retry.
+These locked-child measurements are not independent reconstruction of historical
+weights, native completion verification, GPU/image qualification, or model quality.
+
+The permanent provider-free CPU lane explicitly selects
+`SYNAPTIC_TEST_GRPO_CPU_EVIDENCE=1` and asserts official CPU Torch `2.9.0+cpu` with
+no CUDA. Other lanes skip the tiny-tensor controls before importing Torch; base
+consumers remain Torch-free. Scripted third-party trainer/model boundaries exercise
+real CPU tensor updates, isolated child custody, and native five-role verification,
+without qualifying the real GRPO training stack or provider execution.

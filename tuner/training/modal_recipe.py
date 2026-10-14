@@ -324,6 +324,13 @@ class ModalGRPORecipeV1:
     maximum_cost_minor_units: int | None
     child_max_seconds: int
     prepared_format: str = "synaptic-grpo-prompts/v1"
+    qualification_evidence: object = None
+
+    def limits(self):
+        value = {"child_max_seconds": self.child_max_seconds}
+        if self.qualification_evidence is not None:
+            value["qualification_evidence"] = dict(self.qualification_evidence)
+        return value
 
     @property
     def model(self):
@@ -347,7 +354,7 @@ class ModalGRPORecipeV1:
         return CanonicalDocument.from_mapping({
             "schema_version": "synaptic-packaged-grpo-config/v1", "method": "grpo",
             "execution": {"mode": "packaged_runtime"}, "core_workload": core.document,
-            "limits": {"child_max_seconds": self.child_max_seconds},
+            "limits": self.limits(),
         })
 
 
@@ -370,7 +377,7 @@ class ModalGRPORecipePlanV1:
             "training_input": self.recipe.declaration.to_dict(),
             "prepared_dataset": self.prepared_identity.to_dict(), "row_count": self.recipe.row_count,
             "core_workload_digest": self.core_workload_digest,
-            "limits": {"child_max_seconds": self.recipe.child_max_seconds},
+            "limits": self.recipe.limits(),
             "execution_status": "unsupported-until-provider-dispatch-integration",
             "resource_request": {"accelerator": self.recipe.accelerator,
                 "accelerator_count": self.recipe.accelerator_count, "timeout_seconds": self.recipe.timeout_seconds},
@@ -406,10 +413,14 @@ def load_modal_grpo_recipe(path: Path, *, profiles_root: Path) -> ModalGRPORecip
             or type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None
             or type(rows) is not int or not 1 <= rows <= 128):
         raise ValueError("GRPO publication assertion differs")
-    limits = _section(cfg.get("limits"), {"child_max_seconds"}, "GRPO limits")
+    limits = _section(cfg.get("limits"), {"child_max_seconds", "qualification_evidence"}, "GRPO limits")
     child_limit = limits.get("child_max_seconds")
     if type(child_limit) is not int or not 1 <= child_limit <= 86400:
         raise ValueError("GRPO child budget differs")
+    evidence = None
+    if "qualification_evidence" in limits:
+        from Trainers.grpo.runtime_v1 import validate_qualification_evidence_policy
+        evidence = MappingProxyType(validate_qualification_evidence_policy(limits["qualification_evidence"]))
     job = _section(cfg.get("job"), {
         "runtime_profile", "accelerator", "accelerator_count", "timeout_seconds", "maximum_cost_minor_units",
     }, "GRPO job")
@@ -424,7 +435,8 @@ def load_modal_grpo_recipe(path: Path, *, profiles_root: Path) -> ModalGRPORecip
     load_runtime_profile(job["runtime_profile"], profiles_root).resolve(
         model=public.model.ref, model_revision=public.model.revision, method="grpo")
     return ModalGRPORecipeV1(cfg.get("name", path.stem), locator, digest, rows, job["runtime_profile"],
-        public, job["accelerator"], job["accelerator_count"], job["timeout_seconds"], maximum, child_limit)
+        public, job["accelerator"], job["accelerator_count"], job["timeout_seconds"], maximum, child_limit,
+        qualification_evidence=evidence)
 
 
 def load_modal_recipe(path, *, profiles_root):

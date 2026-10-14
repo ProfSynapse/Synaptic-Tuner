@@ -902,7 +902,9 @@ def bind_modal_grpo_recipe_material(*, plan, identity, run_id, release, provider
     context = CanonicalDocument.from_mapping({"schema_version": PACKAGED_CONTEXT_SCHEMA,
                                              "runtime_release": release.to_dict()})
     workload = compile_packaged_grpo_workload(core_workload=core, context=context.to_dict(),
-                                            child_max_seconds=plan.recipe.child_max_seconds)
+                                            child_max_seconds=plan.recipe.child_max_seconds,
+        **({"qualification_evidence": dict(plan.recipe.qualification_evidence)}
+           if plan.recipe.qualification_evidence is not None else {}))
     execution = PackagedExecutionBindingV1.build(run_ref=run_id, runtime_release=release,
         provider_runtime_binding=provider_binding,
         prepared_input_ref=identity.ref, prepared_input_revision=identity.revision,
