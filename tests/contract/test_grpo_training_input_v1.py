@@ -119,7 +119,7 @@ def test_explicit_recipe_registry_compilation_preserves_default_sft():
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parents[1] / "training"))
-    from test_sft_compilation import _execution_source
+    from tests.training.test_sft_compilation import _execution_source
     raw = b'{"prompt":"Say OK"}\n'
     value = TrainingInputV1.from_dict(document())
     resolved = CanonicalDocument.from_mapping({"schema_version": "synaptic-grpo-config/v1",

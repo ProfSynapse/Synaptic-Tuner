@@ -27,7 +27,7 @@ from .coordinator_material import (
 from .recipes import CompiledWorkload, RecipeRegistry, canonical_json_bytes
 from .service import TrainingService, _PackagedCompilationHooks
 from .packaged_compilation import (
-    PACKAGED_CONTEXT_SCHEMA, PACKAGED_ENTRYPOINT, PACKAGED_SFT_WORKLOAD_SCHEMA,
+    PACKAGED_CONTEXT_SCHEMA, PACKAGED_ENTRYPOINT,
     _fields, compile_packaged_sft_workload, packaged_artifact_policy_digest,
 )
 
@@ -36,15 +36,42 @@ ExecutionMaterialV1 = GitExecutionSourceV1 | PackagedExecutionBindingV1
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
-def compile_bound_packaged_workload(config, binding) -> CompiledWorkload:
+def _selected_packaged_projection(config, execution_context=None):
+    if type(config) is not CanonicalDocument:
+        raise TypeError("exact packaged configuration required")
+    value = config.to_dict()
+    if value.get("method") == "grpo":
+        from .packaged_grpo_compilation import (
+            _core, compile_packaged_grpo_workload, packaged_grpo_configuration_digest,
+        )
+        value = _fields(value, {"schema_version", "method", "execution", "core_workload", "limits"}, "packaged GRPO configuration")
+        if (value["schema_version"] != "synaptic-packaged-grpo-config/v1"
+                or value["execution"] != {"mode": "packaged_runtime"}
+                or type(execution_context) is not CanonicalDocument):
+            raise ValueError("packaged GRPO configuration or context differs")
+        limits = _fields(value["limits"], {"child_max_seconds"}, "packaged GRPO limits")
+        core = _core(value["core_workload"])
+        workload = compile_packaged_grpo_workload(core_workload=core,
+            context=execution_context.to_dict(), child_max_seconds=limits["child_max_seconds"])
+        return workload, packaged_grpo_configuration_digest(workload), core.document["prepared_input"]
+    workload = compile_packaged_sft_workload(resolved_config=config)
+    return workload, workload.document["configuration"]["digest"], workload.document["identities"]["dataset"]
+
+
+def packaged_method_configuration_digest(config, *, execution_context=None):
+    """Derive a method's exact existing configuration commitment."""
+    return _selected_packaged_projection(config, execution_context)[1]
+
+
+def compile_bound_packaged_workload(config, binding, *, execution_context=None) -> CompiledWorkload:
     if type(binding) is not PackagedExecutionBindingV1:
         raise TypeError("exact packaged execution binding required")
     # Reconstruct, rather than trusting a frozen object that may have been mutated.
     binding = PackagedExecutionBindingV1.from_dict(binding.to_dict())
-    workload = compile_packaged_sft_workload(resolved_config=config)
+    workload, configuration_digest, prepared_input = _selected_packaged_projection(config, execution_context)
     if (binding.workload_digest != workload.fingerprint
-            or binding.configuration_digest != workload.document["configuration"]["digest"]
-            or binding.to_dict()["prepared_input"] != workload.document["identities"]["dataset"]):
+            or binding.configuration_digest != configuration_digest
+            or binding.to_dict()["prepared_input"] != prepared_input):
         raise ValueError("packaged binding differs from compiled workload or prepared identity")
     return workload
 
@@ -62,7 +89,7 @@ def validate_packaged_material(*, request: TrainingRequest, material) -> Compile
     if type(request) is not TrainingRequest or type(request.document) is not CanonicalDocument:
         raise TypeError("exact training request required")
     binding = material.execution_source
-    workload = compile_bound_packaged_workload(material.resolved_config, binding)
+    workload = compile_bound_packaged_workload(material.resolved_config, binding, execution_context=material.execution_context)
     if binding.artifact_policy_digest != packaged_artifact_policy_digest(material.artifact_policy):
         raise ValueError("packaged binding differs from artifact policy")
     if type(material.execution_context) is not CanonicalDocument:
@@ -72,13 +99,21 @@ def validate_packaged_material(*, request: TrainingRequest, material) -> Compile
         raise ValueError("unsupported packaged context")
     release = parse_packaged_runtime_release(context["runtime_release"])
     config = material.resolved_config.to_dict()
+    method = workload.method
+    if method == "grpo":
+        core = workload.document["core_workload"]
+        model = {"ref": core["model"]["model_id"], "revision": core["model"]["revision"],
+                 "tokenizer_revision": core["model"]["tokenizer_revision"]}
+        dataset = core["prepared_input"]
+    else:
+        model, dataset = config["model"], config["dataset"]
     if (
         release.manifest_digest != binding.runtime_release_digest
         or release.worker_entrypoint != PACKAGED_ENTRYPOINT
-        or "sft" not in release.compatible_methods
-        or (config["model"]["ref"], config["model"]["revision"]) not in release.compatible_models
-        or config["dataset"]["format"] not in release.compatible_dataset_formats
-        or release.workload_schema != PACKAGED_SFT_WORKLOAD_SCHEMA
+        or method not in release.compatible_methods
+        or (model["ref"], model["revision"]) not in release.compatible_models
+        or dataset["format"] not in release.compatible_dataset_formats
+        or release.workload_schema != workload.schema_version
         or release.prepared_input_schema != "synaptic-prepared-training-input/v1"
         or release.artifact_contract_schema != workload.document["artifacts"]["schema_version"]
     ):
@@ -100,15 +135,23 @@ def validate_packaged_material(*, request: TrainingRequest, material) -> Compile
     if type(material.runtime) is not RuntimeSpec or material.runtime != expected_runtime:
         raise ValueError("packaged runtime differs from admitted release")
     public = TrainingInputV1.from_json(request.document.canonical_json)
-    if (
-        canonical_json_bytes(public.to_dict()) != canonical_json_bytes(request.document.to_dict())
-        or public.method.value != "sft"
-        or public.model.to_dict() != {key: config["model"][key] for key in ("ref", "revision", "tokenizer_revision")}
-        or public.dataset.ref != config["dataset"]["ref"]
-        or canonical_json_bytes(public.hyperparameters.to_dict()) != canonical_json_bytes(config["sft"])
-        or public.artifacts.required_kinds != material.artifact_policy.required_kinds
-        or public.artifacts.retain_checkpoints != material.artifact_policy.retain_checkpoints
-    ):
+    if canonical_json_bytes(public.to_dict()) != canonical_json_bytes(request.document.to_dict()):
+        raise ValueError("packaged configuration differs from canonical request")
+    if method == "grpo":
+        from synaptic_tuner.api.v1.training_sources import PreparedTrainingInputIdentity
+        from .grpo_compilation import compile_grpo_input
+        if public.method.value != "grpo":
+            raise ValueError("packaged configuration differs from canonical request")
+        expected = compile_grpo_input(public, PreparedTrainingInputIdentity.from_dict(dataset))
+        if expected.canonical_bytes != canonical_json_bytes(core):
+            raise ValueError("packaged configuration differs from canonical request")
+    elif (public.method.value != "sft"
+            or public.model.to_dict() != {key: model[key] for key in ("ref", "revision", "tokenizer_revision")}
+            or public.dataset.ref != dataset["ref"]
+            or canonical_json_bytes(public.hyperparameters.to_dict()) != canonical_json_bytes(config["sft"])):
+        raise ValueError("packaged configuration differs from canonical request")
+    if (public.artifacts.required_kinds != material.artifact_policy.required_kinds
+            or public.artifacts.retain_checkpoints != material.artifact_policy.retain_checkpoints):
         raise ValueError("packaged configuration differs from canonical request")
     return workload
 

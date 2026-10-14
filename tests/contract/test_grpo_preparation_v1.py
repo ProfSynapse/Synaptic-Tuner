@@ -11,7 +11,7 @@ from tuner.training.grpo_preparation import (
     snapshot_grpo_publication,
 )
 from tuner.training.input_preparation import PosixPrivatePreparedRootAuthorityV1, TrainingInputPreparationServiceV1
-from test_grpo_training_input_v1 import document
+from tests.contract.test_grpo_training_input_v1 import document
 
 
 def setup(tmp_path, raw=b'{"question":"Say OK","expected":"OK","fraction":0.5}\n'):

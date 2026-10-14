@@ -43,7 +43,7 @@ from tuner.training.modal_host_storage import ModalHostStorageV1
 from tuner.training.modal_local_preparation import validate_local_launcher
 from tuner.training.modal_run_retention import load_retained_modal_run, _decode_bytes, WORKFLOW_FILE
 from tuner.training.packaged_compilation import (
-    compile_packaged_sft_workload, packaged_configuration_digest, packaged_artifact_policy_digest,
+    packaged_artifact_policy_digest,
 )
 from tuner.training import default_recipe_registry
 from tuner.training.contracts import ResolvedTrainingRequest, TrainingRequest as MaterialRequest
@@ -171,11 +171,12 @@ def _typed_inputs(retained):
         execution, CanonicalDocument(_decode_bytes(raw["execution_context"]).decode("utf-8")),
         CanonicalDocument(_decode_bytes(raw["resolved_config"]).decode("utf-8")), runtime, resources, policy,
     )
-    workload = compile_packaged_sft_workload(resolved_config=components.resolved_config)
+    from tuner.training.packaged_boundary import compile_bound_packaged_workload
+    workload = compile_bound_packaged_workload(components.resolved_config, execution,
+        execution_context=components.execution_context)
     if (workload.canonical_bytes != _decode_bytes(inputs["workload"])
             or execution.run_ref != retained.run.run_id
             or execution.workload_digest != workload.fingerprint
-            or execution.configuration_digest != packaged_configuration_digest(components.resolved_config)
             or execution.artifact_policy_digest != packaged_artifact_policy_digest(policy)
             or components.execution_context.to_dict() != {
                 "schema_version": "synaptic-packaged-execution-context/v1", "runtime_release": release.to_dict(),
