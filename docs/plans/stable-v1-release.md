@@ -1306,3 +1306,26 @@ engine production modules came from the installed wheel. The example is a
 checkout consumer, not a newly packaged engine entrypoint. No runtime source,
 dependency, asset or lock inventory changed. Live account/model qualification
 and the overall stable release gate remain open.
+
+### Durable publication records and local transfer ownership
+
+An optional publication-store adapter now persists the existing publication
+records and transitions through the generic host store. Retained POSIX file
+locks establish local transfer ownership. Original directory and lock-file
+identities prevent another opener from replacing an active owner's lock.
+A fresh process may recover an orphan for lookup only; it cannot repeat the
+transfer. Default artifact composition and destination support are unchanged.
+
+Root review corrected a wrong-thread close that could release the owner's
+descriptors. The regression uses an actual competing process to confirm that
+ownership remains active. All 129 source publication controls passed in 1.71
+seconds, including process death and first-reader recovery with a signed
+destination fixture. Fresh sdist-built wheel
+`11e5c7c5f5a1ff3806870eed928117490ee8214a12adb261f7183e80cccc9d78`
+passed the base consumer and 348 installed lifecycle/publication controls in
+55.83 seconds, with one existing non-worker cancellation skip. The new module
+is byte-exact in reviewed source, wheel and installation. An older deep-JSON
+test was corrected to accept both supported closed rejection outcomes observed
+on Python 3.12 and 3.14; runtime behavior did not change. All seven maintenance
+checks remain current and skill mirrors match. Concrete destinations, a durable
+spool, verified-run composition and live publication remain separate gates.
