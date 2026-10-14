@@ -15,6 +15,9 @@ on:
       - "tests/execution/providers/test_hf_jobs_process_readback.py"
       - "tests/execution/providers/test_hf_pinned_model_snapshot.py"
       - "Trainers/runtime_profiles/**"
+      - "Trainers/image_profiles/smollm2_135m_packaged_grpo_candidate_v1/**"
+      - "examples/grpo_captured_candidate/**"
+      - "tests/training/test_grpo_captured_candidate.py"
       - "Trainers/image_profiles/qwen35_4b_conversation_sft_candidate_v1/**"
       - "tests/contract/test_data_conversation_sft_handoff_v1.py"
       - "tests/contract/test_environment_admission_v1.py"
@@ -776,8 +779,11 @@ jobs:
           import tuner.training.packaged_boundary as boundary
           import tuner.training.packaged_grpo_compilation as packaged_grpo
           import tuner.training.modal_retained_reader as retained_reader
+          import tuner.runtime_profiles as runtime_profiles
+          import tuner.training.modal_recipe as modal_recipe
+          import tuner.execution.providers.modal.runtime_build as runtime_build
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (inputs, compilation, preparation, recipe, generic, core, boundary, packaged_grpo, retained_reader):
+          for module in (inputs, compilation, preparation, recipe, generic, core, boundary, packaged_grpo, retained_reader, runtime_profiles, modal_recipe, runtime_build):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -787,6 +793,7 @@ jobs:
               "contract/test_grpo_training_input_v1.py",
               "contract/test_grpo_preparation_v1.py",
               "training/test_packaged_grpo_material.py",
+              "training/test_grpo_captured_candidate.py",
               "contract/test_public_training_input_v1.py",
               "contract/test_public_training_input_loader_v1.py",
           )
@@ -805,7 +812,22 @@ jobs:
                        "synaptic-grpo-config-v1.schema.json",
                        "synaptic-grpo-workload-v1.schema.json"):
               shutil.copy2(installed / "schemas" / name, schemas / name)
-          # Only tests and installed schema data enter the neutral root.
+          # Explicit host/source-owned candidate inputs, never production Python.
+          example = root / "examples" / "grpo_captured_candidate"
+          example.mkdir(parents=True)
+          for name in ("rows.jsonl", "preparation.json", "recipe.yaml", "README.md"):
+              shutil.copy2(checkout / "examples/grpo_captured_candidate" / name, example / name)
+          build = root / "host-inputs" / "grpo-build-profile.yaml"
+          build.parent.mkdir()
+          shutil.copy2(checkout / "Trainers/image_profiles/smollm2_135m_packaged_grpo_candidate_v1/profile.yaml", build)
+          os.environ["SYNAPTIC_TEST_GRPO_BUILD_PROFILE"] = str(build)
+          wheels = list((Path(os.environ["RUNNER_TEMP"]) / "sdist-wheelhouse").glob("synaptic_tuner-*.whl"))
+          assert len(wheels) == 1 and wheels[0].is_file(), wheels
+          os.environ["SYNAPTIC_TEST_GRPO_CANDIDATE_WHEEL"] = str(wheels[0])
+          assert os.environ["SYNAPTIC_TEST_GRPO_CANDIDATE_WHEEL"]
+          # Candidate runtime YAML/inventory stay installed; host build YAML
+          # is deliberately absent from the wheel. The test proves both.
+          # Only tests, caller inputs and installed schema data enter the root.
           import pytest
           sys.path.insert(0, str(root))
           os.chdir(root)
