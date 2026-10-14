@@ -1,0 +1,17 @@
+{
+  "schema_version": "synaptic-local-publication-host/v1",
+  "consumer": {
+    "path": "/ABSOLUTE/RETAINED/consumer.json",
+    "sha256": "REPLACE_WITH_EXACT_SHA256",
+    "size_bytes": 1
+  },
+  "run": {"run_id": "REPLACE_WITH_ORIGINAL_RUN", "project_ref": "REPLACE_WITH_ORIGINAL_PROJECT"},
+  "root": "/ABSOLUTE/PRIVATE/FRESH/PUBLICATION",
+  "destination_ref": "local/native",
+  "authority_ref": "host-publication",
+  "key_ref": "host-publication-key",
+  "secret": {"provider": "env", "name": "PUBLICATION_KEY"},
+  "maximum_artifact_bytes": 268435456,
+  "maximum_total_bytes": 1073741824,
+  "seconds": 300
+}
