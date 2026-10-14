@@ -425,7 +425,7 @@ and `hf_raw_text_fixture` when preparing the ordinary HF SFT consumer. The
 fixture ingests eight complete synthetic Question/Answer bodies and publishes
 `syntunia-sft-row/v1` through the existing service, with six training and two
 validation rows. This supported raw-text lane applies full-token loss; it does
-not relabel messages/v2 data or promise prompt-only masking.
+not relabel messages/v2 data or apply completion-only loss.
 
 `python examples/training_qualification/prepare_hf.py declare <config.json>`
 exclusively writes a credential-free runtime declaration from the selected
@@ -439,7 +439,8 @@ uses genuine clean host/Gitlink inspection, bounded public Git verification and
 an explicitly named local source-authentication key distinct from both HF token
 references. Each Git read is bounded to 30 seconds, source evidence freshness
 to 600 seconds, and prepared bytes to 2 MiB. Supply real bucket, quote, scope,
-source and named-key inputs; placeholders refuse. Only actual parsed/rederived
+source and named-key inputs; unfilled example values refuse. Preview does not
+verify bucket existence or current pricing. Only actual parsed/rederived
 material and successful consumer validation/HF preview publish consumer.json.
 Full public preflight remains deferred to warm composition. No Job, bucket,
 model download, image/GPU qualification or capability promotion occurs here.
