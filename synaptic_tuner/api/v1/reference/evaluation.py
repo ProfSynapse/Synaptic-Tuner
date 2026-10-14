@@ -296,9 +296,12 @@ class LocalHttpEvaluatorBackendV1:
     Every connection value is passed by the host; nothing is read from the
     process environment. An optional API key is a ``SecretRef`` resolved
     through the host's ``SecretResolverPort`` at ``open`` time only.
+    Request and decompressed response bodies default to 1 MiB each; the host
+    may configure finite limits through 64 MiB. Token limits are independent.
+    HTTP timeouts bound transport inactivity, not total run duration.
     """
 
-    __slots__ = ("_backend", "_host", "_port", "_scheme", "_api_key", "_secrets", "_timeout", "_retries")
+    __slots__ = ("_backend", "_host", "_port", "_scheme", "_api_key", "_secrets", "_timeout", "_retries", "_max_request_bytes", "_max_response_bytes")
 
     def __init__(
         self,
@@ -311,7 +314,12 @@ class LocalHttpEvaluatorBackendV1:
         secrets: SecretResolverPort | None = None,
         timeout: float = 60.0,
         retries: int = 2,
+        max_request_bytes: int = 1 << 20,
+        max_response_bytes: int = 1 << 20,
     ) -> None:
+        for name, bound in (("request", max_request_bytes), ("response", max_response_bytes)):
+            if type(bound) is not int or not 1 <= bound <= 64 * 1024 * 1024:
+                raise ValueError(f"HTTP {name} bound must be a positive exact integer through 64 MiB")
         if backend not in LOCAL_HTTP_BACKENDS:
             raise ValueError("backend must be one of the local HTTP backends")
         if type(host) is not str or not host or type(port) is not int or not 0 < port < 65536:
@@ -332,6 +340,8 @@ class LocalHttpEvaluatorBackendV1:
         self._secrets = secrets
         self._timeout = float(timeout)
         self._retries = int(retries)
+        self._max_request_bytes = max_request_bytes
+        self._max_response_bytes = max_response_bytes
 
     def requirement(self) -> AuthorizationRequirement:
         return AuthorizationRequirement(EVALUATION_START_OPERATION, False)
@@ -351,7 +361,9 @@ class LocalHttpEvaluatorBackendV1:
             model=model.model_ref, scheme=self._scheme, api_key=api_key,
             host=self._host, port=self._port,
         )
-        return _LocalComparisonClient(create_client(self._backend, settings, timeout=self._timeout, retries=self._retries),
+        return _LocalComparisonClient(create_client(self._backend, settings, timeout=self._timeout, retries=self._retries,
+                                                   max_request_bytes=self._max_request_bytes,
+                                                   max_response_bytes=self._max_response_bytes),
                                       self._backend, settings)
 
 
