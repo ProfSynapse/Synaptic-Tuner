@@ -921,3 +921,16 @@ downloads. Real shared-consumer grants also refuse missing current permission;
 unknown submissions, wrong keys and changed provider bindings remain closed.
 SDK/image/ML boundaries are explicit doubles: no live stop/quiescence, GPU,
 model quality, image qualification or universal recovery claim is made.
+
+### Ordinary public HF staging diagnostics
+
+The host-owned training qualification consumer batches exact source/input
+readback with the pinned SDK while preserving every member hash, private FD
+custody and the single original staging deadline. Use its existing `show`
+command on a retained staging-uncertain attempt for authenticated local phase
+and closed diagnostic class. Original authority keys and workflow/Foundation
+records are required; no provider client, source reconstruction or new grant is
+created. Missing diagnostics cannot establish a cause or no effects. Keep the
+consumed attempt and its upload namespace, never replay it, and distinguish a
+fresh reviewed admission from receipt recovery. This does not qualify a live
+model/job or increase the approved job budget.

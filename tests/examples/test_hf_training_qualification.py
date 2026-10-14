@@ -439,6 +439,7 @@ def test_shared_launch_real_host_ports_and_cold_known_native_five(
         retained, "verify", adapter=adapter, adapter_options=options
     )
     assert verified["verified"] is True
+    assert shared.known(retained, "show", adapter=adapter, adapter_options=options)["state"] == "succeeded"
     assert set(verified) == {"run", "verified", "checked_at"}
     assert json.loads(json.dumps(verified, allow_nan=False)) == verified
     destination = tmp_path / "downloads"
@@ -455,3 +456,41 @@ def test_shared_launch_real_host_ports_and_cold_known_native_five(
         hashlib.sha256(raw).hexdigest() for _, raw in values.values()
     }
     assert len([item for item in material.provider.calls if item[0] == "submit"]) == 1
+
+
+def test_shared_show_authenticates_stage_failure_without_sdk_or_source(configured, tmp_path, monkeypatch):
+    import os
+    from synaptic_tuner.api.v1.secrets import SecretRef
+
+    config, material = configured
+    path = Path(os.environ.get("SYNAPTIC_TEST_TRAINING_QUALIFICATION_LAUNCH",
+        str(ROOT / "examples/training_qualification/launch.py")))
+    spec = importlib.util.spec_from_file_location("qualification_stage_launch", path)
+    shared = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(shared)
+    config["state_root"] = str(tmp_path / "stage-attempt")
+    config["host"].update(grant_ref="fixture-stage-grant", allowed_requirements=[{
+        "operation": "training.start", "paid_effect": True,
+        "maximum_cost_minor_units": 100, "currency": "USD"}])
+    for name in ("AUTHORITY", "READER", "HOST_TOKEN", "JOB_TOKEN"):
+        monkeypatch.setenv(name, Secrets().resolve(SecretRef("env", name)))
+    def failure(*args, **kwargs):
+        raise RuntimeError("secret-provider-message")
+    material.provider.batch_bucket_files = failure
+    shared.launch(config, adapter=adapter, adapter_options={"sdk": sdk, "api": material.provider})
+    retained = shared.load_config(Path(config["state_root"]) / "config.json")
+    before = list(material.provider.calls)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("local show constructed provider/source authority")
+    monkeypatch.setattr(adapter, "_preparation", forbidden)
+    monkeypatch.setattr(sdk, "HfApi", forbidden)
+    shown = shared.known(retained, "show", adapter=adapter)
+    assert shown["local_workflow_phase"] == "stage_reconcile_required"
+    assert shown["local_stage_diagnostic"]["phase"] == "upload"
+    assert shown["local_stage_diagnostic"]["failure_class"] == "sdk"
+    assert shown["replay_authorized"] is shown["provider_evidence"] is False
+    assert material.provider.calls == before
+    monkeypatch.setenv("AUTHORITY", "different-original-key" * 4)
+    with pytest.raises(Exception):
+        shared.known(retained, "show", adapter=adapter)
+    assert material.provider.calls == before

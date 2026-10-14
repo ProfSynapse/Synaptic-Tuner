@@ -336,6 +336,10 @@ def known(
         if ports is not None
         else host_ports(config, root, create=False)
     ) as current:
+        if action == "show" and hasattr(adapter, "local_show"):
+            local = adapter.local_show(config, ports=current)
+            if local is not None:
+                return local
         with adapter.open_host(
             config,
             state_root=root,

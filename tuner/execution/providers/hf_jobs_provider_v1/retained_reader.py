@@ -884,3 +884,92 @@ def open_retained_hf_lifecycle(
         reader_key=reader_key, deadline_seconds=deadline_seconds,
         lifecycle_ports=ports,
         allow_current_cancel_authorization=allow_current_cancel_authorization)
+
+
+def read_local_stage_diagnostic(*, records, streams, run, authority):
+    """Authenticated local staging failure only; no known-job or replay authority."""
+    from synaptic_tuner.api.v1.reference.repositories import (
+        DurableWorkflowStoreV1, DurablePlanningStoreV1, DurableEffectRepositoryV1,
+    )
+    from synaptic_tuner.api.v1.reference.authority import UnavailableRecoveryVerifierV1
+    from tuner.execution.coordinator_v1.model import (
+        WorkflowPhaseV1, AuthenticatedFoundationRecordAssessmentV1,
+    )
+    from tuner.execution.coordinator_v1.state_machine import _derive_foundation
+    from tuner.execution.foundation_v2.commands import parse_exact_command
+
+    # This untrusted head selects a reader only. Every admitted stage result
+    # below replays authenticated history; ordinary runs retain their full reader.
+    head = records.read(partition="workflow", key=DurableWorkflowStoreV1._head_key(run))
+    if head is None or len(head.canonical) > _MAX_RECORD:
+        raise HFJobsError("binding_mismatch")
+    routing = json.loads(head.canonical)
+    if routing.get("record", {}).get("phase") != "stage_reconcile_required":
+        return None
+    workflows = DurableWorkflowStoreV1(records, streams,
+        foundation_authenticator=authority.foundation_authenticator,
+        assessment_authenticator=authority.assessment_authority,
+        observation_authenticator=None, artifact_verifier=None)
+    workflow = workflows.get(run)
+    if workflow is None:
+        raise HFJobsError("binding_mismatch")
+    if workflow.phase is not WorkflowPhaseV1.STAGE_RECONCILE_REQUIRED:
+        return None
+    if workflow.stage is None or workflow.submit is not None or workflow.provider_run_ref is not None:
+        raise HFJobsError("binding_mismatch")
+    plans = DurablePlanningStoreV1(records)
+    plan = plans.get_plan(workflow.plan_fingerprint)
+    context = plans.get_context(workflow.provider_context_digest)
+    if plan is None or context is None or context.provider != workflow.provider:
+        raise HFJobsError("binding_mismatch")
+    material_digest = plan.basis.resolved_config_digest
+    key = "hf-jobs/" + material_digest + "/"
+    record = records.read(partition="effects", key=key + "read-material/" + material_digest)
+    if record is None:
+        raise HFJobsError("binding_mismatch")
+    captured = _parse_capture(record.canonical)
+    selection = captured["material"]["selection"]
+    if (captured["material_digest"] != material_digest
+            or captured["workload"].fingerprint != plan.basis.workload_digest
+            or captured["source_digest"] != plan.basis.source_digest
+            or context.profile_digest != _sha(document_bytes(selection))
+            or context.provider != ProviderRef(**selection["provider"])
+            or context.descriptor_digest != captured["descriptor"].descriptor_digest
+            or workflow.provider_descriptor_digest != context.descriptor_digest):
+        raise HFJobsError("binding_mismatch")
+    stage = workflow.stage
+    command = parse_exact_command(stage.canonical_command_bytes)
+    claim = records.read(partition="effects", key=key + "claim/stage")
+    expected_claim = document_bytes({"schema_version": "synaptic-hf-attempt/v1",
+        "material_digest": material_digest, "command_digest": command.digest, "kind": "stage"})
+    if claim is None or claim.canonical != expected_claim:
+        raise HFJobsError("binding_mismatch")
+    recovery = UnavailableRecoveryVerifierV1()
+    repository = DurableEffectRepositoryV1(records,
+        receipt_authority=authority.receipt_authority,
+        invalid_evidence_authority=authority.invalid_evidence_authority,
+        recovery_verifier=recovery, finality_verifier=recovery,
+        grant_authority=authority.grant_authority)
+    assessment = AuthenticatedFoundationRecordAssessmentV1.parse(
+        stage.foundation_bindings[-1].canonical_assessment_bytes)
+    _derive_foundation(stage, repository.get(stage.effect_id), assessment,
+        authority.foundation_authenticator, authority.assessment_authority, None)
+    record = records.read(partition="effects", key=key + "stage-diagnostic/" + command.digest)
+    diagnostic = None
+    if record is not None:
+        if len(record.canonical) > 1024:
+            raise HFJobsError("binding_mismatch")
+        diagnostic = json.loads(record.canonical)
+        if document_bytes(diagnostic) != record.canonical:
+            raise HFJobsError("binding_mismatch")
+        if (type(diagnostic) is not dict
+                or set(diagnostic) != {"command_digest", "material_digest", "phase", "failure_class"}
+                or diagnostic["command_digest"] != command.digest
+                or diagnostic["material_digest"] != material_digest
+                or diagnostic["phase"] not in {"empty_slots", "input_custody", "upload",
+                    "readback_inventory", "readback_bytes", "receipt"}
+                or diagnostic["failure_class"] not in {"deadline", "sdk", "binding", "local"}):
+            raise HFJobsError("binding_mismatch")
+    return {"run": run.to_dict(), "state": "reconcile_required",
+        "local_workflow_phase": workflow.phase.value, "local_stage_diagnostic": diagnostic,
+        "provider_evidence": False, "replay_authorized": False}

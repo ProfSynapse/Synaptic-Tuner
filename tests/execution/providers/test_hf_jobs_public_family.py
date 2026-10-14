@@ -7,6 +7,7 @@ from dataclasses import replace
 import hashlib
 import io
 import json
+import stat
 import time
 from importlib.resources import files
 from pathlib import Path, PurePosixPath
@@ -685,3 +686,184 @@ def test_transport_uses_only_preparation_captured_bootstrap(material, monkeypatc
     plan = api.training.plan(api.training.resolve(request), material.preparation.selection.provider)
     api.training.start(plan, api.training.preflight(plan))
     assert len([call for call in material.provider.calls if call[0] == "submit"]) == 1
+
+
+def test_staged_readback_batches_all_members_with_exact_hashes(material):
+    provider = material.provider
+    members = []
+    count = len(material.preparation.source_files) + 1
+    for index in range(count):
+        raw = (b"payload" * index) if index else b""
+        path = f"fixture/member-{index}"
+        provider.blobs[path] = raw
+        members.append((BucketFile(type="file", path=path, size=len(raw),
+                                  xetHash=hashlib.sha256(raw).hexdigest()), raw))
+    calls = []
+    original = provider.download_bucket_files
+    def download(bucket, files, **kwargs):
+        calls.append(len(files))
+        assert len({str(leaf.parent) for _, leaf in files}) == count
+        assert all(stat.S_IMODE(leaf.parent.stat().st_mode) == 0o700 for _, leaf in files)
+        original(bucket, files, **kwargs)
+    provider.download_bucket_files = download
+    transport = HFJobsTransport(preparation=material.preparation, sdk=sdk, api=provider,
+        records=InMemoryDurableRecordStoreV1(), secrets=Secrets(), scratch_root=material.scratch)
+    transport._verify_staged_batch(members, "fixture-token", time.monotonic() + 10)
+    assert calls == [count]
+    assert not list(material.scratch.glob("hf-read-*"))
+
+
+@pytest.mark.parametrize("changed", ["bytes", "symlink", "extra"])
+def test_staged_batch_rejects_invalid_member_without_receipt(material, changed):
+    provider = material.provider
+    raw = b"original"
+    item = BucketFile(type="file", path="fixture/content", size=len(raw), xetHash="a" * 64)
+    provider.blobs[item.path] = raw
+    original = provider.download_bucket_files
+    def download(bucket, files, **kwargs):
+        original(bucket, files, **kwargs)
+        leaf = files[0][1]
+        if changed == "bytes":
+            leaf.write_bytes(b"replaced")
+        elif changed == "symlink":
+            leaf.unlink()
+            leaf.symlink_to(material.scratch / "untrusted")
+        else:
+            (leaf.parent / "extra").write_bytes(b"extra")
+    provider.download_bucket_files = download
+    transport = HFJobsTransport(preparation=material.preparation, sdk=sdk, api=provider,
+        records=InMemoryDurableRecordStoreV1(), secrets=Secrets(), scratch_root=material.scratch)
+    with pytest.raises((HFJobsError, OSError)):
+        transport._verify_staged_batch([(item, raw)], "fixture-token", time.monotonic() + 10)
+
+
+@pytest.mark.parametrize("failure", ["sdk", "binding", "deadline"])
+def test_stage_failure_retains_closed_bound_diagnostic_and_never_submits(material, failure, monkeypatch):
+    from synaptic_tuner.api.v1.training_facade import TrainingRequest
+    from tuner.execution.providers.hf_jobs_provider_v1 import transport as module
+
+    original = material.provider.download_bucket_files
+    def download(bucket, files, **kwargs):
+        if failure == "sdk":
+            raise RuntimeError("credential-secret-must-not-appear")
+        original(bucket, files, **kwargs)
+        files[0][1].write_bytes(b"replaced")
+    material.provider.download_bucket_files = download
+    if failure == "deadline":
+        original_bounded = module._bounded
+        def bounded(operation, deadline):
+            if getattr(operation, "__name__", "") == "<lambda>" and len(material.provider.blobs):
+                raise HFJobsError("deadline_exceeded")
+            return original_bounded(operation, deadline)
+        monkeypatch.setattr(module, "_bounded", bounded)
+    api, composition, ports = _host(material)
+    request = TrainingRequest("fixture-request", "fixture-project", '{}')
+    plan = api.training.plan(api.training.resolve(request), material.preparation.selection.provider)
+    preflight = api.training.preflight(plan)
+    api.training.start(plan, preflight)
+    rows = ports.records.list_page(partition="effects", prefix="", after_key=None, limit=100).records
+    diagnostics = [json.loads(row.canonical) for row in rows if "/stage-diagnostic/" in row.key]
+    assert len(diagnostics) == 1
+    diagnostic = diagnostics[0]
+    assert diagnostic["phase"] in {"upload", "readback_bytes"}
+    assert diagnostic["failure_class"] in {"sdk", "binding", "local", "deadline"}
+    assert diagnostic["material_digest"] == material.preparation.material_digest
+    assert "credential-secret" not in json.dumps(diagnostic)
+    assert not [call for call in material.provider.calls if call[0] == "submit"]
+
+
+def test_cold_local_stage_diagnostic_authenticates_without_provider_or_source(material):
+    from synaptic_tuner.api.v1.training_facade import TrainingRequest
+    from tuner.execution.providers.hf_jobs_provider_v1.retained_reader import read_local_stage_diagnostic
+
+    def failed(*args, **kwargs):
+        raise RuntimeError("private-provider-text")
+    material.provider.batch_bucket_files = failed
+    api, _, ports = _host(material)
+    request = TrainingRequest("fixture-request", "fixture-project", '{}')
+    plan = api.training.plan(api.training.resolve(request), material.preparation.selection.provider)
+    preflight = api.training.preflight(plan)
+    started = api.training.start(plan, preflight)
+    before = list(material.provider.calls)
+    authority = compose_reference_authority(clock=ports.clock, secrets=ports.secrets,
+        authority_secret=SecretRef("env", "AUTHORITY"))
+    outcome = read_local_stage_diagnostic(records=ports.records, streams=ports.streams,
+        run=started.run, authority=authority)
+    assert outcome["local_workflow_phase"] == "stage_reconcile_required"
+    assert outcome["local_stage_diagnostic"]["phase"] == "upload"
+    assert outcome["local_stage_diagnostic"]["failure_class"] == "sdk"
+    assert outcome["provider_evidence"] is outcome["replay_authorized"] is False
+    assert material.provider.calls == before
+    class LegacyRecords:
+        def read(self, **kwargs):
+            return None if "/stage-diagnostic/" in kwargs["key"] else ports.records.read(**kwargs)
+        def __getattr__(self, name):
+            return getattr(ports.records, name)
+    legacy = read_local_stage_diagnostic(records=LegacyRecords(), streams=ports.streams,
+        run=started.run, authority=authority)
+    assert legacy["local_stage_diagnostic"] is None
+    assert legacy["replay_authorized"] is legacy["provider_evidence"] is False
+    row = next(row for row in ports.records.list_page(
+        partition="effects", prefix="", after_key=None, limit=100).records
+        if "/stage-diagnostic/" in row.key)
+    original = row.canonical
+    for invalid in (b" " + original, original[:-1] + b',"phase":"upload"}'):
+        assert ports.records.compare_and_swap(partition="effects", key=row.key,
+            expected_revision=row.revision, canonical=invalid)
+        with pytest.raises(HFJobsError, match="binding_mismatch"):
+            read_local_stage_diagnostic(records=ports.records, streams=ports.streams,
+                run=started.run, authority=authority)
+        row = ports.records.read(partition="effects", key=row.key)
+    assert material.provider.calls == before
+
+
+def test_batch_budget_rejects_before_allocation_or_sdk(material, monkeypatch):
+    from tuner.execution.providers.hf_jobs_provider_v1 import transport as module
+    monkeypatch.setattr(module, "_MAX_DOWNLOAD_BYTES", 1)
+    transport = HFJobsTransport(preparation=material.preparation, sdk=sdk, api=material.provider,
+        records=InMemoryDurableRecordStoreV1(), secrets=Secrets(), scratch_root=material.scratch)
+    item = BucketFile(type="file", path="fixture/content", size=2, xetHash="a" * 64)
+    with pytest.raises(HFJobsError, match="input_invalid"):
+        transport._verify_staged_batch([(item, b"ab")], "fixture-token", time.monotonic() + 10)
+    assert not list(material.scratch.glob("hf-read-*"))
+    assert material.provider.calls == []
+
+
+def test_batch_cleanup_attempts_all_fds_preserving_deadline(material, monkeypatch):
+    from tuner.execution.providers.hf_jobs_provider_v1 import transport as module
+    transport = HFJobsTransport(preparation=material.preparation, sdk=sdk, api=material.provider,
+        records=InMemoryDurableRecordStoreV1(), secrets=Secrets(), scratch_root=material.scratch)
+    members = [(BucketFile(type="file", path=f"fixture/{i}", size=1, xetHash="a" * 64), b"x")
+               for i in range(3)]
+    monkeypatch.setattr(module, "_bounded", lambda *_: (_ for _ in ()).throw(HFJobsError("deadline_exceeded")))
+    closes = []
+    original = module.os.close
+    def close(fd):
+        original(fd)
+        closes.append(fd)
+        if len(closes) == 1:
+            raise OSError("private-close-text")
+    monkeypatch.setattr(module.os, "close", close)
+    with pytest.raises(HFJobsError, match="deadline_exceeded"):
+        transport._verify_staged_batch(members, "fixture-token", time.monotonic() + 10)
+    assert len(closes) == 3
+    assert len(list(material.scratch.glob("hf-read-*"))) == 3
+
+
+def test_verified_spool_attempts_parent_close_after_leaf_close_fault(material, monkeypatch):
+    from tuner.execution.providers.hf_jobs_provider_v1 import transport as module
+    material.provider.blobs["fixture/content"] = b"x"
+    item = BucketFile(type="file", path="fixture/content", size=1, xetHash="a" * 64)
+    transport = HFJobsTransport(preparation=material.preparation, sdk=sdk, api=material.provider,
+        records=InMemoryDurableRecordStoreV1(), secrets=Secrets(), scratch_root=material.scratch)
+    original = module.os.close
+    closes = []
+    def close(fd):
+        original(fd)
+        closes.append(fd)
+        if len(closes) == 1:
+            raise OSError("private-close-error")
+    with pytest.raises(HFJobsError, match="artifact_invalid"):
+        with transport._spool(item, 1, "fixture-token", time.monotonic() + 10):
+            monkeypatch.setattr(module.os, "close", close)
+    assert len(closes) == 2
