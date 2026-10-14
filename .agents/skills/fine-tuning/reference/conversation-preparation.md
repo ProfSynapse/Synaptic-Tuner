@@ -197,3 +197,16 @@ source/wheel/image commitments and bounded live qualification remain separate.
 The shared copier can also select existing GRPO prompt verifier/source custody;
 normal Modal GRPO recipes, planning and start remain closed until their packaged
 compiler and execution integration are accepted.
+
+
+### Installed Modal source prerequisite
+
+The current build planner derives its engine root from the imported
+`runtime_build` module and requires an accepted Git `HEAD`. An ordinary wheel
+installed into site-packages has no engine Git checkout. The installed CPU
+planning/runner fixtures therefore supply one explicitly synthetic source
+observation; all unrelated subprocess calls remain unchanged. This is not proof
+that wheel-only Modal planning or launch works. A usable explicit accepted source
+location/build-material path for a clean installed host remains a separate
+release integration gate. Retained run reads do not replan the current recipe
+and are a different surface.
