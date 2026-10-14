@@ -141,6 +141,24 @@ def _inventory_names(descriptor):
     return names
 
 
+def verify_grpo_publication_bytes(path, manifest_raw, raw, *, require_content_addressed_name=True):
+    """Pure exact-byte inspection; this does not admit private filesystem custody."""
+    if (type(path) is not type(Path()) or type(manifest_raw) is not bytes
+            or not 0 < len(manifest_raw) <= 4096):
+        raise ValueError("GRPO publication manifest bound is invalid")
+    manifest = json.loads(manifest_raw, object_pairs_hook=_pairs, parse_constant=_invalid_constant)
+    if type(manifest) is not dict or set(manifest) != {
+        "schema_version", "format", "prompt_column", "content_digest", "size_bytes", "row_count", "semantic_digest"}:
+        raise ValueError("GRPO publication manifest fields differ")
+    column = _text(manifest["prompt_column"], "prompt_column", maximum_bytes=128)
+    expected = _manifest(raw, column)
+    if manifest != expected or manifest_raw != canonical_json_bytes(expected):
+        raise ValueError("GRPO publication commitments differ")
+    if require_content_addressed_name and path.name != "dataset-" + expected["semantic_digest"]:
+        raise ValueError("GRPO publication name differs")
+    return manifest
+
+
 def snapshot_grpo_publication(path):
     _private(path)
     root = storage._OutputRootAuthority(path)
@@ -149,17 +167,8 @@ def snapshot_grpo_publication(path):
         if _inventory_names(root.descriptor) != {"manifest.json", "dataset.jsonl"}:
             raise ValueError("GRPO publication inventory differs")
         manifest_raw = _read_relative(root, "manifest.json", 4096)
-        manifest = json.loads(manifest_raw, object_pairs_hook=_pairs, parse_constant=_invalid_constant)
-        if type(manifest) is not dict or set(manifest) != {
-            "schema_version", "format", "prompt_column", "content_digest", "size_bytes", "row_count", "semantic_digest"}:
-            raise ValueError("GRPO publication manifest fields differ")
-        column = _text(manifest["prompt_column"], "prompt_column", maximum_bytes=128)
         raw = _read_relative(root, "dataset.jsonl", _MAX_BYTES)
-        expected = _manifest(raw, column)
-        if manifest != expected or manifest_raw != canonical_json_bytes(expected):
-            raise ValueError("GRPO publication commitments differ")
-        if path.name != "dataset-" + expected["semantic_digest"]:
-            raise ValueError("GRPO publication name differs")
+        manifest = verify_grpo_publication_bytes(path, manifest_raw, raw)
         if _inventory_names(root.descriptor) != {"manifest.json", "dataset.jsonl"}:
             raise ValueError("GRPO publication inventory changed")
         root.verify()

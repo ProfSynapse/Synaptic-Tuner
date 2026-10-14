@@ -1,4 +1,4 @@
-# Immutable conversation preparation and CPU SFT support (Stages 1–2)
+# Immutable conversation preparation and CPU SFT host support
 
 The reusable host preparation extension accepts caller-declared text conversation
 rows and publishes `synaptic-conversation-sft-row/v1` with a canonical manifest.
@@ -72,8 +72,8 @@ masquerading as the old v2 format reject.
 
 A CPU parser/native-artifact fixture proves contract behavior, not GPU training,
 model quality, image qualification or provider reliability. Existing release
-allowlists remain unchanged and reject this format. A future additive candidate
-selection needs separate review; do not bypass or edit a historical selection.
+allowlists remain unchanged and reject this format. The additive unqualified
+candidate below is explicit; do not bypass or edit a historical selection.
 The native prepared-path verifier retains its 2 MiB limit for old v1/v2 and the
 new conversation format; preparation's larger publication bound is not execution
 support.
@@ -146,6 +146,67 @@ It does not coerce structured tool calls or `content: null` into text. Its
 provider/release metadata and Git observation are explicitly synthetic planning
 fixtures, not deployment observations, source admission or build capture.
 Actual image construction, CPU/GPU qualification and training remain separate.
-This handoff supports Python API resolve/plan only: the ordinary Modal recipe
-CLI remains bound to its existing v2 messages path. No model-quality, live
-training or new provider capability claim follows from this planning selection.
+The normal Modal recipe/runner now also accepts explicit conversation SFT
+publication format through the selected named candidate. This extends host-side
+format consumption, not the historical release allowlist or live qualification.
+No model-quality or live training claim follows from this selection.
+
+
+## Normal Modal recipe and immutable private copy
+
+Use the existing `train --job-config <recipe.yaml> --plan --json` path; no new
+provider verb is required. The caller-owned SFT recipe selects its exact named
+runtime profile under `job.runtime_profile` and declares:
+
+```yaml
+dataset:
+  local_file: .tracking/datasets/dataset-<verified-digest>/dataset.jsonl
+  schema_version: synaptic-conversation-sft-row/v1
+  format: messages
+  use_preassigned_splits: true
+  split_dataset: false
+  expected_digest: <verified-digest>
+  expected_split_counts:
+    train: <actual-train-count>
+    validation: <actual-validation-count>
+training:
+  require_memory_efficient_loss: true
+```
+
+This is the dataset section of a complete existing Modal SFT recipe, not a full
+recipe or an approval. Preserve its explicit model/revision, hyperparameters,
+resource limits and other required controls. The named build profile must declare
+compatibility with that exact model, method and conversation format. A v2-only
+build cannot satisfy this selection. The existing `qwen35-conversation-sft-candidate-v1`
+profile remains unqualified; its build profile is host-owned, while its runtime
+and compatibility declarations are installed resources.
+
+The normal runner inspects exact bounded manifest and JSONL bytes through retained
+directory descriptors, including nonprivate mounted source publications. It
+makes one exclusive copy into an owner-only native Linux preparation root and
+uses the actual conversation verifier/source ports. Private publication guards
+remain unchanged. Public prepare/resolve/start receives the original immutable
+identity and bytes; rows are not relabeled as v2 or regenerated. The native
+conversation input bound remains 2 MiB. Wrong formats, hashes, profiles, unsafe
+members and copy collisions reject.
+
+CPU tests exercise the joined normal runner with scripted provider/runtime state
+and existing generic host stores, plus source deletion after copying. They do not
+prove image construction, GPU training, model fit or remote reliability. Final
+source/wheel/image commitments and bounded live qualification remain separate.
+The shared copier can also select existing GRPO prompt verifier/source custody;
+normal Modal GRPO recipes, planning and start remain closed until their packaged
+compiler and execution integration are accepted.
+
+
+### Installed Modal source prerequisite
+
+The current build planner derives its engine root from the imported
+`runtime_build` module and requires an accepted Git `HEAD`. An ordinary wheel
+installed into site-packages has no engine Git checkout. The installed CPU
+planning/runner fixtures therefore supply one explicitly synthetic source
+observation; all unrelated subprocess calls remain unchanged. This is not proof
+that wheel-only Modal planning or launch works. A usable explicit accepted source
+location/build-material path for a clean installed host remains a separate
+release integration gate. Retained run reads do not replan the current recipe
+and are a different surface.

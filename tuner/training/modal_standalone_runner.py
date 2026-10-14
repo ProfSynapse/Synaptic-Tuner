@@ -39,11 +39,8 @@ from tuner.runtime.releases import PackagedExecutionBindingV1
 from tuner.runtime_profiles import load_runtime_profile
 from tuner.training.contracts import CanonicalDocument, ResolvedTrainingComponents, ResourceSpec, RuntimeSpec
 from tuner.training.input_preparation import (
-    PUBLISHED_PREPARED_DATASET_NORMALIZER_V1,
     PosixPrivatePreparedRootAuthorityV1,
-    PublishedPreparedDatasetNormalizerConfigV1,
-    PublishedPreparedDatasetNormalizerV1,
-    TrainingInputPreparationServiceV1, default_dataset_format_verifiers_v1,
+    TrainingInputPreparationServiceV1,
 )
 from tuner.training.modal_host_authority import HMACAuthenticator, UTCClock
 from tuner.training.modal_host_composition import compose_modal_packaged_reference_host, compose_modal_metrics_qualification_host
@@ -57,7 +54,7 @@ from tuner.training.run_progress_consumer import start_progress_consumer
 from tuner.training.modal_host_reader import ModalPackagedReadUnavailable
 from tuner.training.modal_host_requests import ModalPackagedResolutionUnavailable
 from tuner.training.modal_host_effects import ModalPackagedHostEffectsV1
-from tuner.training.modal_host_prepared_copy import stage_published_modal_dataset
+from tuner.training.modal_host_prepared_copy import stage_published_modal_dataset, modal_copied_preparation_ports
 from tuner.training.modal_host_qualification import (
     ModalHostCPUQualificationV1, ModalHostQualificationUnavailable,
     qualify_modal_runtime_for_host,
@@ -267,6 +264,7 @@ def prepare_modal_standalone_local(*, plan, context):
     )
     profile_path, intent = resolve_modal_sft_build(
         admitted, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision,
+        prepared_format=plan.recipe.prepared_format,
     )
     if (admitted.profile_sha256 != plan.profile_sha256 or admitted.image != plan.profile_base_image
             or intent["intent_digest"] != plan.runtime_material_intent_digest):
@@ -338,6 +336,7 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1,
     )
     profile_path, build_intent = resolve_modal_sft_build(
         admitted, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision,
+        prepared_format=plan.recipe.prepared_format,
     )
     if (admitted.profile_sha256 != plan.profile_sha256
             or admitted.image != plan.profile_base_image
@@ -493,21 +492,23 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             source.absolute(), private_root=prepared_root,
             expected_dataset_digest=plan.prepared_identity.revision,
             expected_content_digest=plan.prepared_identity.content_digest,
+            prepared_format=plan.prepared_identity.format,
         )
         validate_retention_root(prepared_root)
-        normalizer = PublishedPreparedDatasetNormalizerV1(authorized_root=prepared_root)
+        normalizer, normalizer_config, verifier = modal_copied_preparation_ports(
+            private_root=prepared_root, identity=plan.prepared_identity,
+            train_rows=recipe.train_rows, validation_rows=recipe.validation_rows,
+        )
         preparation = TrainingInputPreparationServiceV1(
             prepared_root=prepared_root,
-            normalizers={PUBLISHED_PREPARED_DATASET_NORMALIZER_V1: normalizer},
-            format_verifiers=default_dataset_format_verifiers_v1(),
+            normalizers={normalizer_config.normalizer_ref: normalizer},
+            format_verifiers={verifier.format: verifier},
             root_authority=PosixPrivatePreparedRootAuthorityV1(),
         )
         configuration = TrainingPreparationConfigV1(
             "request-" + run_id, project_ref,
             recipe.training_input(plan.prepared_identity.ref).canonical_json(),
-            PublishedPreparedDatasetNormalizerConfigV1(
-                recipe.dataset_digest, recipe.train_rows, recipe.validation_rows,
-            ),
+            normalizer_config,
         )
         source_port = LocalTrainingInputPathV1(copied)
         prepared = preparation.prepare(source_port, configuration)

@@ -764,8 +764,9 @@ excluded from both wheels to avoid a circular hash. A fresh base-only consumer
 also passed. Synthetic provider/release and Git observations are explicit CPU
 planning fixtures; they are not source admission, image capture or deployment
 evidence. Existing profiles remain unchanged. Candidate image qualification
-and training remain open, and the ordinary Modal recipe CLI retains its
-existing v2 path. This is a Python API planning handoff.
+and training remain open. The later normal Modal host integration described
+below also admits the conversation format; this handoff itself covers Python
+API planning.
 
 ### Installed public GRPO compilation and preparation
 
@@ -816,3 +817,29 @@ lacks the required `fcntl` constants. The affected child/worker modules passed
 196 cases with one skip under an isolated system Python 3.14 environment that
 provides them. No runtime fallback or substituted constants were introduced.
 GitHub's supported Python 3.12 CI remains required before merge.
+
+### Normal Modal conversation preparation
+
+The existing Modal SFT recipe and host now select either the historical v2 or
+conversation format explicitly, pass that selection through named runtime/build
+compatibility checks, and retain the original immutable dataset bytes. One
+private-copy path selects the existing format verifier; it also supports GRPO
+prompt custody without enabling GRPO planning or execution. Historical profiles
+remain unchanged and reject the conversation format.
+
+Source-archive-built wheel
+`671022228f663a4b2dce24903e41018ffc7377149f66a57d392c924af6cebae1`
+passed a fresh base-only consumer and 113 installed host tests. The joined
+conversation case reaches the actual normal runner and public preparation,
+resolve and start with scripted provider replies. Existing v2 CLI, retained
+readback, process restart and cancellation controls remain covered. Four changed
+production modules and two installed candidate assets match the reviewed source
+byte for byte. Existing runtime inventories and pins are unchanged.
+
+The candidate remains unqualified. Git/source and provider observations in these
+CPU tests are explicit fixtures, not live source admission, image capture or
+training evidence. The current build planner derives its source root from its
+module location and requires Git HEAD there. A wheel-only installation therefore
+still needs an explicit accepted source/build-material handoff before ordinary
+Modal planning and launch are release-ready. The host-owned build profile stays
+outside the wheel. GRPO execution and live model qualification remain separate.
