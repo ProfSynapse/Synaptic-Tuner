@@ -1156,3 +1156,25 @@ quick reference now distinguishes normal runner support from unproven live
 image/model qualification. These are scripted accounting and retained-read
 controls, not live account/model quality, lost-request recovery or restoration
 of an active worker. Paid evaluation judging remains a separate metering gap.
+
+### Paid evaluation judge accounting
+
+The reference evaluation composition now accepts a named paid judge through
+the existing metered client and actual JudgeValidator. Paid response and judge
+calls share one spend record only when provider, account, namespace and currency
+agree; an unpaid response backend contributes no tokens to the paid judge's
+spend. Model authorization covers both paid model identities. Missing usage,
+malformed provider completions and uncertain client construction remain
+indeterminate rather than becoming zero-cost success. Legacy unpaid judging
+is unchanged. External judge comparisons retain unverified scorer provenance.
+
+Independent source and CI/skill review passed. Root passed 89 focused source
+controls in 2.75 seconds. Fresh sdist-built wheel
+`4921b43bf5acd41c0a972d5308a13f0d2801cea8874abacd747faf6a145ec6b1`
+passed the base consumer and all 266 installed evaluation/report controls in
+5.71 seconds. Both changed production modules match reviewed bytes in the
+wheel and installed package. All seven maintenance checks remain current
+without inventory or pin changes; skill mirrors match. No live provider
+effects occurred. This closes the paid judge accounting gap above; live
+qualification still needs bounded HTTP response/deadline handling and review
+of retries after uncertain requests. Authorization caps are not invoice proof.
