@@ -93,8 +93,17 @@ remain unpromoted. Pure preview is not SDK/image/account qualification. Warm sta
 requires genuine original compiled material, selected runtime profile, verified
 prepared bytes, exact provider scope/bucket/hardware/secret references and a pinned
 host SDK. Source-free known-job reads use the existing retained HF reader, original
-keys and store, without restoring a source lease or submission authority. Cold
-cancel/reconcile remain unavailable. Provider labels and scopes are retained
-configuration declarations, not fresh remote attestation. No fresh-process,
-SIGKILL, active-worker recovery or live proof is claimed by this example's CPU
-controls. See the HF template/adapter for its exact finite inputs.
+keys and store, without restoring a source lease or submission authority. Explicit
+`allow_cancel_reconcile: true` must be selected before the original plan;
+configured cold cancellation/reconciliation then uses the original known-job
+binding and current host permission. Defaults remain false and the separate
+read-only opener still refuses these effects. SDK acknowledgment is distinct
+from observed terminal state; lost replies stay uncertain without another cancel
+or training submission.
+
+Accepted CPU controls include an actual SIGKILL producer and first fresh SQLite
+opener after original input/source deletion, with scripted provider state, native
+verification and original authority retained. They do not establish live provider
+behavior or active-worker continuation. Provider labels/scopes remain retained
+configuration declarations, not fresh remote attestation. See the HF template
+and [support matrix](../../docs/plans/api-v1-support-matrix.md) for exact limits.

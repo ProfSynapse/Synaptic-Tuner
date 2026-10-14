@@ -115,8 +115,10 @@ is not a Git build checkout; cold known-run reads do not replan current recipes
 or rebuild an image. The omitted source-build helper/schema/tool assets are now
 included in the reviewed archive. An actual pinned offline build passes within
 39 source controls, with 163 installed Modal controls on a fresh sdist-built wheel.
-The correction still needs CI/merge and a fresh normal local preparation attempt;
-it is not augmented image or GPU qualification. Exact launcher and provider image/child pins stay separate
+The archive correction is merged. Actual fresh local attempts C (`439608b6`) and
+D (`4b77bd1f`) passed normal planning and source-wheel preparation without
+provider effects; this is not augmented image or GPU qualification. Exact
+launcher and provider image/child pins stay separate
 from the library's broad Python metadata. Linux/POSIX descriptor/lock/guardian
 operations and no local GPU are explicit boundaries, not Windows/macOS runtime
 qualification. Final supported platform/asset/release artifacts remain a gate.
