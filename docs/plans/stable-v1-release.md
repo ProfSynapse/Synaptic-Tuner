@@ -31,23 +31,36 @@ The Python API is a library contract, not a deployed HTTP/MCP service.
 ## Current release status — 2026-10-14
 
 The source distribution is still **1.1.0 / Beta**, not a stable release. At this
-checkpoint, main is `76842ecb` through merged [#243](https://github.com/ProfSynapse/Synaptic-Tuner/pull/243).
+checkpoint, main is `1603b60b` through merged [#249](https://github.com/ProfSynapse/Synaptic-Tuner/pull/249).
 HF publication [#238](https://github.com/ProfSynapse/Synaptic-Tuner/pull/238),
 launcher closure [#239](https://github.com/ProfSynapse/Synaptic-Tuner/pull/239),
-cold HF cancellation [#240](https://github.com/ProfSynapse/Synaptic-Tuner/pull/240)
+cold HF cancellation [#240](https://github.com/ProfSynapse/Synaptic-Tuner/pull/240),
 native GRPO publication [#241](https://github.com/ProfSynapse/Synaptic-Tuner/pull/241),
-HF material preparation [#242](https://github.com/ProfSynapse/Synaptic-Tuner/pull/242)
-and Modal capture diagnostics #243 each passed all 18 checks on their accepted
-heads; each merged tree matches its reviewed head. No stable version,
+HF material preparation [#242](https://github.com/ProfSynapse/Synaptic-Tuner/pull/242),
+Modal capture diagnostics #243, configured Modal lifecycle #244 and finite
+CPU-parent diagnostics #245, orphaned-cancel observation #246, same-model consumer
+#247, its token-default repair #248 and source-root fixture correction #249 each
+passed all 18 checks on their accepted heads; each merged tree matches its reviewed head. No stable version,
 tag or package publication has been selected. The dated log below retains exact
 source/wheel hashes, failures and evidence limits; older unavailable/baseline
 summaries are historical rather than current backend verdicts. Counts below are
 overlapping installed lane totals, not a cumulative unique-test count.
 
+The reviewed HF batch staging/local-read diagnostics are installed accepted in
+[#250](https://github.com/ProfSynapse/Synaptic-Tuner/pull/250) at `5248e576`, open
+against main. The portable CPU sealed-input probe fix is also installed accepted
+in [#251](https://github.com/ProfSynapse/Synaptic-Tuner/pull/251) at
+`58225583be620625febba9c7e175af696bf71a5d`, stacked on #250. Both remain
+separate from merged main.
+Exact-head CI and merge remain pending at this checkpoint. Independent source review, narrow installed
+readback evidence and local CPU experiments do not substitute for live training
+qualification. The merged lifecycle implementations do not establish earlier
+attempt causes or physical provider quiescence.
+
 | Supported preparation/composition | Current accepted evidence | Remaining release work |
 | --- | --- | --- |
 | Durable host records/history | Caller-owned SQLite implements existing record/stream ports and atomic Data/Evaluation/Pipeline/training-workflow updates; retained plans, claims and original keys support bounded cold reads. | Final supported-host/recovery qualification; a database does not restore credentials, source leases or active processes. |
-| Data/environment/evaluation consumer | **337 installed controls** exercise public generate/improve/validate, actual local fixture workers, measured scripted response/judge calls, immutable exports, reports/comparison and SQLite readback. Paid-call uncertainty stops later paid dispatches; bounded HTTP acquisition is implemented. | Genuine bounded paid backend/judge/account acceptance, representative scenario/source coverage and advertised cancellation behavior. CPU scripted calls are not live model/account qualification. |
+| Data/environment/evaluation consumer | **356 installed controls** exercise public generate/improve/validate, actual local fixture workers, immutable exports, reports/comparison and SQLite readback. Bounded live Luna attempt D on checkout consumer `7b8639ea` and engine wheel `d9e14291` completed two one-row Data operations, two one-case evaluations and four measured `FOUND` spend effects. Improvement validated an already-passing row without changing its JSONL bytes; comparison remained incompatible. | Representative scenario/source coverage, advertised cancellation behavior and broader backend/account qualification. The bounded synthetic smoke does not establish quality ranking, immutable model identity or invoice enforcement. |
 | Ordinary SFT consumers | Shared checkout consumer with installed production passed **Docker 61 / HF 80** controls, including public start, known reads, native five-role verification/download and uncertain-submit non-replay. Modal also has the normal retained-run/public lifecycle and historical exact-source live evidence. | Final-source **Docker/Modal/HF** live SFT parity, real cancellation/reconciliation and known-run recovery with original inputs/keys. Historical Modal success does not qualify the final stack. |
 | Modal GRPO | Public compiler/preparation, fixed isolated child, native verification, normal runner and retained known-run reads are implemented. The actual captured SmolLM candidate passed **256 installed controls** and retains the observed **396-distribution base**. | Qualify the actual augmented image/CPU closure, pinned model/tokenizer and one bounded **Modal GPU GRPO** run with real update/grouped reward evidence; constant/unchanged observations remain inconclusive. Other GRPO providers remain deferred. |
 | Artifact publication | Caller-owned durable store/spool/create-only destination passed **377 installed controls + one existing skip**; native RunsAPI join passed **73 installed Docker/publication controls** with five-role streams and cold marker lookup. Optional HF SFT publication passed **115 installed controls**, including owned snapshot lookup after process death. The native GRPO renderer/publication join passed **145 combined installed HF controls**, **256 GRPO controls** and **39 source-closure controls** (overlapping lane totals) on wheel source `371d4b05`. | Live repository/account/destination qualification remains open; expected-parent submission and verified owned immutable snapshot do not establish RPC causality or an introducing commit after a lost reply. The GRPO join uses actual native verification over synthetic CPU model files; genuine GPU training and live publication qualification remain open. |
@@ -72,8 +85,9 @@ totals. Initial descriptor opt-in and current permission are required, defaults
 remain off, and lost acknowledgments never authorize replay. The native GRPO publication join is installed accepted with synthetic CPU model
 files, without fabricating a TrainingAPI success. These implementations are now
 merged; final supported-composition review remains open. Live qualification remains SFT on all
-three providers, GRPO on one, genuine paid nontraining workflows and the admitted
-publication destination. Then complete the existing final contract/platform/
+three providers, GRPO on one and the admitted publication destination. The bounded
+paid nontraining smoke below is complete; representative coverage and its other
+advertised behavior remain qualification work. Then complete the existing final contract/platform/
 distribution review and choose a stable release.
 The fresh CPU qualification attempt D on exact `4b77bd1f` stopped with
 `CAPTURE_OUTPUT / INSPECTOR_REJECTED` and no qualification receipt. Its consumed
@@ -98,15 +112,120 @@ then an unclassified installed-child qualification operation failed. No CPU
 qualification receipt, native child code or specific failing operation was
 retained; the underlying cause remains unknown. Preserve its consumed claims and
 known call. There was no model download or GPU training. More precise finite-stage
-diagnostics, followed by a separately bound fresh attempt, remain necessary.
+diagnostics are merged in #245; a separately bound fresh attempt
+is still necessary. This does not retrospectively establish E's cause.
 
-The Modal lifecycle candidate joins recipe opt-in and current caller permission
-to the existing public cancellation/reconciliation operations. Acknowledgment is
+The merged #244 Modal lifecycle implementation joins recipe opt-in and current
+caller permission to the existing public cancellation/reconciliation operations. Acknowledgment is
 distinct from an independent provider terminal observation. If an acknowledged
-cancel loses its Foundation receipt before persistence, the current composition
-retains the consumed effect and refuses replay; trusted quiescence recovery for
-that gap is unavailable. Do not claim arbitrary crash recovery or live cancellation
-qualification from the local process tests.
+cancel loses its Foundation receipt before persistence, merged #246 retains
+the consumed effect and permits known-run reads through the original authenticated
+`FOUND` submit. Pending preserves `CANCEL_INTENT_RECORDED`; independent terminal
+observations preserve the unadvanced cancel intent without inventing a receipt,
+acknowledgment or bound cancellation. Native success can verify and stream the
+five artifacts. Cancel/reconcile for that orphaned intent remain refused even
+after terminal observation; physical quiescence is not established. Do not claim
+arbitrary crash recovery or live cancellation qualification from the local tests.
+
+Merged #246, accepted source `9ea8a004`, passed **178 installed coordinator/Docker controls**
+and **426 installed native custody controls**, with one portable SFT control
+deselected in the real-seal Python 3.14 lane. Source, wheel and installed production
+bytes matched on wheel
+`2b390c59073600d9396fd395ea734906bcfa3e26a8ef2a6dffdb6011b8a72a7a`.
+Merged #247's source `c52be233` passed **345 installed evaluation/nontraining
+controls** in 57.00 seconds on wheel
+`d9e14291368baaa2c2011ed41c0b544b98b4ac2e52409eddb9624e783756b0d9`,
+with source/wheel/installed production equality. After nine additional optional
+consumer effort controls, merged #247 at `cf049501` passed **354 installed
+controls** in 57.04 seconds using the same engine wheel. The changed consumer is
+checkout-owned; the installed engine bytes are unchanged. Its optional
+`provider.thinking_effort` forwards to the existing Data client constructor only
+when selected; omission preserves defaults. An external evaluation judge uses
+its own configuration, where null effort/temperature omit those parameters
+rather than requesting explicit effort `none`. Its retained public evaluation
+plans bind configuration-ordered run refs, including two runs of the same model;
+legacy distinct-model attempts remain readable. The model alias is not an
+immutable checkpoint, and external judging remains unverified/incomparable.
+These are overlapping provider-free installed totals; CI, merging and live
+qualification remain separate.
+
+Bounded paid nontraining attempt D completed on `7b8639ea` with unchanged installed
+engine wheel `d9e14291` after **356 installed controls** passed in 59.88 seconds.
+The single reviewed execution exited zero with empty stderr. Credential-free
+readback verified two Data operations with one row each, two evaluations with one
+case each and no request errors, and four measured `FOUND` spend effects totaling
+1,422 input and 382 output tokens. Generated and improved JSONL share SHA-256
+`713ac3623203fc890a2eb980c7ed9308103eb7b4dbb5444b7939d33dad7177a1`: improvement
+validated an already-passing row, not a textual revision. All model roles selected
+`gpt-6-luna`, a mutable alias rather than an immutable checkpoint. Comparison
+remained `comparable=false` with `comparison_basis_unverified` for the external
+judge, not a model-quality ranking. The shared 16-call/300-second limits were
+enforced; no observed live call count is exposed. Claim-to-last-closure timestamps
+span approximately 21.5 seconds, not a billing or universal wall-clock bound.
+Evidence is retained in `nontraining-qualification-20261014/attempt-d/readback.json`
+and `root-execution-review.json`. Attempt C remains failed and conservatively
+indeterminate after the pre-inner-dispatch token guard refusal; it was never
+replayed or rewritten. The separate host-only default repair follows the existing
+SynthChat client convention and does not change engine code. The reviewed #247/#248 heads passed exact full CI and merged. Remaining stable
+qualification gates stay open.
+
+### Current HF, Modal CPU and Docker prerequisites
+
+HF SFT attempt A remains **stage-only indeterminate**, with no authenticated
+submit or known provider job. The original workflow is
+`stage_reconcile_required`; its consumed stage effect remains indeterminate and
+must not be replayed. A bounded read-only batch experiment retrieved all 87
+source files (982,148 bytes) in a three-second UTC measurement window and matched
+the source-owned bytes. That result does not establish the original stage failure
+cause or authorize adoption/re-upload. The locally integrated HF fix passed a
+narrow installed legacy `show`: original 12 records and four streams remained
+logically unchanged, the result retained reconciliation-required/no-provider-
+evidence/no-replay status, and no HF credential/client, source preparation or
+grant was opened. The fresh copied installation passed **171 controls** in 257.66 seconds on
+wheel `72203ac13235d685b53de98853067be7f76cf80efedc7545336503201a1fe390`.
+The initial default uv hardlink installation produced 23 asset-guard failures;
+that evidence remains retained. Installing with `--link-mode copy` corrected
+physical custody without changing a guard. Exact-head CI/merge and another
+admitted training attempt remain pending. Evidence is retained under
+`hf-sft-final-bound-plan-20261014/`, including the stage summary, batch-read
+experiment and installed legacy-show record.
+
+Modal GRPO CPU F on merged source `cf049501` ran the normal reviewed command once
+and failed `CALL_INPUT_FD / UNAVAILABLE` at
+`packaged_training_worker.input_fd`. Its build, deployment and qualification
+claims and exact call remain retained; no signed CPU receipt was returned. This
+boundary precedes `os.memfd_create`/`MFD_ALLOW_SEALING`, not the later seal step;
+it cannot identify the remote exception or retrospectively settle E. The exact
+copied local CPython 3.11.14 lacks those Python entrypoints. The existing training
+helper succeeded locally through its reviewed libc fallback, checked real kernel
+seals/hash/readback and refused a write with `EPERM`. The separate probe repair
+reuses that authenticated helper and guarded core seal constants, without a new
+ABI, fake Python constants, inventory/pin change or guard waiver. Source controls
+passed **239 with one existing optional-Torch skip** on real portable 3.11; peer
+controls passed **228 with one skip** (overlapping totals). The combined fresh wheel passed **237 installed controls**, with one optional-
+Torch skip and two checkout-only controls deselected (covered by source tests).
+All 1,050 source-owned members matched source, wheel and installation and had
+link count one; 2,772 RECORD hashes were verified. All seven maintenance checks
+are current.
+A new admitted live CPU attempt remains pending. F retains no local image/
+Sandbox identity or affirmative cleanup record; no GPU/model weights or replay
+occurred. Evidence is `grpo-normal-cpu-qualification-20261014-f/outcome.json` and
+its local existing-helper experiment.
+
+The authorized Windows desktop is now reachable and has a ready WSL Docker
+daemon through an explicit Unix socket; its default Windows `npipe` context is
+unsuitable for the selected WSL/POSIX consumer. No global context change is
+required. The idle RTX 3090 was observed; this is hardware readiness, not SFT
+qualification. The physical Docker VHDX drive had 170 GiB free. A proposed increment of at most
+100 GiB with at least 60 GiB reserved is planning, not a quota. Root approved
+only the exact public Linux/amd64 `1644…` base-image pull, not GPU execution.
+The single pull has started with a 900-second bound; no completed result is
+recorded at this checkpoint.
+The core preparation ports exist, but a reusable checkout-consumer preparation
+CLI still needs its reviewed design/implementation before a GPU plan is ready.
+No Docker training, model download or final-source lifecycle parity is established
+by these observations or by a base pull alone.
+
 No new grant, lifecycle DTO, store or scenario CRUD framework is required merely
 to close this plan. Supported host composition and installed/source prerequisites
 are detailed in the [operation matrix](api-v1-support-matrix.md) and
@@ -691,8 +810,8 @@ exit nor bucket progress substitutes for durable final artifact publication.
 2. **Modal closure:** apply the same ladder to the final candidate, preserving
    exact launcher/runtime locks, per-call log proof and one-shot claims. Close
    cancellation/reconciliation and restart gaps without weakening admission.
-3. **HF Jobs API v1 parity:** implement the provider-neutral adapter using the
-   existing SDK/storage mechanisms, then run the same ladder. Preserve protected
+3. **HF Jobs API v1 parity:** qualify the existing installed provider-neutral
+   adapter and host consumer with the same ladder. Preserve protected
    anchor/secret/source semantics; do not merely wrap legacy CLI stdout as proof.
 
 Exit: one shared conformance matrix has exact provider-specific terminal evidence
