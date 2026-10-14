@@ -176,3 +176,18 @@ def test_legacy_sft_schema_keeps_existing_result_bytes(tmp_path, monkeypatch):
     assert image.canonical(result) == image.canonical(
         worker.local_cpu_result(release, result["trainer_sha256"])
     )
+
+
+def test_fixture_namespace_binding_keeps_foreign_root_rejected(tmp_path, monkeypatch):
+    from tuner.runtime.packaged_sft_child import _OwnedImportGuard
+
+    search_path = list(sys.path)
+    _image(tmp_path, monkeypatch)
+    assert sys.path == search_path
+    guard = _OwnedImportGuard({SOURCE / "Trainers/sft/runtime_v1.py": "unused"})
+    owned = guard.find_spec("Trainers", [str(SOURCE)])
+    assert list(owned.submodule_search_locations) == [str(SOURCE / "Trainers")]
+    foreign = tmp_path / "foreign-image"
+    (foreign / "Trainers").mkdir(parents=True)
+    with pytest.raises(ImportError, match="PACKAGED_CHILD_IMPORT_REJECTED"):
+        guard.find_spec("Trainers", [str(SOURCE), str(foreign)])
