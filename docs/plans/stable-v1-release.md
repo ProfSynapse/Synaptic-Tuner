@@ -31,9 +31,7 @@ The Python API is a library contract, not a deployed HTTP/MCP service.
 ## Current release status — 2026-10-14
 
 The source distribution is still **1.1.0 / Beta**, not a stable release. At this
-checkpoint, main is `db2459a6` through merged [#234](https://github.com/ProfSynapse/Synaptic-Tuner/pull/234). PRs
-[#235](https://github.com/ProfSynapse/Synaptic-Tuner/pull/235)–[#236](https://github.com/ProfSynapse/Synaptic-Tuner/pull/236) have locally accepted installed evidence
-and are awaiting their stack's CI/merge;
+checkpoint, main is `e915e105` through merged [#237](https://github.com/ProfSynapse/Synaptic-Tuner/pull/237). [#238](https://github.com/ProfSynapse/Synaptic-Tuner/pull/238) HF publication and [#239](https://github.com/ProfSynapse/Synaptic-Tuner/pull/239) launcher closure have locally accepted installed evidence and their exact CI/merge remains pending;
 local acceptance is not a main-merge or publication claim. No stable version,
 tag or package publication has been selected. The dated log below retains exact
 source/wheel hashes, failures and evidence limits; older unavailable/baseline
@@ -46,9 +44,9 @@ overlapping installed lane totals, not a cumulative unique-test count.
 | Data/environment/evaluation consumer | **337 installed controls** exercise public generate/improve/validate, actual local fixture workers, measured scripted response/judge calls, immutable exports, reports/comparison and SQLite readback. Paid-call uncertainty stops later paid dispatches; bounded HTTP acquisition is implemented. | Genuine bounded paid backend/judge/account acceptance, representative scenario/source coverage and advertised cancellation behavior. CPU scripted calls are not live model/account qualification. |
 | Ordinary SFT consumers | Shared checkout consumer with installed production passed **Docker 61 / HF 80** controls, including public start, known reads, native five-role verification/download and uncertain-submit non-replay. Modal also has the normal retained-run/public lifecycle and historical exact-source live evidence. | Final-source **Docker/Modal/HF** live SFT parity, real cancellation/reconciliation and known-run recovery with original inputs/keys. Historical Modal success does not qualify the final stack. |
 | Modal GRPO | Public compiler/preparation, fixed isolated child, native verification, normal runner and retained known-run reads are implemented. The actual captured SmolLM candidate passed **256 installed controls** and retains the observed **396-distribution base**. | Qualify the actual augmented image/CPU closure, pinned model/tokenizer and one bounded **Modal GPU GRPO** run with real update/grouped reward evidence; constant/unchanged observations remain inconclusive. Other GRPO providers remain deferred. |
-| Local publication | Caller-owned durable store/spool/create-only destination passed **377 installed controls + one existing skip**; native RunsAPI join passed **73 installed Docker/publication controls** with five-role streams and cold marker lookup. | Usable HF model-repository publication remains a separate implementation/live gate: expected-parent submission and verified owned immutable snapshot at the returned OID/current tip, without claiming RPC causality or an introducing commit after a lost reply. |
+| Artifact publication | Caller-owned durable store/spool/create-only destination passed **377 installed controls + one existing skip**; native RunsAPI join passed **73 installed Docker/publication controls** with five-role streams and cold marker lookup. | Optional HF SFT publication passed **115 installed controls**, including owned snapshot lookup after process death. Live repository/account/destination qualification remains open; expected-parent submission and verified owned immutable snapshot do not establish RPC causality or an introducing commit after a lost reply. The GRPO native renderer join is still unaccepted work. |
 | Environment owner death | Guardian-backed fixed worker passed **388 installed controls + one existing skip**, including real owner SIGKILL/stopped-worker termination and retained-identity cleanup after acknowledged custody. | Keep pre-handoff owner loss, guardian/machine loss and unconfirmed cleanup explicit. This is local ownership cleanup, not resumable generation or a security sandbox. |
-| Packaging/platforms | Fresh sdist-built wheels, neutral consumers, installed origins and declared assets are tested. The corrected offline source archive passed **39 source controls**, including a real pinned build, and **163 installed Modal controls**. Host examples/build declarations remain checkout-owned. | Merge the correction, repeat normal local preparation on its final source, then freeze advertised inventory/platform/install guidance and release artifacts; metadata `>=3.10` is not qualification. |
+| Packaging/platforms | Fresh sdist-built wheels, neutral consumers, installed origins and declared assets are tested. The corrected offline source archive passed **39 source controls**, including a real pinned build, and **163 installed Modal controls**. Host examples/build declarations remain checkout-owned. The complete launcher passed **11 source controls / 163 installed Modal controls**, with 40 hashed dependencies plus engine and a passing dependency check. Fresh attempt C on exact `439608b6` passed actual four-row preparation, normal `--plan` and `--prepare-local`, producing its real source wheel. | Freeze advertised inventory/platform/install guidance and release artifacts; metadata `>=3.10` is not qualification. C authorized no provider effects and does not qualify a later final source, augmented image or model. |
 
 **Recovery means retained known-run/status/history/artifact access and truthful
 uncertainty without replay.** Implemented cold readers reuse original stored
@@ -59,14 +57,17 @@ observed terminal status and confirmed owned-process termination are distinct.
 The real provider cancellation/recovery/parity gates remain required; this scope
 clarification does not waive them.
 
-The source-wheel/archive correction has local acceptance and still needs CI/merge
-and a fresh normal preparation attempt. Remaining functional work includes
-usable HF model-repository publication and the HF cancellation/reconciliation
-configuration-candidate audit: its default flags remain off and may need further
-work before the advertised qualified route is usable. The accepted local stack
-still requires exact CI/merge and final supported-composition review. Live qualification remains SFT on all three
-providers, GRPO on one, and genuine paid nontraining workflows. Then complete the
-existing final contract/platform/distribution review and choose a stable release.
+The archive correction is merged and actual normal local preparation succeeded on
+`439608b6`; failed attempts A/B remain retained. The HF publication implementation
+is installed accepted. Configured source-free known-job HF cancellation and
+reconciliation are independently source-approved, with installed acceptance
+pending; initial descriptor opt-in and current permission are required, defaults
+remain off, and lost acknowledgments never authorize replay. The GRPO publication
+join is still unaccepted. The accepted local stack still requires exact CI/merge
+and final supported-composition review. Live qualification remains SFT on all
+three providers, GRPO on one, genuine paid nontraining workflows and the admitted
+publication destination. Then complete the existing final contract/platform/
+distribution review and choose a stable release.
 No new grant, lifecycle DTO, store or scenario CRUD framework is required merely
 to close this plan. Supported host composition and installed/source prerequisites
 are detailed in the [operation matrix](api-v1-support-matrix.md) and
