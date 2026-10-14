@@ -1,0 +1,4 @@
+{"prompt":[{"role":"user","content":"Choose blue or red. Reply with one color word only."}]}
+{"prompt":[{"role":"user","content":"Pick either red or blue. Answer with the color name only."}]}
+{"prompt":[{"role":"user","content":"Select one color from blue and red. Output just that word."}]}
+{"prompt":[{"role":"user","content":"Answer with blue or red, without explanation."}]}

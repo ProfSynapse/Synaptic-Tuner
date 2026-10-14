@@ -1,0 +1,91 @@
+# Candidate configuration only, not launch authority or a provider billing cap.
+# Live resource/prompt/reward review is required; no grouped variation is guaranteed.
+name: captured-smollm2-grpo-candidate
+description: Three-step candidate measurement; no model/GPU/update qualification claimed
+target: cloud
+provider: modal
+method: grpo
+run:
+  method: grpo
+  dry_run: false
+job:
+  runtime_profile: smollm2-135m-grpo-candidate-v1
+  accelerator: L40S
+  accelerator_count: 1
+  timeout_seconds: 900
+  maximum_cost_minor_units: 100
+dataset:
+  local_file: data/dataset-0ea76d987aab3a43edde7f90b4b28e26da662363a20da62e531d92ceb3f64b44/dataset.jsonl
+  schema_version: synaptic-grpo-prompts/v1
+  expected_digest: 0ea76d987aab3a43edde7f90b4b28e26da662363a20da62e531d92ceb3f64b44
+  expected_row_count: 4
+training_input:
+  schema_version: synaptic-training-input/v1
+  method: grpo
+  model:
+    ref: HuggingFaceTB/SmolLM2-135M-Instruct
+    revision: a91318be21aeaf0879874faa161dcb40c68847e9
+    tokenizer_revision: a91318be21aeaf0879874faa161dcb40c68847e9
+  dataset:
+    ref: prepared://sha256/0ea76d987aab3a43edde7f90b4b28e26da662363a20da62e531d92ceb3f64b44
+  hyperparameters:
+    schema_version: synaptic-grpo-hyperparameters/v1
+    batch_size: 4
+    gradient_accumulation_steps: 1
+    num_generations: 4
+    max_steps: 3
+    max_seq_length: 256
+    max_prompt_length: 128
+    max_completion_length: 32
+    learning_rate: 5.0e-06
+    temperature: 0.8
+    beta: 0.04
+    weight_decay: 0.0
+    warmup_ratio: 0.0
+    max_grad_norm: 1.0
+    seed: 3407
+    logging_steps: 1
+    save_steps: 10
+    save_total_limit: 1
+    lora_rank: 8
+    lora_alpha: 16
+    lora_dropout: 0.0
+    lora_target_modules:
+    - q_proj
+    - v_proj
+    use_dora: false
+    use_rslora: false
+    load_in_4bit: false
+    bf16: false
+    fp16: true
+    prompt_column: prompt
+  rewards:
+    items:
+    - name: blue
+      weight: 1
+    documents:
+      blue:
+        name: blue
+        scope: response
+        validation:
+        - type: regex
+          match: (?i)\bblue\b
+        scoring:
+          strategy: binary
+          on_pass: 1.0
+          on_fail: 0.0
+    schema: {}
+  artifacts:
+    required_kinds:
+    - final_model
+    - tokenizer
+    - training_lineage
+    - training_metrics
+    - workload_record
+    retain_checkpoints: false
+limits:
+  child_max_seconds: 300
+  qualification_evidence:
+    max_trainable_bytes: 16777216
+    max_trainable_tensors: 256
+    max_reward_values: 4096

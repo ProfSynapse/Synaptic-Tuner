@@ -1,0 +1,9 @@
+{
+  "normalizer_ref": "synaptic.grpo-prompts/v1",
+  "member": "rows.jsonl",
+  "prompt_column": "prompt",
+  "source_sha256": "fffb33b0894860e539f5bcb8569214559fc629c388c9b954ccb0b3d2d8bc67f4",
+  "source_size_bytes": 379,
+  "expected_semantic_digest": "0ea76d987aab3a43edde7f90b4b28e26da662363a20da62e531d92ceb3f64b44",
+  "expected_row_count": 4
+}
