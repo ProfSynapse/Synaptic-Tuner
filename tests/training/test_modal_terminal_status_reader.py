@@ -78,3 +78,13 @@ def test_unknown_status_cannot_fall_back_to_worker_get(monkeypatch):
         ModalPackagedReadUnavailable, match="modal_packaged_call_unknown"
     ):
         reader.observe(request)
+
+
+@pytest.mark.parametrize("state", ["cancelled", "failed", None])
+def test_status_collaborator_requires_exact_internal_enum(state):
+    reader, request, _ = _reader(ModalFunctionCallState.RETURNED)
+    reader._facade.observe_known_call_status = lambda *_a, **_k: state
+    with pytest.raises(
+        ModalPackagedReadUnavailable, match="modal_packaged_call_unknown"
+    ):
+        reader.observe(request)

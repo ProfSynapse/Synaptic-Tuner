@@ -218,6 +218,8 @@ class ModalPackagedCoordinatorReaderV1:
                     lambda: status_reader(provider_job_ref, deadline=read_deadline),
                     deadline=read_deadline, code="modal_packaged_call_read_unavailable",
                 )
+                if type(state) is not ModalFunctionCallState:
+                    raise ModalPackagedReadUnavailable("modal_packaged_call_unknown")
                 if state in {ModalFunctionCallState.CANCELLED,
                              ModalFunctionCallState.FAILED,
                              ModalFunctionCallState.PENDING}:
