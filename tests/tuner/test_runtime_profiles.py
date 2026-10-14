@@ -105,11 +105,12 @@ def test_runtime_profile_accepts_exact_recomputed_inventory_digest(
     assert load_runtime_profile("qwen35-sft-v1", tmp_path).distribution_count == 327
 
 
-def test_runtime_profile_schema_v1_rejects_non_sft_methods(tmp_path: Path) -> None:
+@pytest.mark.parametrize("methods", [["kto"], ["sft", "grpo"], ["grpo", "sft"]])
+def test_runtime_profile_schema_v1_rejects_unsupported_or_mixed_methods(tmp_path: Path, methods) -> None:
     profile = yaml.safe_load(
         (PROFILES / "qwen35-sft-v1.yaml").read_text(encoding="utf-8")
     )
-    profile["compatibility"]["methods"] = ["kto"]
+    profile["compatibility"]["methods"] = methods
     (tmp_path / "qwen35-sft-v1.yaml").write_text(
         yaml.safe_dump(profile, sort_keys=False), encoding="utf-8"
     )
@@ -117,7 +118,7 @@ def test_runtime_profile_schema_v1_rejects_non_sft_methods(tmp_path: Path) -> No
         (PROFILES / "qwen35-sft-v1.inventory.json").read_bytes()
     )
 
-    with pytest.raises(RuntimeProfileError, match="supports only method sft"):
+    with pytest.raises(RuntimeProfileError, match="exactly one supported method"):
         load_runtime_profile("qwen35-sft-v1", tmp_path)
 
 

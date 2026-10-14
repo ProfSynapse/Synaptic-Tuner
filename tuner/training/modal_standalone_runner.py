@@ -68,7 +68,8 @@ from synaptic_tuner.api.v1.reference.sqlite_store import SQLiteDurableStoreV1
 from tuner.training.modal_run_retention import (
     WORKFLOW_FILE, KEY_NAMES, validate_retention_root, retain_modal_run, retained_bytes,
 )
-from tuner.training.modal_recipe import ModalSFTRecipePlanV1, resolve_modal_sft_build
+from tuner.training.modal_recipe import (ModalSFTRecipePlanV1, ModalGRPORecipePlanV1,
+                                        resolve_modal_sft_build, resolve_modal_recipe_build)
 from tuner.training.packaged_compilation import (
     PACKAGED_CONTEXT_SCHEMA, compile_packaged_sft_workload,
     packaged_artifact_policy_digest, packaged_configuration_digest,
@@ -260,11 +261,12 @@ def prepare_modal_standalone_local(*, plan, context):
     current_clean_source_commit(context.engine_root)
     profiles_root = context.engine_root / "Trainers" / "runtime_profiles"
     admitted = load_runtime_profile(plan.recipe.runtime_profile, profiles_root).resolve(
-        model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision, method="sft",
+        model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision, method="grpo" if type(plan) is ModalGRPORecipePlanV1 else "sft",
     )
-    profile_path, intent = resolve_modal_sft_build(
+    profile_path, intent = resolve_modal_recipe_build(
         admitted, profiles_root, plan.recipe.model.ref, plan.recipe.model.revision,
         prepared_format=plan.recipe.prepared_format, source_root=context.engine_root,
+        method="grpo" if type(plan) is ModalGRPORecipePlanV1 else "sft",
     )
     if (admitted.profile_sha256 != plan.profile_sha256 or admitted.image != plan.profile_base_image
             or intent["intent_digest"] != plan.runtime_material_intent_digest):
@@ -395,6 +397,8 @@ def qualify_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
                                  modal_environment: str,
                                  fresh_attempt: bool = False) -> ModalStandaloneCPUQualificationV1:
     """Build/deploy and check the installed CPU worker; never stage training input."""
+    if type(plan) is ModalGRPORecipePlanV1:
+        raise ModalStandaloneRunUnavailable("modal_grpo_dispatch_unsupported")
     if (os.name != "posix" or platform.python_version() != "3.11.14"
             or type(plan) is not ModalSFTRecipePlanV1
             or plan.recipe.maximum_cost_minor_units is None):
@@ -453,6 +457,8 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
     No user callback, manually built wheel or provider-specific public API is
     part of this command.  The public TrainingAPI and RunsAPI own the run.
     """
+    if type(plan) is ModalGRPORecipePlanV1:
+        raise ModalStandaloneRunUnavailable("modal_grpo_dispatch_unsupported")
     if (os.name != "posix" or platform.python_version() != "3.11.14"):
         raise ModalLocalPreparationUnavailable("LAUNCHER_PYTHON")
     if (type(plan) is not ModalSFTRecipePlanV1
@@ -860,3 +866,60 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1, context: object,
             ledger.finish(verified=False)
         if local_inputs is not None:
             local_inputs.close()
+
+
+def bind_modal_grpo_recipe_material(*, plan, identity, run_id, release, provider_binding,
+                                    profile, local_inputs):
+    """Bind final material while original local inputs remain in retained custody.
+
+    Revalidation performs bounded local reads, never provider/start effects.
+    Cold readback uses final retained material without reopening these inputs.
+    """
+    if type(plan) is not ModalGRPORecipePlanV1 or identity != plan.prepared_identity:
+        raise ValueError("GRPO prepared identity differs from original preplan")
+    from tuner.runtime_profiles import RuntimeProfile
+    from tuner.training.modal_local_preparation import PreparedModalLocalInputs
+    from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV2
+    if (type(profile) is not RuntimeProfile or profile.name != plan.recipe.runtime_profile
+            or profile.profile_sha256 != plan.profile_sha256 or profile.image != plan.profile_base_image
+            or profile.methods != ("grpo",) or type(local_inputs) is not PreparedModalLocalInputs
+            or type(release) is not PackagedTrainingRuntimeReleaseV2):
+        raise ValueError("GRPO selected runtime profile or local custody differs")
+    profile.resolve(model=plan.recipe.model.ref, model_revision=plan.recipe.model.revision, method="grpo")
+    profile_path = profile.modal_build_profile_path(profile.path.parent.parent / "image_profiles")
+    local_inputs.revalidate(profile_path, plan.runtime_material_intent_digest, source_root=local_inputs.source_root)
+    if (release.material != local_inputs.layout[5] or release.material.get("kind") != "modal_build"):
+        raise ValueError("GRPO actual runtime material differs from retained inputs")
+    from tuner.training.grpo_compilation import compile_grpo_input
+    from tuner.training.packaged_grpo_compilation import compile_packaged_grpo_workload, packaged_grpo_configuration_digest
+    base_image = (release.material["base_image"]["reference"]
+                  if getattr(release, "material", {}).get("kind") == "modal_build" else release.image_ref)
+    if base_image.removeprefix("docker.io/") != plan.profile_base_image.removeprefix("docker.io/"):
+        raise ValueError("GRPO actual runtime image differs from preplan")
+    core = compile_grpo_input(plan.recipe.training_input(identity.ref), identity)
+    if core.fingerprint != plan.core_workload_digest:
+        raise ValueError("GRPO core differs from original preplan")
+    context = CanonicalDocument.from_mapping({"schema_version": PACKAGED_CONTEXT_SCHEMA,
+                                             "runtime_release": release.to_dict()})
+    workload = compile_packaged_grpo_workload(core_workload=core, context=context.to_dict(),
+                                            child_max_seconds=plan.recipe.child_max_seconds)
+    execution = PackagedExecutionBindingV1.build(run_ref=run_id, runtime_release=release,
+        provider_runtime_binding=provider_binding,
+        prepared_input_ref=identity.ref, prepared_input_revision=identity.revision,
+        prepared_input_content_digest=identity.content_digest, prepared_input_size_bytes=identity.size_bytes,
+        prepared_input_format=identity.format,
+        workload_digest=workload.fingerprint,
+        configuration_digest=packaged_grpo_configuration_digest(workload),
+        artifact_policy_digest=packaged_artifact_policy_digest(plan.recipe.artifact_policy()))
+    runtime = (RuntimeSpec(None, release.installed_distributions_digest, release.python_version,
+                           "modal_build", release.material_digest)
+               if getattr(release, "material", {}).get("kind") == "modal_build"
+               else RuntimeSpec(release.image_ref, release.installed_distributions_digest, release.python_version))
+    components = ResolvedTrainingComponents(execution, context, plan.recipe.packaged_config(identity),
+        runtime, ResourceSpec(plan.recipe.accelerator, plan.recipe.accelerator_count, plan.recipe.timeout_seconds),
+        plan.recipe.artifact_policy())
+    from tuner.training.packaged_boundary import validate_packaged_material
+    from tuner.training.contracts import TrainingRequest
+    validate_packaged_material(request=TrainingRequest(CanonicalDocument(plan.recipe.declaration.canonical_json())),
+                              material=components)
+    return components, workload
