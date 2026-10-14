@@ -30,8 +30,11 @@ The Python API is a library contract, not a deployed HTTP/MCP service.
 
 ## Current release status — 2026-10-14
 
-The source distribution is still **1.1.0 / Beta**, not a stable release. At this
-checkpoint, main is `1603b60b` through merged [#249](https://github.com/ProfSynapse/Synaptic-Tuner/pull/249).
+Version **1.1.0** is the intended stable package version. Its classifier records
+that intended channel, not completed acceptance. The first stable GitHub release
+will bind exact source, wheel, sdist, checksums and qualification scope after the
+gates below pass; no PyPI publication is promised. The dated evidence at this
+checkpoint remains scoped, with final live provider/lifecycle gates open. Main is `1603b60b` through merged [#249](https://github.com/ProfSynapse/Synaptic-Tuner/pull/249).
 HF publication [#238](https://github.com/ProfSynapse/Synaptic-Tuner/pull/238),
 launcher closure [#239](https://github.com/ProfSynapse/Synaptic-Tuner/pull/239),
 cold HF cancellation [#240](https://github.com/ProfSynapse/Synaptic-Tuner/pull/240),
