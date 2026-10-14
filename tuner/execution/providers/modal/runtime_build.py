@@ -36,6 +36,7 @@ from tuner.execution.providers.modal.modal_wheel_builder import (
 _IMAGE_ID = re.compile(r"^im-[A-Za-z0-9]{1,64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_CAPTURE_BODY_BYTES = 128 * 1024
+_CAPTURE_INSTALLER_FLAGS = ("--no-index", "--no-deps", "--require-hashes", "--no-cache-dir", "--force-reinstall")
 _SOURCE_STATUS_TIMEOUT_SECONDS = 120
 _BUILDER_ATTESTATION = object()
 _WHEEL_SOURCE_PATHS = (
@@ -73,22 +74,45 @@ class SourceWheelFailure(ValueError):
         self.reason = reason
 
 
+def _validate_capture_diagnostic(value: object) -> dict[str, object]:
+    from tuner.runtime.modal_build_inspector import INSPECTOR_FAILURE_PHASES
+    from tuner.runtime.packaged_training_worker import INSTALLED_RUNTIME_INSPECTION_STAGES
+    keys = {"image_id", "sandbox_id", "native_returncode", "inspector_phase", "inventory_stage", "cleanup_status"}
+    if type(value) is not dict or set(value) != keys:
+        raise ValueError("invalid capture diagnostic")
+    for key, pattern in (("image_id", _IMAGE_ID), ("sandbox_id", re.compile(r"sb-[A-Za-z0-9]{1,64}\Z"))):
+        if value[key] is not None and (type(value[key]) is not str or pattern.fullmatch(value[key]) is None):
+            raise ValueError("invalid capture identity")
+    code = value["native_returncode"]
+    if code is not None and (type(code) is not int or not -(2**31) <= code < 2**31):
+        raise ValueError("invalid native returncode")
+    phase, stage = value["inspector_phase"], value["inventory_stage"]
+    if phase is not None and (type(phase) is not str or phase not in INSPECTOR_FAILURE_PHASES):
+        raise ValueError("invalid inspector phase")
+    if stage is not None and (phase != "INSTALLED_INVENTORY" or type(stage) is not str or stage not in INSTALLED_RUNTIME_INSPECTION_STAGES):
+        raise ValueError("invalid inventory stage")
+    if value["cleanup_status"] not in {"CONFIRMED", "UNRESOLVED"}:
+        raise ValueError("invalid capture cleanup")
+    return dict(value)
+
+
 class ModalBoundedOperationFailure(RuntimeError):
     """A bounded call failed; its provider exception is never retained."""
 
-    __slots__ = ("reason",)
+    __slots__ = ("reason", "capture_diagnostic")
 
-    def __init__(self, code: str, reason: str) -> None:
+    def __init__(self, code: str, reason: str, *, capture_diagnostic=None) -> None:
         if reason not in {"TIMEOUT", "OPERATION_FAILED", "INSPECTOR_REJECTED", "OUTPUT_INVALID"}:
             raise ValueError("bounded failure reason is invalid")
         super().__init__(code)
         self.reason = reason
+        self.capture_diagnostic = capture_diagnostic
 
 
 class ModalBuildStageFailure(RuntimeError):
     """Closed build/capture stage for host projection, without provider text."""
 
-    __slots__ = ("stage", "reason", "image_id")
+    __slots__ = ("stage", "reason", "image_id", "capture_diagnostic")
     _REASONS = {
         "SOURCE_WHEEL": frozenset({
             "LOCAL_BUILD_FAILED", "SOURCE_STATE_INVALID", *_SOURCE_STATE_REASONS,
@@ -103,7 +127,7 @@ class ModalBuildStageFailure(RuntimeError):
         "CAPTURE_VALIDATE": frozenset({"INVALID"}),
     }
 
-    def __init__(self, stage: str, reason: str, *, image_id: str | None = None) -> None:
+    def __init__(self, stage: str, reason: str, *, image_id: str | None = None, capture_diagnostic=None) -> None:
         if reason not in self._REASONS.get(stage, ()):
             raise ValueError("Modal build stage diagnosis is invalid")
         if (image_id is not None and (
@@ -112,6 +136,7 @@ class ModalBuildStageFailure(RuntimeError):
             raise ValueError("Modal build image identity is invalid")
         super().__init__("modal_build_stage_unavailable")
         self.stage, self.reason, self.image_id = stage, reason, image_id
+        self.capture_diagnostic = None if capture_diagnostic is None else _validate_capture_diagnostic(capture_diagnostic)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,9 +163,10 @@ def _build_image_with_failure_id(image: object, app: object) -> object:
 
 
 class _CaptureOutputFailure(ValueError):
-    __slots__ = ("reason",)
+    __slots__ = ("reason", "capture_diagnostic")
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, *, capture_diagnostic=None) -> None:
+        self.capture_diagnostic = capture_diagnostic
         if reason not in {"INSPECTOR_REJECTED", "OUTPUT_INVALID"}:
             raise ValueError("Modal capture reason is invalid")
         super().__init__("Modal capture output is invalid")
@@ -377,7 +403,7 @@ def _bounded(operation: Callable[[], object], *, deadline: float, code: str,
         raise ModalBoundedOperationFailure(code, "TIMEOUT") from None
     if not ok:
         reason = value.reason if type(value) is _CaptureOutputFailure else "OPERATION_FAILED"
-        raise ModalBoundedOperationFailure(code, reason) from None
+        raise ModalBoundedOperationFailure(code, reason, capture_diagnostic=value.capture_diagnostic if type(value) is _CaptureOutputFailure else None) from None
     return value
 
 
@@ -393,7 +419,23 @@ def _capture_output(sandbox: object) -> bytes:
         raise _CaptureOutputFailure("OUTPUT_INVALID")
     sandbox.wait(raise_on_termination=False)
     if type(sandbox.returncode) is not int or sandbox.returncode != 0:
-        raise _CaptureOutputFailure("INSPECTOR_REJECTED")
+        diagnostic = {"image_id": None, "sandbox_id": None,
+                      "native_returncode": sandbox.returncode if type(sandbox.returncode) is int and -(2**31) <= sandbox.returncode < 2**31 else None,
+                      "inspector_phase": None, "inventory_stage": None, "cleanup_status": "UNRESOLVED"}
+        if sandbox.returncode == 2:
+            try:
+                raw = bytes(output)
+                document = json.loads(raw)
+                if canonical_bytes(document) + b"\n" != raw:
+                    raise ValueError
+                if (type(document) is not dict or set(document) != {"schema_version", "phase", "inventory_stage"}
+                        or document["schema_version"] != "synaptic-modal-build-inspection-failure/v1"):
+                    raise ValueError
+                diagnostic.update(inspector_phase=document["phase"], inventory_stage=document["inventory_stage"])
+                diagnostic = _validate_capture_diagnostic(diagnostic)
+            except Exception:
+                diagnostic["inspector_phase"] = diagnostic["inventory_stage"] = None
+        raise _CaptureOutputFailure("INSPECTOR_REJECTED", capture_diagnostic=diagnostic)
     return bytes(output)
 
 
@@ -456,14 +498,14 @@ def prepare_capture_build_inputs(profile, staged: Path, wheel: Path, digest: str
         python = profile.python_executable
         command = (
             "set -eu; before=\"$(" + python + " -I -m pip check 2>&1)\" || test \"$?\" -eq 1; "
-            + python + " -I -m pip install --no-index --no-deps --require-hashes --no-cache-dir -r /opt/synaptic-runtime/requirements.txt; "
+            + python + " -I -m pip install " + " ".join(_CAPTURE_INSTALLER_FLAGS) + " -r /opt/synaptic-runtime/requirements.txt; "
             + "after=\"$(" + python + " -I -m pip check 2>&1)\" || test \"$?\" -eq 1; "
             + "test \"$before\" = \"$after\""
         )
         recipe = {
             "sdk_version": "1.5.4", "python_executable": python,
             "commands": [command],
-            "installer_flags": ["--no-index", "--no-deps", "--require-hashes", "--no-cache-dir"],
+            "installer_flags": list(_CAPTURE_INSTALLER_FLAGS),
             "wheels": [{"filename": item["filename"], "sha256": item["sha256"]} for item in all_wheels],
             "builder_policy": "synaptic-modal-wheel-build/v2",
             "builder_lock_sha256": hashlib.sha256(builder_lock_bytes()).hexdigest(),
@@ -578,24 +620,40 @@ def capture_modal_build_candidate(
         except ModalBoundedOperationFailure as error:
             raise ModalBuildStageFailure("CAPTURE_CREATE", error.reason) from None
         capture_failure: BaseException | None = None
+        capture_diagnostic = {"image_id": image_id, "sandbox_id": None, "native_returncode": None,
+                              "inspector_phase": None, "inventory_stage": None, "cleanup_status": "UNRESOLVED"}
+        try:
+            observed_sandbox_id = getattr(sandbox, "object_id", None)
+        except Exception:
+            observed_sandbox_id = None
+        if type(observed_sandbox_id) is str and re.fullmatch(r"sb-[A-Za-z0-9]{1,64}", observed_sandbox_id):
+            capture_diagnostic["sandbox_id"] = observed_sandbox_id
         try:
             try:
                 raw = _bounded(lambda: _capture_output(sandbox), deadline=deadline,
                                code="modal_training_capture_failed")
+                capture_diagnostic["native_returncode"] = 0
             except ModalBoundedOperationFailure as error:
-                raise ModalBuildStageFailure("CAPTURE_OUTPUT", error.reason) from None
+                raise ModalBuildStageFailure("CAPTURE_OUTPUT", error.reason, capture_diagnostic=error.capture_diagnostic) from None
         except BaseException as error:
             capture_failure = error
+            if type(error) is ModalBuildStageFailure:
+                if error.capture_diagnostic is not None:
+                    capture_diagnostic.update({k: error.capture_diagnostic[k] for k in ("native_returncode", "inspector_phase", "inventory_stage")})
+                error.capture_diagnostic = _validate_capture_diagnostic(capture_diagnostic)
             raise
         finally:
             try:
                 _cleanup_sandbox(sandbox)
+                capture_diagnostic["cleanup_status"] = "CONFIRMED"
+                if type(capture_failure) is ModalBuildStageFailure:
+                    capture_failure.capture_diagnostic = _validate_capture_diagnostic(capture_diagnostic)
             except ModalBoundedOperationFailure as error:
                 if capture_failure is None:
-                    raise ModalBuildStageFailure("CAPTURE_CLEANUP", error.reason) from None
+                    raise ModalBuildStageFailure("CAPTURE_CLEANUP", error.reason, capture_diagnostic=capture_diagnostic) from None
             except Exception:
                 if capture_failure is None:
-                    raise ModalBuildStageFailure("CAPTURE_CLEANUP", "OPERATION_FAILED") from None
+                    raise ModalBuildStageFailure("CAPTURE_CLEANUP", "OPERATION_FAILED", capture_diagnostic=capture_diagnostic) from None
         try:
             if hashlib.sha256(stable_read(inspector, 128 * 1024)).hexdigest() != inspector_digest:
                 raise ValueError("Modal training inspector changed")
@@ -606,7 +664,7 @@ def capture_modal_build_candidate(
             )
             candidate._attest_build(_BUILDER_ATTESTATION)
         except Exception:
-            raise ModalBuildStageFailure("CAPTURE_VALIDATE", "INVALID") from None
+            raise ModalBuildStageFailure("CAPTURE_VALIDATE", "INVALID", capture_diagnostic=capture_diagnostic) from None
         return candidate
 
 

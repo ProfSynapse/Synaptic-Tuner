@@ -128,9 +128,10 @@ def test_candidate_nested_evidence_is_copy_on_read_and_capture_digest_is_recheck
         tampered.validate_release(release, require_builder=False)
 
 
+@pytest.mark.parametrize("capture_rejection", [None, "cleaned", "cleanup_unknown"])
 @pytest.mark.parametrize("mutate_lock_after_capture", [False, True])
 def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
-        monkeypatch, tmp_path, mutate_lock_after_capture) -> None:
+        monkeypatch, tmp_path, mutate_lock_after_capture, capture_rejection) -> None:
     from pathlib import Path
     from tuner.execution.providers.modal import runtime_build
 
@@ -181,6 +182,8 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
         def run_commands(self, *commands):
             events.append("install")
             assert len(commands) == 1 and "--require-hashes" in commands[0]
+            assert "--force-reinstall" in commands[0]
+            assert commands[0].count("pip check") == 2
             return self
 
         def build(self, app):
@@ -199,8 +202,12 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
 
     class Sandbox:
         def __init__(self, raw):
+            self.object_id = "sb-Exact123"
+            if capture_rejection:
+                raw = runtime_build.canonical_bytes({"schema_version": "synaptic-modal-build-inspection-failure/v1",
+                                  "phase": "INSTALLED_INVENTORY", "inventory_stage": "PROVENANCE"}) + b"\n"
             self.stdout = [raw]
-            self.returncode = 0
+            self.returncode = 2 if capture_rejection else 0
             self.terminated = False
 
         @classmethod
@@ -230,6 +237,8 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
         def terminate(self, *, wait):
             events.append("terminate")
             assert wait is False
+            if capture_rejection == "cleanup_unknown":
+                raise RuntimeError("private-provider-error")
             self.terminated = True
 
         def poll(self):
@@ -257,6 +266,22 @@ def test_build_claim_precedes_provider_effect_and_capture_cleans_up(
             )
         assert (caught.value.stage, caught.value.reason) == ("BUILD_INPUTS", "INVALID")
         assert events == []
+        return
+    if capture_rejection:
+        with pytest.raises(runtime_build.ModalBuildStageFailure) as caught:
+            capture_modal_build_candidate(
+                sdk=SDK(), client=client, profile_path=profile,
+                build_claim=lambda: events.append("claim"), app_name="training-build",
+                environment_name="production", expected_intent_digest=intent,
+            )
+        assert (caught.value.stage, caught.value.reason) == ("CAPTURE_OUTPUT", "INSPECTOR_REJECTED")
+        assert caught.value.capture_diagnostic == {
+            "image_id": "im-exact", "sandbox_id": "sb-Exact123", "native_returncode": 2,
+            "inspector_phase": "INSTALLED_INVENTORY", "inventory_stage": "PROVENANCE",
+            "cleanup_status": "UNRESOLVED" if capture_rejection == "cleanup_unknown" else "CONFIRMED",
+        }
+        assert "private-provider-error" not in str(caught.value)
+        assert events.count("claim") == events.count("sandbox") == events.count("terminate") == 1
         return
     candidate = capture_modal_build_candidate(
         sdk=SDK(), client=client, profile_path=profile,
@@ -747,3 +772,74 @@ def test_source_wheel_scratch_io_is_not_archive_invalid(monkeypatch, tmp_path, f
         runtime_build.prepare_current_source_wheel(source, output, expected_source_commit=commit)
     assert caught.value.reason == "BUILDER_SETUP_FAILED"
     assert str(caught.value) == "source_wheel_unavailable"
+
+
+@pytest.mark.parametrize("phase,stage,accepted", [
+    ("INSTALLED_INVENTORY", "PROVENANCE", True),
+    ("INSTALLED_INVENTORY", "PRIVATE_TEXT", False),
+    ("PRIVATE_TEXT", None, False),
+    ("INPUT", "PROVENANCE", False),
+])
+def test_capture_retains_native_exit_and_only_exact_closed_inspector_frame(phase, stage, accepted):
+    import time
+    from types import SimpleNamespace
+    from tuner.execution.providers.modal import runtime_build
+    raw = runtime_build.canonical_bytes({"schema_version": "synaptic-modal-build-inspection-failure/v1",
+                      "phase": phase, "inventory_stage": stage}) + b"\n"
+    sandbox = SimpleNamespace(stdout=(raw,), returncode=2, wait=lambda **_kw: None)
+    with pytest.raises(runtime_build.ModalBoundedOperationFailure) as caught:
+        runtime_build._bounded(lambda: runtime_build._capture_output(sandbox),
+                               deadline=time.monotonic()+2, code="closed")
+    diagnostic = caught.value.capture_diagnostic
+    assert diagnostic["native_returncode"] == 2
+    assert diagnostic["inspector_phase"] == (phase if accepted else None)
+    assert diagnostic["inventory_stage"] == (stage if accepted else None)
+    assert diagnostic["cleanup_status"] == "UNRESOLVED"
+
+
+
+def test_same_version_capture_install_restores_exact_wheel_provenance(tmp_path):
+    """Offline pip control: installed same-version packages must not be skipped."""
+    import csv
+    import io
+    import sys
+    from pathlib import Path
+    from tuner.execution.providers.modal.runtime_build import _CAPTURE_INSTALLER_FLAGS
+    env = tmp_path / "venv"
+    subprocess.run([sys.executable, "-m", "venv", "--copies", str(env)],
+                   check=True, capture_output=True, timeout=60)
+    python = env / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    wheel = tmp_path / "synaptic_provenance_fixture-1.0-py3-none-any.whl"
+    info = "synaptic_provenance_fixture-1.0.dist-info/"
+    members = {"synaptic_provenance_fixture.py": b"VALUE = 1\n",
+               info + "METADATA": b"Metadata-Version: 2.1\nName: synaptic-provenance-fixture\nVersion: 1.0\n",
+               info + "WHEEL": b"Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n"}
+    record = io.StringIO()
+    writer = csv.writer(record)
+    for name, raw in members.items():
+        writer.writerow([name, "", len(raw)])
+    writer.writerow([info + "RECORD", "", ""])
+    members[info + "RECORD"] = record.getvalue().encode()
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name, raw in members.items():
+            archive.writestr(name, raw)
+    def pip(*args):
+        return subprocess.run([str(python), "-I", "-m", "pip", *args],
+                              check=True, capture_output=True, timeout=60)
+    pip("install", "--no-index", "--no-deps", str(wheel))
+    purelib = subprocess.run([str(python), "-I", "-c", "import sysconfig;print(sysconfig.get_path('purelib'))"],
+                             check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+    direct_url = Path(purelib) / info / "direct_url.json"
+    direct_url.unlink()  # Model the index-installed base's absent direct_url.
+    digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text(f"{wheel.as_uri()} --hash=sha256:{digest}\n")
+    pip("install", *[flag for flag in _CAPTURE_INSTALLER_FLAGS if flag != "--force-reinstall"], "-r", str(requirements))
+    assert not direct_url.exists()
+    before = pip("check").stdout
+    pip("install", *_CAPTURE_INSTALLER_FLAGS, "-r", str(requirements))
+    assert pip("check").stdout == before
+    document = json.loads(direct_url.read_bytes())
+    assert document["url"] == wheel.as_uri()
+    assert document["archive_info"]["hashes"]["sha256"] == digest
+    assert (Path(purelib) / "synaptic_provenance_fixture.py").read_bytes() == members["synaptic_provenance_fixture.py"]

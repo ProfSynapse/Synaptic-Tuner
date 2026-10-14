@@ -144,3 +144,17 @@ def test_standalone_run_diagnosis_subclass_cannot_project_hostile_fields():
             pass
 
     assert _closed_bootstrap_details(HostileRunError("RUN_HOST_ASSEMBLY")) is None
+
+
+
+def test_capture_inspector_projection_is_closed_and_non_authorizing():
+    capture = {"image_id": "im-Exact123", "sandbox_id": "sb-Exact123", "native_returncode": 2,
+               "inspector_phase": "INSTALLED_INVENTORY", "inventory_stage": "PROVENANCE",
+               "cleanup_status": "UNRESOLVED"}
+    error = ModalHostBootstrapUnavailable("CAPTURE_OUTPUT_INSPECTOR_REJECTED", capture_diagnostic=capture)
+    projected = _closed_bootstrap_details(error)
+    assert projected["capture"] == capture
+    assert projected["retry_authorized"] is False
+    assert set(projected) == {"phase", "failure_class", "location", "retry_authorized", "capture"}
+    with pytest.raises(ValueError):
+        ModalHostBootstrapUnavailable("CAPTURE_OUTPUT_INSPECTOR_REJECTED", capture_diagnostic={**capture, "inventory_stage": "provider-private-text"})

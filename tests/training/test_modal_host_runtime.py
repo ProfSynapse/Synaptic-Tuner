@@ -934,3 +934,60 @@ def test_paid_factory_active_alarm_interval_has_zero_claims_or_provider_reads(mo
         _paid_factory_probe(storage)
     assert storage.attempts.refs == []
     assert not _Volume.created and not _Secret.created and not _App.created
+
+
+@pytest.mark.parametrize("retention_available", [False, True])
+def test_capture_failure_diagnostic_requires_original_claim_and_owner_thread_catalog(monkeypatch, retention_available):
+    import hashlib
+    import json
+    import threading
+    from tuner.execution.providers.modal.runtime_build import ModalBuildStageFailure
+    monkeypatch.setattr(host, "MODAL_SFT_ACCELERATOR_RATE_KEYS", {
+        "A100-80GB": "gpu_hour_cost_a100_80gb_fixture", "L40S": "gpu_hour_cost_l40s",
+    })
+    monkeypatch.setattr(host, "plan_modal_build_material", lambda path: {"intent_digest": "a" * 64})
+    capture = {"image_id": "im-Exact123", "sandbox_id": "sb-Exact123", "native_returncode": 2,
+               "inspector_phase": "INSTALLED_INVENTORY", "inventory_stage": "PROVENANCE",
+               "cleanup_status": "UNRESOLVED"}
+    def reject(**kwargs):
+        raise ModalBuildStageFailure("CAPTURE_OUTPUT", "INSPECTOR_REJECTED", capture_diagnostic=capture)
+    monkeypatch.setattr(host, "capture_modal_build_candidate", reject)
+    owner = threading.get_ident()
+    entries, claims = {}, {}
+    class Attempts:
+        def claim(self, ref, evidence):
+            assert threading.get_ident() == owner
+            claims[ref] = evidence
+            return "claim"
+        def resolve(self, ref):
+            assert threading.get_ident() == owner
+            return claims.get(ref)
+    class Catalog:
+        def publish_if_absent(self, ref, evidence):
+            assert threading.get_ident() == owner
+            entries.setdefault(ref, evidence)
+            return True
+        def resolve(self, ref):
+            assert threading.get_ident() == owner
+            return entries.get(ref)
+    class Storage:
+        attempts = Attempts()
+        def catalog(self, name, **kwargs):
+            assert name == "host-build-diagnostics-v1"
+            if not retention_available:
+                raise RuntimeError("private-storage-error")
+            return Catalog()
+    with pytest.raises(host.ModalHostBootstrapUnavailable) as caught:
+        _paid_factory_probe(Storage())
+    assert caught.value.phase == "CAPTURE_OUTPUT"
+    assert caught.value.failure_class == "INSPECTOR_REJECTED"
+    assert caught.value.capture_diagnostic == (capture if retention_available else None)
+    assert tuple(claims) == (_build_ref(),)
+    if retention_available:
+        document = json.loads(entries[_build_ref()])
+        assert document["capture"] == capture
+        assert document["build_claim_sha256"] == hashlib.sha256(claims[_build_ref()]).hexdigest()
+        assert document["retry_authorized"] is False
+        projection = caught.value.capture_diagnostic
+        projection["inventory_stage"] = "changed"
+        assert caught.value.capture_diagnostic == capture

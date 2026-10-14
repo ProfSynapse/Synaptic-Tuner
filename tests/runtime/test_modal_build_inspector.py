@@ -56,13 +56,42 @@ def test_inspector_rejects_missing_or_malformed_sandbox_marker(build_inputs, mon
         monkeypatch.setenv("MODAL_SANDBOX_ID", sandbox_id)
     monkeypatch.setenv("MODAL_IS_REMOTE", "1")
 
-    with pytest.raises(ValueError, match="runtime identity differs"):
+    with pytest.raises(inspector._InspectionFailure, match="MODAL_BUILD_INSPECTION_REJECTED") as caught:
         inspector.inspect()
+    assert caught.value.phase == "RUNTIME_IDENTITY"
 
 
 def test_inspector_still_requires_image_marker(build_inputs, monkeypatch):
     monkeypatch.setenv("MODAL_SANDBOX_ID", "sb-Exact123")
     monkeypatch.delenv("MODAL_IMAGE_ID")
 
-    with pytest.raises(ValueError, match="runtime identity differs"):
+    with pytest.raises(inspector._InspectionFailure, match="MODAL_BUILD_INSPECTION_REJECTED") as caught:
         inspector.inspect()
+    assert caught.value.phase == "RUNTIME_IDENTITY"
+
+
+@pytest.mark.parametrize("stage", ["PROVENANCE", "CLOSURE", "INVENTORY_ROOT_UNPROVEN"])
+def test_main_emits_only_closed_nested_inventory_predicate(build_inputs, monkeypatch, capsys, stage):
+    expected, path = build_inputs
+    expected["python"]["executable_digest"] = hashlib.sha256(Path(sys.executable).resolve(strict=True).read_bytes()).hexdigest()
+    path.write_text(json.dumps(expected), encoding="utf-8")
+    monkeypatch.setenv("MODAL_SANDBOX_ID", "sb-Exact123")
+    def reject(_expected):
+        raise packaged_training_worker.PackagedInstalledRuntimeInspectionError(stage)
+    monkeypatch.setattr(packaged_training_worker, "inspect_installed_runtime", reject)
+    assert inspector.main() == 2
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "schema_version": "synaptic-modal-build-inspection-failure/v1",
+        "phase": "INSTALLED_INVENTORY", "inventory_stage": stage,
+    }
+
+
+def test_main_does_not_emit_failure_exception_text(build_inputs, monkeypatch, capsys):
+    _, path = build_inputs
+    path.write_text("not-json-private-sentinel", encoding="utf-8")
+    assert inspector.main() == 2
+    captured = capsys.readouterr()
+    assert "private-sentinel" not in captured.out + captured.err
+    assert json.loads(captured.out)["phase"] == "INPUT"
