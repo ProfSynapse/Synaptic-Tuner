@@ -1,3 +1,4 @@
 [submodule "engine"]
 	path = engine
 	url = https://github.com/ProfSynapse/Synaptic-Tuner.git
+	branch = release/portable-cpu-input-integration

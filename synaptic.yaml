@@ -1,6 +1,6 @@
 schema_version: synaptic-project/v1
 project:
-  id: sft-tracking-fixed-qualification-20261014
+  id: sft-portable-source-qualification-20261014
   name: SFT final CF qualification
 engine:
   requires: '>=1.0,<2.0'
