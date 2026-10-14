@@ -682,10 +682,16 @@ The installed CI lane uses Dataset 5.1.0 and pytest 8; trainer/model effects rem
 explicit CPU substitutes. This is not validation of the GPU image's ML stack.
 
 The additive public compiler and preparation evidence are recorded below.
-Separate offline inventory, provider dispatch, native verification and live
-candidate qualification remain open. This trainer entry alone
-does not authenticate a public plan, verify model member custody or advertise
-GRPO through the public API.
+The additive public GRPO compiler and isolated packaged candidate now have
+separate implementation nodes. The candidate preserves exact compiled core
+bytes, retained dataset/model custody and native five-role verification, with
+fixed GRPO offline131/outer13 inventories and an admitted child-only deadline.
+Focused CPU controls cover the actual owned child path using explicit ML/image
+substitutes, and separately the actual selected import guard and complete wheel
+Python checks. They do not qualify the GPU stack, parameter updates, reward
+dispersion, provider execution or public cancellation. Provider routing and
+live candidate qualification remain open; no current SFT release is relabeled.
+See the canonical GRPO reference for maintenance and deadline scope.
 
 ### Conversation SFT compilation and execution preparation
 

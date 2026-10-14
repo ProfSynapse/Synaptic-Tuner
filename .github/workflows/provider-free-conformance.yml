@@ -85,6 +85,7 @@ on:
       - "schemas/**"
       - "scripts/regenerate_modal_runtime_lock.py"
       - "scripts/regenerate_offline_sft_worker_closure.py"
+      - "scripts/regenerate_grpo_worker_closures.py"
       - "scripts/regenerate_hf_parent_closure.py"
       - "scripts/capture_modal_inference_runtime.py"
       - "scripts/inspect_modal_inference_runtime.py"
@@ -874,7 +875,7 @@ jobs:
               str(root / "tests/training/test_conversation_input_preparation.py")]))
           PYCODE
 
-      - name: Exercise installed conversation SFT compiler and packaged training custody
+      - name: Exercise installed conversation SFT and packaged GRPO custody
         if: matrix.suite == 'core'
         working-directory: ${{ runner.temp }}
         run: |
@@ -895,9 +896,34 @@ jobs:
                        "Trainers.sft.src.preprocessing", "shared.sft_preprocessing",
                        "tuner.runtime.offline_sft_worker", "tuner.runtime.verification",
                        "tuner.training.methods.sft", "tuner.training.packaged_compilation",
-                       "tuner.runtime.packaged_sft_execution", "tuner.runtime.packaged_sft_child"):
+                       "tuner.runtime.packaged_sft_execution",
+                       "Trainers.grpo.runtime_v1", "tuner.training.packaged_grpo_compilation",
+                       "tuner.runtime.offline_grpo_worker", "tuner.runtime.packaged_grpo_worker_closure",
+                       "tuner.runtime.packaged_grpo_execution", "tuner.runtime.packaged_grpo_child",
+                       "tuner.runtime.packaged_grpo_verification", "tuner.runtime.packaged_sft_child"):
               location = Path(importlib.util.find_spec(name).origin).resolve()
               assert location.is_relative_to(prefix) and not location.is_relative_to(checkout), location
+          from importlib.resources import files
+          import hashlib
+          from tuner.runtime.offline_grpo_worker import verify_installed_grpo_members
+          from tuner.runtime.packaged_grpo_worker_closure import load_packaged_grpo_worker_closure
+          assert len(verify_installed_grpo_members().closure.members) == 131
+          assert len(load_packaged_grpo_worker_closure().members) == 13
+          for package, relative in (
+              ("tuner.runtime", "manifests/offline-grpo-worker-v1.json"),
+              ("tuner.runtime", "manifests/packaged-grpo-worker-v1.json"),
+              *(("schemas", name) for name in (
+                  "synaptic-grpo-artifacts-v1.schema.json",
+                  "synaptic-offline-grpo-worker-closure-v1.schema.json",
+                  "synaptic-packaged-grpo-terminal-v1.schema.json",
+                  "synaptic-packaged-grpo-training-lineage-v1.schema.json",
+                  "synaptic-packaged-grpo-worker-closure-v1.schema.json",
+                  "synaptic-packaged-grpo-workload-v1.schema.json")),
+          ):
+              resource = files(package).joinpath(relative)
+              assert Path(resource).resolve().is_relative_to(prefix), resource
+              expected = checkout / ("tuner/runtime" if package == "tuner.runtime" else "schemas") / relative
+              assert hashlib.sha256(resource.read_bytes()).digest() == hashlib.sha256(expected.read_bytes()).digest()
           root = Path(os.environ["RUNNER_TEMP"]) / "installed-conversation-sft-tests"
           root.mkdir()
           helpers = (
@@ -912,12 +938,19 @@ jobs:
               "runtime/test_packaged_sft_execution.py",
               "runtime/test_packaged_grpo_execution.py",
               "training/test_training_compiler.py",
+              "runtime/test_packaged_grpo_child.py",
+              "runtime/test_packaged_grpo_compilation.py",
+              "runtime/test_packaged_grpo_native.py",
+              "runtime/grpo_child_fixture.py",
+              "contract/test_grpo_training_input_v1.py",
+              "trainers/grpo/test_packaged_artifacts.py",
+              "trainers/grpo/test_runtime_v1.py",
           )
           for relative in helpers:
               target = root / "tests" / relative
               target.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(checkout / "tests" / relative, target)
-          for package in ("tests", "tests/training", "tests/runtime", "tests/trainers", "tests/trainers/sft"):
+          for package in ("tests", "tests/training", "tests/runtime", "tests/trainers", "tests/trainers/sft", "tests/trainers/grpo", "tests/contract"):
               (root / package / "__init__.py").touch()
           installed = Path(importlib.util.find_spec("tuner").origin).resolve().parent.parent
           (root / "schemas").mkdir()
@@ -931,8 +964,12 @@ jobs:
               str(root / "tests/training/test_conversation_sft_support.py"),
               str(root / "tests/trainers/sft/test_conversation_data_loader.py"),
               str(root / "tests/runtime/test_packaged_sft_execution.py"),
+              str(root / "tests/trainers/sft/test_runtime_v1.py") + "::test_real_decoder_and_isolated_worker_preserve_exact_closure",
               str(root / "tests/runtime/test_packaged_grpo_execution.py"),
-              str(root / "tests/trainers/sft/test_runtime_v1.py") + "::test_real_decoder_and_isolated_worker_preserve_exact_closure"]))
+              str(root / "tests/runtime/test_packaged_grpo_compilation.py"),
+              str(root / "tests/runtime/test_packaged_grpo_child.py"),
+              str(root / "tests/runtime/test_packaged_grpo_native.py"),
+              str(root / "tests/trainers/grpo/test_packaged_artifacts.py")]))
           PYCODE
 
       - name: Exercise installed public evaluation comparison and report readers
