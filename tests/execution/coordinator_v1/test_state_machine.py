@@ -228,3 +228,29 @@ def test_uncertain_cancel_observes_known_run_without_receipt_repair(provider_pha
   assert result.run_observation_digests and result.revision == uncertain.revision + 1
  with pytest.raises(WorkflowTransitionError):
   apply_provider_observation(uncertain, request, envelope, ObservationAuth(False))
+
+
+@pytest.mark.parametrize("phase", tuple(ProviderRunPhaseV1))
+def test_unadvanced_cancel_preserves_intent_during_independent_observation(phase):
+ q, foundation = queued_evidence()
+ pending = record_cancel_intent(q, intent("cancel"))
+ request, envelope = observation(pending, foundation, phase, {"phase": phase.value},
+                                "provider_failed" if phase is ProviderRunPhaseV1.FAILED else None)
+ settled = apply_provider_observation(pending, request, envelope, ObservationAuth())
+ expected = {ProviderRunPhaseV1.QUEUED: WorkflowPhaseV1.CANCEL_INTENT_RECORDED,
+             ProviderRunPhaseV1.RUNNING: WorkflowPhaseV1.CANCEL_INTENT_RECORDED,
+             ProviderRunPhaseV1.SUCCEEDED: WorkflowPhaseV1.SUCCEEDED_UNVERIFIED,
+             ProviderRunPhaseV1.FAILED: WorkflowPhaseV1.FAILED,
+             ProviderRunPhaseV1.CANCELLED: WorkflowPhaseV1.CANCELLED}[phase]
+ assert settled.phase is expected
+ assert settled.cancel == pending.cancel and not settled.cancel.advanced
+ assert settled.bound_cancellation is None and settled.pre_cancel_phase == pending.pre_cancel_phase
+ assert settled.submit == pending.submit
+ assert apply_provider_observation(settled, request, envelope, ObservationAuth()) == settled
+ with pytest.raises(WorkflowTransitionError):
+  apply_provider_observation(pending, request, envelope, ObservationAuth(False))
+ if phase is ProviderRunPhaseV1.CANCELLED:
+  with pytest.raises(ValueError):
+   replace(settled, revision=settled.revision + 1)
+  with pytest.raises(ValueError):
+   replace(settled, provider_run_observations=(), run_observation_digests=())

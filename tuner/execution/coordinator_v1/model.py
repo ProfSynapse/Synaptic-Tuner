@@ -1256,7 +1256,20 @@ class WorkflowRecordV1:
             if self.provider_run_ref is None or not self.run_observation_digests:
                 raise ValueError("cancelled fields invalid")
             if self.cancel is not None and not self.cancel.advanced:
-                raise ValueError("internal cancellation requires advanced intent")
+                # Independent terminal observation is not a cancellation receipt.
+                # Authentication is enforced by transition admission and durable replay.
+                observed = (self.provider_run_observations[-1].content
+                            if self.provider_run_observations else None)
+                ref = self.provider_run_ref.reference
+                if (self.bound_cancellation is not None or observed is None
+                        or observed.phase is not ProviderRunPhaseV1.CANCELLED
+                        or observed.source_revision != self.revision - 1
+                        or (observed.run, observed.provider_run_binding_digest,
+                            observed.provider_id, observed.profile_ref, observed.account_ref,
+                            observed.namespace_ref, observed.provider_job_ref) != (
+                            self.run, self.provider_run_ref.binding_digest, ref.provider_id,
+                            ref.profile_ref, ref.account_ref, ref.namespace_ref, ref.provider_job_ref)):
+                    raise ValueError("orphaned cancellation requires exact terminal observation")
         elif phase is WorkflowPhaseV1.CONTRADICTED:
             active = self.cancel or self.submit or self.stage
             if (not self.stage.advanced or not self.diagnostic_codes

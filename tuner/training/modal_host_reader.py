@@ -129,7 +129,7 @@ class ModalPackagedCoordinatorReaderV1:
         if (type(current) is not WorkflowRecordV1 or current.run != request.run
                 or current.record_digest != request.source_workflow_record_digest
                 or current.revision != request.source_revision
-                or current.phase not in {WorkflowPhaseV1.QUEUED, WorkflowPhaseV1.RUNNING,
+                or current.phase not in {WorkflowPhaseV1.CANCEL_INTENT_RECORDED, WorkflowPhaseV1.QUEUED, WorkflowPhaseV1.RUNNING,
                                          WorkflowPhaseV1.CANCEL_REQUESTED,
                                          WorkflowPhaseV1.CANCEL_RECONCILE_REQUIRED}):
             raise ModalPackagedReadUnavailable("modal_packaged_workflow_mismatch")

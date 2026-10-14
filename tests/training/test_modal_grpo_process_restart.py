@@ -187,11 +187,30 @@ def _child(role, root, expected_source):
         assert not Path(reader.__file__).resolve().is_relative_to(_TEST_ROOT)
     if role == "producer":
         _producer(root)
+    elif role == "orphaned_wrong_key":
+        from dataclasses import replace
+        state = process._snapshot(root)
+        before = process._census_digest(root, state["run"])
+        original = reader.load_retained_modal_run
+        with pytest.MonkeyPatch.context() as patch:
+            def changed_key(*args, **kwargs):
+                retained = original(*args, **kwargs)
+                return replace(retained, signing_keys={
+                    name: "changed-test-only-key-0000000000000000"
+                    for name in retained.signing_keys
+                })
+            patch.setattr(reader, "load_retained_modal_run", changed_key)
+            with pytest.raises(reader.ModalRetainedReadUnavailable):
+                process._consumer(root, "pending")
+        assert process._census_digest(root, state["run"]) == before
+        print(json.dumps({"pid": os.getpid(), "census_digest": before}), flush=True)
     elif role == "receipt_gap_reconcile":
         state = process._snapshot(root)
         before = process._census_digest(root, state["run"])
-        with pytest.raises(reader.ModalRetainedReadUnavailable):
+        from synaptic_tuner.api.v1.runs_facade import RunOperationError
+        with pytest.raises(RunOperationError) as rejected:
             process._consumer(root, "reconcile")
+        assert rejected.value.code.value == "read_ineligible"
         assert process._census_digest(root, state["run"]) == before
         print(json.dumps({"pid": os.getpid(), "state": "cancel_intent_recorded",
                           "census_digest": before}), flush=True)
@@ -226,7 +245,7 @@ def _trusted_proof_root(request):
 
 @pytest.mark.skipif(os.name != "posix", reason="SIGKILL process proof requires POSIX")
 def test_grpo_killed_producer_then_three_fresh_public_readers(
-    request, *, uncertain_cancel=False, cold_cancellation=False, receipt_gap=False
+    request, *, uncertain_cancel=False, cold_cancellation=False, receipt_gap=False, orphaned_reads=False
 ):
     root = _trusted_proof_root(request) / "grpo-process-proof"
     root.mkdir(mode=0o700)
@@ -300,28 +319,41 @@ def test_grpo_killed_producer_then_three_fresh_public_readers(
             assert refused["census_digest"] == cancelled["census_digest"]
             assert refused["pid"] not in (producer.pid, cancelled["pid"])
             assert (root / "cancel-events").read_text().splitlines() == [process._snapshot(root)["call_ref"]]
-            return
-        assert cancelled["state"] == "reconcile_required"
-        assert cancelled["pid"] != producer.pid
-        assert cancelled["cancel_intent"] is not None
-        state = process._snapshot(root)
-        state["expected_state"] = "reconcile_required"
-        state["expected_cancel"] = cancelled["cancel_intent"]
-        process._write(root / "cancelled-provider.json", state)
-        (root / "cancelled-provider.json").replace(root / "provider.json")
-        result = subprocess.run(_command(root, "reconcile"), env=environment,
-                                capture_output=True, timeout=60)
-        assert result.returncode == 0, result.stderr.decode()
-        reconciled = json.loads(result.stdout)
-        assert reconciled["state"] == "reconcile_required"
-        assert reconciled["cancel_intent"]["command_digest"] == cancelled["cancel_intent"]["command_digest"]
-        state["expected_cancel"] = reconciled["cancel_intent"]
-        process._write(root / "reconciled-provider.json", state)
-        (root / "reconciled-provider.json").replace(root / "provider.json")
-        assert (root / "cancel-events").read_text().splitlines() == [state["call_ref"]]
-        uncertain_cancel = True
-        # Later read-only contexts must preserve the authenticated cancel history.
-        ready["census_digest"] = reconciled["census_digest"]
+            if not orphaned_reads:
+                return
+            result = subprocess.run(_command(root, "orphaned_wrong_key"), env=environment,
+                                    capture_output=True, timeout=60)
+            assert result.returncode == 0, result.stderr.decode()
+            assert json.loads(result.stdout)["census_digest"] == cancelled["census_digest"]
+            assert (root / "cancel-events").read_text().splitlines() == [process._snapshot(root)["call_ref"]]
+            state = process._snapshot(root)
+            state["expected_state"] = "cancel_requested"
+            state["expected_cancel"] = cancelled["cancel_intent"]
+            process._write(root / "orphaned-provider.json", state)
+            (root / "orphaned-provider.json").replace(root / "provider.json")
+            ready["census_digest"] = cancelled["census_digest"]
+        else:
+            assert cancelled["state"] == "reconcile_required"
+            assert cancelled["pid"] != producer.pid
+            assert cancelled["cancel_intent"] is not None
+            state = process._snapshot(root)
+            state["expected_state"] = "reconcile_required"
+            state["expected_cancel"] = cancelled["cancel_intent"]
+            process._write(root / "cancelled-provider.json", state)
+            (root / "cancelled-provider.json").replace(root / "provider.json")
+            result = subprocess.run(_command(root, "reconcile"), env=environment,
+                                    capture_output=True, timeout=60)
+            assert result.returncode == 0, result.stderr.decode()
+            reconciled = json.loads(result.stdout)
+            assert reconciled["state"] == "reconcile_required"
+            assert reconciled["cancel_intent"]["command_digest"] == cancelled["cancel_intent"]["command_digest"]
+            state["expected_cancel"] = reconciled["cancel_intent"]
+            process._write(root / "reconciled-provider.json", state)
+            (root / "reconciled-provider.json").replace(root / "provider.json")
+            assert (root / "cancel-events").read_text().splitlines() == [state["call_ref"]]
+            uncertain_cancel = True
+            # Later read-only contexts must preserve the authenticated cancel history.
+            ready["census_digest"] = reconciled["census_digest"]
     observed = []
     for role in ("pending", "completed", "verified"):
         if role == "completed":
@@ -381,11 +413,11 @@ def test_grpo_killed_producer_then_three_fresh_public_readers(
     pending, completed, verified = observed
     assert len({producer.pid, *(item["pid"] for item in observed)}) == 4
     assert (
-        pending["state"] == ("reconcile_required" if uncertain_cancel else "queued")
+        pending["state"] == ("cancel_requested" if orphaned_reads else "reconcile_required" if uncertain_cancel else "queued")
         and pending["census_digest"] == ready["census_digest"]
     )
     assert (
-        completed["before"] == ("reconcile_required" if uncertain_cancel else "queued")
+        completed["before"] == ("cancel_requested" if orphaned_reads else "reconcile_required" if uncertain_cancel else "queued")
         and completed["state"] == "succeeded"
     )
     assert completed["verified_artifacts"] == verified["verified_artifacts"] == 5
