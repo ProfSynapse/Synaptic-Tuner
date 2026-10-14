@@ -1427,3 +1427,25 @@ cleanup retry requires confirmed exit and relinquished guardian custody. This
 is local process supervision, not a security sandbox or durable continuation.
 No generation row or uncertain paid request is replayed, and process cleanup
 alone does not establish a terminal DataAPI outcome.
+
+
+### Native run publication join installed acceptance — 2026-10-14
+
+The optional source adapter now joins the trusted stored verified RunsAPI
+manifest and public artifact streams to caller-owned publication ports and the
+existing ArtifactsAPI. Its deterministic signed source identity commits the
+public verified projection, not an invented native receipt digest. Default empty
+destinations and caller object lifetimes are unchanged.
+
+Independent review accepted `dd58dc4f`; root reviewed CI/docs `f8ac22ed`.
+Fresh sdist-derived wheel SHA256
+`d8f21284319d424a0fd9323e089d056437319392a45c520080f66a490ace2b61` passed base resources and **73 installed
+Docker/publication tests** under CPython 3.12.15. The source adapter is identical
+in source, wheel and installation. The controls connect public native five-role
+verification to local publication, then test terminal reads and marker-boundary
+recovery without provider calls, native source reopening or a second transfer.
+
+The process controls use real SIGKILL and a new first SQLite opener, retaining
+scripted fixture host inputs through fork. They do not establish independent
+remote-provider reconstruction or live training/publication. HF repository
+publication remains a separate destination and qualification gate.
