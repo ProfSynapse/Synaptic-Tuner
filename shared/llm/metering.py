@@ -46,6 +46,7 @@ class MeteredLLMClient(BaseLLMClient):
             self._meter.add(None)
             raise
         if type(completion) is not LLMCompletionV1:
+            self._meter.add(None)
             raise TypeError("wrapped client must return LLMCompletionV1 from chat()")
         self._meter.add(completion.usage)
         return completion
@@ -66,6 +67,7 @@ class MeteredLLMClient(BaseLLMClient):
             self._meter.add(None)
             raise
         if type(result) is not LLMStructuredV1:
+            self._meter.add(None)
             raise TypeError("wrapped client must return LLMStructuredV1 from structured_output()")
         self._meter.add(result.usage)
         return result
