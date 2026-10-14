@@ -10,6 +10,7 @@ from queue import Queue, Empty
 from contextlib import contextmanager
 import shlex
 import stat
+import sys
 import tempfile
 from threading import Thread
 import time
@@ -18,9 +19,11 @@ from synaptic_tuner.api.v1.ports import StoragePartition
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from tuner.execution.foundation_v2.commands import parse_exact_command
 from tuner.execution.foundation_v2.identities import EffectKind
-from .model import HFJobsError, document_bytes, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_TOTAL_BYTES
+from .model import HFJobsError, document_bytes, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_TOTAL_BYTES, MAX_INPUT_BYTES
 from .preparation import sha
 
+
+_MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 
 def _bounded(operation, deadline):
     """Bound SDK waiting; late remote/local effects remain possible and consumed."""
@@ -349,31 +352,34 @@ class HFJobsTransport:
 
         return _bounded(collect, deadline)
 
+    def _allocate_spool(self, item, maximum):
+        self._root()
+        if type(maximum) is not int or item.size > maximum:
+            raise HFJobsError("artifact_invalid")
+        root = Path(tempfile.mkdtemp(prefix="hf-read-", dir=self.scratch_root))
+        return root, root.lstat(), os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+
     @contextmanager
-    def _spool(self, item, maximum, token, deadline):
+    def _spool(self, item, maximum, token, deadline, *, downloaded=None):
         """Verify an owned 0600 leaf in a 0700 root.
 
         SDK leaves are normalized through the checked FD after writing inside
         the private root. Uncertain SDK scratch is retained; file permissions do not attest remote durability.
         """
-        self._root()
-        if type(maximum) is not int or item.size > maximum:
-            raise HFJobsError("artifact_invalid")
-        root = Path(tempfile.mkdtemp(prefix="hf-read-", dir=self.scratch_root))
+        root, root_info, parent = self._allocate_spool(item, maximum) if downloaded is None else downloaded
         leaf = root / "content"
         complete, descriptor = False, None
-        root_info = root.lstat()
-        parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
-            _bounded(
-                lambda: self.api.download_bucket_files(
-                    self._read_selection()["bucket_id"],
-                    [(item, leaf)],
-                    token=token,
-                    raise_on_missing_files=True,
-                ),
-                deadline,
-            )
+            if downloaded is None:
+                _bounded(
+                    lambda: self.api.download_bucket_files(
+                        self._read_selection()["bucket_id"],
+                        [(item, leaf)],
+                        token=token,
+                        raise_on_missing_files=True,
+                    ),
+                    deadline,
+                )
             self._root()
             descriptor = os.open(
                 "content", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
@@ -477,14 +483,21 @@ class HFJobsTransport:
                     os.unlink("content", dir_fd=parent)
                     root.rmdir()
             finally:
-                if descriptor is not None:
-                    os.close(descriptor)
-                os.close(parent)
+                primary = sys.exc_info()[0] is not None
+                failed = False
+                for fd in (descriptor, parent):
+                    if fd is not None:
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            failed = True
+                if failed and not primary:
+                    raise HFJobsError("artifact_invalid")
 
-    def _download(self, item, maximum, token, deadline):
-        if maximum > 64 * 1024 * 1024:
+    def _download(self, item, maximum, token, deadline, *, downloaded=None):
+        if maximum > _MAX_DOWNLOAD_BYTES:
             raise HFJobsError("input_invalid")
-        with self._spool(item, maximum, token, deadline) as (fd, digest, size, check):
+        with self._spool(item, maximum, token, deadline, downloaded=downloaded) as (fd, digest, size, check):
             chunks = []
             while True:
                 check()
@@ -495,6 +508,40 @@ class HFJobsTransport:
             check()
             return b"".join(chunks), digest
 
+    def _verify_staged_batch(self, members, token, deadline):
+        """One bounded SDK group; every member retains the ordinary spool guards."""
+        if (not members or len(members) > len(self.preparation.source_files) + 1
+                or any(type(value) is not bytes or len(value) > _MAX_DOWNLOAD_BYTES
+                       for _, value in members)
+                or sum(len(value) for _, value in members) > (
+                    sum(len(value) for value in self.preparation.source_files.values()) + MAX_INPUT_BYTES)):
+            raise HFJobsError("input_invalid")
+        pending = []
+        try:
+            for item, value in members:
+                pending.append((item, value, self._allocate_spool(item, len(value))))
+            _bounded(lambda: self.api.download_bucket_files(
+                self.selection.bucket_id,
+                [(item, spool[0] / "content") for item, _, spool in pending],
+                token=token, raise_on_missing_files=True,
+            ), deadline)
+            while pending:
+                item, value, spool = pending.pop(0)
+                observed, digest = self._download(item, len(value), token, deadline, downloaded=spool)
+                if observed != value or digest != sha(value):
+                    raise HFJobsError("binding_mismatch")
+        finally:
+            # Unconfirmed/late SDK writes retain their private namespaces.
+            primary = sys.exc_info()[0] is not None
+            failure = False
+            for _, _, spool in pending:
+                try:
+                    os.close(spool[2])
+                except OSError:
+                    failure = True
+            if failure and not primary:
+                raise HFJobsError("artifact_invalid")
+
     def stage(self, command):
         self._mutation()
         self._validate(command, EffectKind.STAGE)
@@ -502,30 +549,37 @@ class HFJobsTransport:
         self._secret(self.selection.job_token)
         self._claim(command)
         deadline = time.monotonic() + self.deadline_seconds
+        phase = "empty_slots"
         try:
             if (self._list(self.selection.source_prefix, len(self.preparation.source_files) + 1, token, deadline)
                     or self._list(self.selection.run_prefix, 2, token, deadline)):
                 raise HFJobsError("binding_mismatch")
             identity = self.preparation.input_identity
+            phase = "input_custody"
             with self.preparation.input_lease.take_stream() as stream:
                 raw = stream.read(identity.size_bytes + 1)
                 if type(raw) is not bytes or len(raw) != identity.size_bytes or sha(raw) != identity.content_digest:
                     raise HFJobsError("binding_mismatch")
                 source = dict(self.preparation.source_files)
+                if any(len(value) > _MAX_DOWNLOAD_BYTES for value in source.values()):
+                    raise HFJobsError("input_invalid")
                 add = [(content, self.selection.source_prefix + "/" + name)
                        for name, content in sorted(source.items())]
                 input_path = "input/" + identity.content_digest + "/private-dataset.jsonl"
                 add.append((raw, self.selection.run_prefix + "/" + input_path))
+                phase = "upload"
                 _bounded(lambda: self.api.batch_bucket_files(self.selection.bucket_id, add=add, token=token), deadline)
+                members = []
+                phase = "readback_inventory"
                 for prefix, expected in ((self.selection.source_prefix, source),
                                          (self.selection.run_prefix, {input_path: raw})):
                     listed = self._list(prefix, len(expected) + 1, token, deadline)
                     if set(listed) != set(expected):
                         raise HFJobsError("binding_mismatch")
-                    for name, value in expected.items():
-                        observed, digest = self._download(listed[name], len(value), token, deadline)
-                        if observed != value or digest != sha(value):
-                            raise HFJobsError("binding_mismatch")
+                    members.extend((listed[name], value) for name, value in expected.items())
+                phase = "readback_bytes"
+                self._verify_staged_batch(members, token, deadline)
+            phase = "receipt"
             receipt = self._retain("stage", command, {"schema_version": "synaptic-hf-stage-receipt/v1",
                 "command_digest": command.digest, "material_digest": self.preparation.material_digest,
                 "stage_ref": "hf-stage-" + command.digest, "effect_id": command.operation.effect.effect_id})
@@ -534,7 +588,19 @@ class HFJobsTransport:
                 canonical=document_bytes(receipt)) is not True:
                 raise HFJobsError("binding_mismatch")
             return receipt
-        except BaseException:
+        except BaseException as error:
+            failure = ("deadline" if isinstance(error, HFJobsError) and error.code == "deadline_exceeded"
+                       else "sdk" if isinstance(error, HFJobsError) and error.code == "read_unavailable"
+                       else "binding" if isinstance(error, HFJobsError) and error.code == "binding_mismatch"
+                       else "local")
+            try:
+                self.records.create(partition=StoragePartition.EFFECTS.value,
+                    key=self._key("stage-diagnostic", command.digest),
+                    canonical=document_bytes({"command_digest": command.digest,
+                        "material_digest": self.material_digest, "phase": phase,
+                        "failure_class": failure}))
+            except BaseException:
+                pass
             raise HFJobsError("stage_unavailable") from None
 
     def _validate(self, command, kind):

@@ -368,3 +368,14 @@ def open_host(config, *, state_root, mode, ports=None, sdk=None, api=None):
                 )
                 public = composed.api()
                 yield public.training, public.runs, provider, run
+
+
+def local_show(config, *, ports):
+    """Expose only authenticated local staging failure, without provider construction."""
+    from tuner.execution.providers.hf_jobs_provider_v1.retained_reader import read_local_stage_diagnostic
+
+    _, _, run, authority_ref, _ = _read_settings(config)
+    authority = compose_reference_authority(
+        clock=ports.clock, secrets=ports.secrets, authority_secret=authority_ref)
+    return read_local_stage_diagnostic(records=ports.records, streams=ports.streams,
+        run=run, authority=authority)
