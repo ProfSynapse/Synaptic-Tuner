@@ -499,6 +499,7 @@ def _joined(
             return self
 
         def get(self, *, timeout):
+            assert timeout == 0 and self.object_id in results
             return results[self.object_id]
 
     sdk = SimpleNamespace(
@@ -509,6 +510,20 @@ def _joined(
         exception=SimpleNamespace(NotFoundError=NotFoundError),
     )
     monkeypatch.setitem(sys.modules, "modal", sdk)
+    from tuner.execution.providers.modal.facade import (
+        ExplicitModal154ReadFacade, ModalFunctionCallState,
+    )
+
+    def observe_status(self, identifier, *, deadline):
+        # This completed-worker SDK double has output only for its captured
+        # call IDs. Actual raw protobuf status validation has pinned-SDK tests.
+        assert self.client is client
+        return (ModalFunctionCallState.RETURNED if identifier in results
+                else ModalFunctionCallState.UNKNOWN)
+
+    monkeypatch.setattr(
+        ExplicitModal154ReadFacade, "observe_known_call_status", observe_status
+    )
     async_utils = ModuleType("modal._utils.async_utils")
     import asyncio
 
