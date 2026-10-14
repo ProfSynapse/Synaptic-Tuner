@@ -163,9 +163,7 @@ def _consumer(root, role):
             return self
         def get(self, *, timeout):
             assert timeout == 0
-            reads.append('poll')
-            if state['phase'] == 'pending':
-                raise TimeoutError()
+            assert state['phase'] != 'pending'
             return state['call_result']
     class Calls:
         @staticmethod
@@ -183,6 +181,12 @@ def _consumer(root, role):
         patch.setattr(ModalPackagedHostEffectsV1, 'bind', forbidden)
     patch.setattr(runner, '_qualified_runtime', forbidden)
     patch.setattr(reader, 'validate_local_launcher', lambda: None)
+    from tuner.execution.providers.modal.facade import ModalFunctionCallState
+    def status_read(*args, **kwargs):
+        reads.append('poll')
+        return (ModalFunctionCallState.PENDING if state['phase'] == 'pending'
+                else ModalFunctionCallState.RETURNED)
+    patch.setattr(reader.ExplicitModal154ReadFacade, 'observe_known_call_status', status_read)
     patch.setattr(reader, 'open_modal_host_scope', lambda **kwargs: (client, scope))
     patch.setattr(reader, 'observe_modal_host_scope', lambda **kwargs: (scope.account_ref, scope.workspace_ref, scope.environment_ref, scope.client_ref))
     patch.setattr(reader._CurrentPackagedDeploymentReader, 'observe', lambda *args, **kwargs: facts)

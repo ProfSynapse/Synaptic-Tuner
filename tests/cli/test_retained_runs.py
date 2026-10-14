@@ -104,6 +104,9 @@ def setup_reader(tmp_path, monkeypatch, *, verified=True, fail=False):
             calls.append("close")
 
     module.open_retained_modal_runs = open_reader
+    def lifecycle_forbidden(**kwargs):
+        raise AssertionError("read actions must not open cancellation authority")
+    module.open_retained_modal_lifecycle = lifecycle_forbidden
     monkeypatch.setitem(sys.modules, module.__name__, module)
     monkeypatch.setitem(sys.modules, "modal", ModuleType("modal"))
     return calls

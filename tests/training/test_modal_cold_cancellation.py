@@ -393,7 +393,7 @@ def test_recipe_optin_is_exact_bool_and_absent_plan_bytes_unchanged(tmp_path):
     source = Path(runner.__file__).resolve().parents[2]
     raw = yaml.safe_load(
         (
-            source / "Trainers/recipes/qwen35_4b_32k_modal_prompt_completion.yaml"
+            Path("Trainers/recipes/qwen35_4b_32k_modal_prompt_completion.yaml")
         ).read_text()
     )
     path = tmp_path / "recipe.yaml"
