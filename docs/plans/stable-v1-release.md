@@ -838,8 +838,33 @@ byte for byte. Existing runtime inventories and pins are unchanged.
 
 The candidate remains unqualified. Git/source and provider observations in these
 CPU tests are explicit fixtures, not live source admission, image capture or
-training evidence. The current build planner derives its source root from its
-module location and requires Git HEAD there. A wheel-only installation therefore
-still needs an explicit accepted source/build-material handoff before ordinary
-Modal planning and launch are release-ready. The host-owned build profile stays
+training evidence. That build planner originally derived its source root from its
+module location and required Git HEAD there. The later explicit source handoff
+below removes that checkout-location assumption for installed callers. The host-owned build profile stays
 outside the wheel. GRPO execution and live model qualification remain separate.
+
+### Explicit source selection for installed Modal hosts
+
+The existing `SYNAPTIC_ENGINE_ROOT` setting and `ProjectContext.engine_root` now
+carry the selected engine build source through planning, local preparation,
+revalidation and capture. Preparation retains the selected directory identity,
+clean commit and build intent. Installed policy assets remain installed; both
+the selected source and the built wheel must contain the expected inspector
+before provider claims. Existing checkout defaults and restricted metrics source
+rules remain unchanged. A local clean commit does not replace pushed-source or
+host Gitlink authority.
+
+Fresh source-archive-built wheel
+`5b4df495f19282745674bfe253dbb3899eaef95ef19befe7e4264406a8dcf6fa`
+passed a base-only neutral consumer and 122 installed host tests. Seven changed
+production modules matched the source and installation byte for byte. The full
+267-case legacy runner suite also passed, and existing inventories remain current
+without hash or membership changes. The permanent installed lane uses actual
+test-owned Git repositories and checks missing/dirty/replaced sources and changed
+wheel inspectors, including the final pre-claim source recheck.
+
+Wheel building and provider replies are scripted in those controls. They prove
+source propagation and local consistency, not an actual provider image build,
+pushed-source admission or model/hardware qualification. Installed training still
+requires a separately admitted engine source checkout; the wheel is not a Git
+source repository. GRPO execution and provider parity qualification remain open.
