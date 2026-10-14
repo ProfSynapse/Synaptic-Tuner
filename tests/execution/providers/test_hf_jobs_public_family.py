@@ -772,7 +772,7 @@ def test_stage_failure_retains_closed_bound_diagnostic_and_never_submits(materia
     assert not [call for call in material.provider.calls if call[0] == "submit"]
 
 
-def test_cold_local_stage_diagnostic_authenticates_without_provider_or_source(material, monkeypatch):
+def test_cold_local_stage_diagnostic_authenticates_without_provider_or_source(material):
     from synaptic_tuner.api.v1.training_facade import TrainingRequest
     from tuner.execution.providers.hf_jobs_provider_v1.retained_reader import read_local_stage_diagnostic
 
@@ -794,14 +794,15 @@ def test_cold_local_stage_diagnostic_authenticates_without_provider_or_source(ma
     assert outcome["local_stage_diagnostic"]["failure_class"] == "sdk"
     assert outcome["provider_evidence"] is outcome["replay_authorized"] is False
     assert material.provider.calls == before
-    original_read = ports.records.read
-    monkeypatch.setattr(ports.records, "read", lambda **kwargs:
-        None if "/stage-diagnostic/" in kwargs["key"] else original_read(**kwargs))
-    legacy = read_local_stage_diagnostic(records=ports.records, streams=ports.streams,
+    class LegacyRecords:
+        def read(self, **kwargs):
+            return None if "/stage-diagnostic/" in kwargs["key"] else ports.records.read(**kwargs)
+        def __getattr__(self, name):
+            return getattr(ports.records, name)
+    legacy = read_local_stage_diagnostic(records=LegacyRecords(), streams=ports.streams,
         run=started.run, authority=authority)
     assert legacy["local_stage_diagnostic"] is None
     assert legacy["replay_authorized"] is legacy["provider_evidence"] is False
-    monkeypatch.setattr(ports.records, "read", original_read)
     row = next(row for row in ports.records.list_page(
         partition="effects", prefix="", after_key=None, limit=100).records
         if "/stage-diagnostic/" in row.key)
