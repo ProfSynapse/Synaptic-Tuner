@@ -44,3 +44,5 @@ placeholders are inactive for Docker. No HF account or billing selection is
 implied by this host branch. Source/fixture setup itself performs no image build,
 model download, GPU training, submission or cancellation. The separately
 approved public base pull is external retained evidence, not a claim by this repo.
+
+Git retains the historical prepared publication bytes, not private filesystem modes. The fixture test verifies an exact private copy; execution must create a fresh private publication through the supported preparation workflow.
