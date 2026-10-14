@@ -17,8 +17,8 @@ out `synaptic-tuner` submodule. Existing `train --job-config configuration/grpo.
 Keep actual run state under ignored `.synaptic/`, private directories0700/files0600.
 A Git checkout does not itself establish private runtime permissions.
 
-This commit is prepared locally, not pushed source evidence. Later public remote
-source verification must authenticate the actual host branch and exact engine
-gitlink before GPU training. CPU/provider qualification and training require root
-reviewed exact CI, current scope, bounded fresh attempt and explicit effect go-ahead.
-No historical authorization or example configuration authorizes those effects.
+Public remote source verification must authenticate the actual pushed host branch
+and exact engine gitlink before GPU training. Qualification and training retain
+reviewed exact CI, current scope and bounded fresh-attempt requirements. Existing
+explicit bounded session authorization remains applicable; the fixture and
+configuration alone are not effect authority.

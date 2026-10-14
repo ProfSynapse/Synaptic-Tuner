@@ -7,10 +7,13 @@ Do not merge it into main or an engine feature branch. Do not touch EHR.
   `reference/modal-jobs.md` before any training or chat operation.
 - Treat the engine submodule as read-only; make engine changes in the engine
   feature worktree, review them, then deliberately update the published pin.
-- Use the existing public TrainingAPI/RunsAPI and bounded run-chat adapter.
-  The example in `synaptic-tuner/examples/modal_chat` supplies one-shot
-  authenticated host composition, permanent attempt claims and result persistence.
-  Use its checked-in `launch.py`; do not add a throwaway cloud launcher.
+- Use the existing public TrainingAPI/RunsAPI. Prefer the installed normal
+  `python -I -m tuner train --job-config configuration/grpo.yaml --project-root .`
+  path for GRPO planning (`--plan`), local preparation (`--prepare-local`),
+  CPU qualification (`--qualify`) and ordinary execution (without those mode flags).
+  Keep its exact source/runtime/launcher bindings and permanent attempt claims.
+  The bounded run-chat adapter and checked-in `synaptic-tuner/examples/modal_chat/launch.py`
+  remain optional when applicable; do not add a throwaway cloud launcher.
 - Keep consumer configuration, data, authorities and state here. Private output
   belongs under ignored `.synaptic/`; credential values belong in neither
   source, command arguments, logs nor the example database.
