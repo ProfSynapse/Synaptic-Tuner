@@ -78,6 +78,8 @@ on:
       - "tests/execution/coordinator_v1/test_durable_publication_store.py"
       - "synaptic_tuner/api/v1/reference/publication_store.py"
       - "synaptic_tuner/api/v1/reference/local_publication.py"
+      - "synaptic_tuner/api/v1/reference/hf_publication.py"
+      - "tests/training/test_hf_model_publication.py"
       - "tests/execution/coordinator_v1/test_local_publication.py"
       - "synaptic_tuner/api/v1/reference/publication_sources.py"
       - "tests/training/test_local_run_artifact_publication.py"
@@ -1255,7 +1257,11 @@ jobs:
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
-          for name in ("tuner.training.coordinator_material", "tuner.runtime.dispatch", "synaptic_tuner.api.v1.reference.sqlite_store"):
+          for name in ("tuner.training.coordinator_material", "tuner.runtime.dispatch", "synaptic_tuner.api.v1.reference.sqlite_store",
+                       "synaptic_tuner.api.v1.reference.hf_publication",
+                       "synaptic_tuner.api.v1.reference.local_publication",
+                       "synaptic_tuner.api.v1.reference.publication_sources",
+                       "tuner.inference.retrieved_model"):
               location = Path(importlib.import_module(name).__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -1271,6 +1277,12 @@ jobs:
               "execution/providers/test_hf_jobs_public_lifecycle.py",
               "execution/providers/test_hf_jobs_retained_reader.py",
               "execution/providers/test_hf_jobs_process_readback.py",
+              "training/test_hf_model_publication.py",
+              "training/test_local_run_artifact_publication.py",
+              "training/test_docker_host_composition.py",
+              "execution/providers/docker_provider_v1/conftest.py",
+              "execution/providers/docker_provider_v1/test_local_source.py",
+              "execution/providers/docker_provider_v1/test_preparation.py",
               "training/test_sft_compilation.py",
               "runtime/test_artifact_verification.py",
           ):
@@ -1296,7 +1308,8 @@ jobs:
               str(root / "tests/execution/providers/test_hf_jobs_public_lifecycle.py"),
               str(root / "tests/execution/providers/test_hf_jobs_retained_reader.py"),
               str(root / "tests/execution/providers/test_hf_jobs_process_readback.py"),
-              str(root / "tests/examples/test_hf_training_qualification.py")]))
+              str(root / "tests/examples/test_hf_training_qualification.py"),
+              str(root / "tests/training/test_hf_model_publication.py")]))
           PYCODE
 
       - name: Exercise installed model preparation with the candidate image Hub SDK
