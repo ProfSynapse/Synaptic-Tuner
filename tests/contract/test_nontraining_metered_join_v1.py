@@ -120,17 +120,23 @@ def test_measured_data_environment_generate_improve_and_cold_reads(
         assert api.preflight(plan).ready
         generated = api.start(plan)
         outcome = api.show(generated.run)
-        assert outcome.rows_written == 1
+        assert outcome.rows_written == (0 if missing_usage else 1)
         assert outcome.state is (
             DataRunState.FAILED if missing_usage else DataRunState.SUCCEEDED
         )
         assert outcome.diagnostic_code == (
             "spend_indeterminate" if missing_usage else None
         )
-        spend._assert_artifacts_match_disk(outcome, Path(request.output_ref))
-        assert generation_client.chat_calls == 4 and generation_client.judge_calls > 0
-        assert any("missing_path" in prompt for prompt in generation_client.prompts)
-        assert prepared[-1].last_evaluation["passed"] and not list(scratch.iterdir())
+        if not missing_usage:
+            spend._assert_artifacts_match_disk(outcome, Path(request.output_ref))
+        if missing_usage:
+            assert generation_client.calls == generation_client.chat_calls == 1
+            assert generation_client.judge_calls == 0 and not outcome.artifacts
+        else:
+            assert generation_client.chat_calls == 4 and generation_client.judge_calls > 0
+            assert any("missing_path" in prompt for prompt in generation_client.prompts)
+            assert prepared[-1].last_evaluation["passed"]
+        assert not list(scratch.iterdir())
         (effect,) = spend._spend_records(store)
         assert effect.state is (
             SpendEffectState.INDETERMINATE if missing_usage else SpendEffectState.FOUND
@@ -204,7 +210,7 @@ def test_measured_data_environment_generate_improve_and_cold_reads(
         assert found.usage.output_tokens == improve_client.calls * spend.PER_CALL[1]
         snapshots = {
             Path(path): Path(path).read_bytes()
-            for path in (request.output_ref, improvement.output_ref)
+            for path in ((improvement.output_ref,) if missing_usage else (request.output_ref, improvement.output_ref))
         }
         assert not operations._environment_owners and not list(scratch.iterdir())
     scenario.unlink()
@@ -292,7 +298,7 @@ def test_measured_evaluation_reports_compare_after_sqlite_reopen(
             )
             results.append(api.evaluation.result(EvaluationResultRequest(run)))
         effects = spend._spend_records(store)
-        assert len(effects) == 2 and len(backend.chats) == 4
+        assert len(effects) == 2 and len(backend.chats) == (3 if missing_usage else 4)
         for effect in effects:
             missing = missing_usage and effect.entity.run_id == runs[1].run_id
             assert effect.state is (
@@ -324,12 +330,13 @@ def test_measured_evaluation_reports_compare_after_sqlite_reopen(
         )
         for run, result in zip(runs, results):
             assert cold.evaluation.result(EvaluationResultRequest(run)) == result
-        # Scoring can be comparable despite accounting uncertainty; comparing
+        # The refused later paid call makes scoring incomplete. Comparing
         # retained reports must not rewrite the failed run or close its spend.
         report = cold.evaluation.compare(
             *(EvaluationResultRequest(run) for run in runs)
         )
-        assert report["passed"] and report["reference_run"] == runs[0].to_dict()
+        assert report["passed"] is (not missing_usage)
+        assert report["reference_run"] == runs[0].to_dict()
         assert report["candidate_run"] == runs[1].to_dict()
         if missing_usage:
             assert cold.evaluation.show(runs[1]).state is EvaluationRunState.FAILED

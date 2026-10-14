@@ -569,20 +569,32 @@ class _MeteredBackendClient:
     (``structured_chat``, ``is_server_running``, ...) passes through unchanged.
     """
 
-    __slots__ = ("_inner", "_meter")
+    __slots__ = ("_inner", "_meter", "_stop_on_unknown")
 
-    def __init__(self, inner, meter: UsageAccumulator) -> None:
+    def __init__(self, inner, meter: UsageAccumulator, *, stop_on_unknown: bool = False) -> None:
+        if type(stop_on_unknown) is not bool:
+            raise TypeError("stop_on_unknown must be exact bool")
+        self._stop_on_unknown = stop_on_unknown
         self._inner = inner
         self._meter = meter
 
     def chat(self, messages):
+        if self._stop_on_unknown and self._meter.indeterminate:
+            from shared.llm.metering import MeteredCallRefused
+            raise MeteredCallRefused()
         try:
             response = self._inner.chat(messages)
         except BaseException:
             # The request may have reached the provider: an unmeasured call.
             self._meter.add(None)
             raise
-        self._meter.add(getattr(response, "usage", None))
+        try:
+            usage = getattr(response, "usage", None)
+        except BaseException:
+            if self._stop_on_unknown:
+                self._meter.add(None)
+            raise
+        self._meter.add(usage)
         return response
 
     def __getattr__(self, name: str):
@@ -1456,7 +1468,8 @@ class ReferenceEvaluationOperationsV1:
                 )
             try:
                 response_meter = meter if scope is None or backend.requirement().paid_effect else UsageAccumulator()
-                client = _MeteredBackendClient(backend.open(request.model), response_meter)
+                client = _MeteredBackendClient(backend.open(request.model), response_meter,
+                    stop_on_unknown=scope is not None and backend.requirement().paid_effect)
             except Exception:
                 if (spend is not None and backend.requirement().paid_effect
                         and self._ports.judge is not None and self._ports.judge.requirement().paid_effect):
@@ -1469,7 +1482,7 @@ class ReferenceEvaluationOperationsV1:
                         from shared.llm.metering import MeteredLLMClient
                         from Evaluator.judge_validator import JudgeValidator
                         inner = self._ports.judge.create_client()
-                        metered_judge_client = MeteredLLMClient(inner, meter)
+                        metered_judge_client = MeteredLLMClient(inner, meter, stop_on_unknown=True)
                         judge = self._ports.judge.open_with_client(metered_judge_client)
                         if type(judge) is not JudgeValidator or judge.judge_service.llm_client is not metered_judge_client:
                             raise TypeError("paid judge construction unavailable")

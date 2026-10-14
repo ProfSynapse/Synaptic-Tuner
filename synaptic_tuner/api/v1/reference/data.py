@@ -852,7 +852,8 @@ class ReferenceDataOperationsV1:
             self._environment_owners[run.run_id] = validator
         try:
             client = client_type(
-                self._ports.llm_clients.create(backend=plan.request.backend, model=plan.request.model), meter
+                self._ports.llm_clients.create(backend=plan.request.backend, model=plan.request.model), meter,
+                stop_on_unknown=scope is not None
             )
         except Exception:
             if selected:

@@ -435,7 +435,8 @@ def test_paid_data_run_with_an_unmeasured_call_fails_spend_indeterminate(tmp_pat
     run = api.start(plan).run
     outcome = api.show(run)
     assert outcome.state is DataRunState.FAILED and outcome.diagnostic_code == "spend_indeterminate"
-    assert outcome.rows_written == 3  # rows were written; only the spend is indeterminate
+    assert outcome.rows_written == 1  # no later paid request follows unknown usage
+    assert client.chat_calls == 5
     assert "usage" not in harness.head_result(run)
     (effect,) = _spend_records(harness.records)
     assert effect.state is SpendEffectState.INDETERMINATE and effect.usage is None

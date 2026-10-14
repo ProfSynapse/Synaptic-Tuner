@@ -173,3 +173,12 @@ completion values and uncertain paid construction cannot establish zero
 spend. A metered external judge remains an unverified comparison input.
 Existing provider transports here have no finite HTTP byte-cap guarantee;
 null output tokens do not promise unlimited context or elapsed time.
+
+Paid reference Data and evaluation clients stop further account-linked requests
+after any request has unknown usage/outcome, including exceptions, malformed
+completion values or missing usage. The run's existing shared accumulator makes
+this stop sticky across paid response/judge clients; refused retries make no
+inner request and add no actual-call count. Known measured retries remain
+possible. Local/unpaid clients retain their previous behavior by default.
+This does not terminate an in-flight request, suppress provider-internal retries,
+prove no remote effect, or authorize recovery/replay.

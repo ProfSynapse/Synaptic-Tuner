@@ -149,7 +149,8 @@ def test_real_judge_same_account_usage_and_swallowed_uncertainty(
     outcome = api.evaluation.show(run)
     result = api.evaluation.result(EvaluationResultRequest(run))
     (effect,) = spend._spend_records(records)
-    assert len(inner.calls) == 2 and len(backend.chats) == 2
+    assert len(inner.calls) == (2 if mode == "measured" else 1)
+    assert len(backend.chats) == (1 if response_paid and mode != "measured" else 2)
     assert secrets.calls == [KEY] and constructed == [{"timeout_seconds": 60.0}]
     assert inner.calls[0][1]["max_tokens"] == 123
     assert "changed after construction" not in json.dumps(inner.calls)

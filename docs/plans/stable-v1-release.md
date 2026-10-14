@@ -1206,3 +1206,25 @@ passed the base consumer and all 69 installed HF controls with pinned Hub 1.33.0
 in 84.89 seconds. All four changed production modules match reviewed bytes in
 the wheel and installed package. Seven maintenance checks remain current without
 inventory or pin changes; skill mirrors match. No live provider effects occurred.
+
+### Stop subsequent paid calls after unknown usage
+
+Paid Data and evaluation clients now refuse subsequent requests once their
+shared run accumulator becomes indeterminate. Exceptions, malformed responses,
+missing usage and failing usage accessors retain uncertainty; a refused retry
+does not dispatch or add another actual-call count. Paid response and judge
+wrappers share this state. The option defaults off for legacy/local clients,
+and known measured retries remain available. This prevents later wrapper
+dispatches; it does not terminate an in-flight request, control provider-internal
+retries or authorize replay after restart.
+
+Independent review found and corrected the usage-accessor exception edge case.
+The final source passed 123 author regressions and 18 independent focused
+controls, including the actual improvement retry loop, a swallowed JudgeService
+failure, sibling wrappers and local compatibility. Fresh sdist-built wheel
+`14dc85d4d2a1b90b00c52e25005096c48c145518faef3c770f42cf22095e2ad1`
+passed the base consumer and all 284 installed evaluation/report controls in
+5.92 seconds. All three changed production modules match reviewed source in
+the wheel and installed package. Seven maintenance checks remain current and
+skill mirrors match. No live provider effects occurred. HTTP response bounds,
+whole-operation deadlines and live account/model qualification remain separate.
