@@ -1344,9 +1344,13 @@ pins unchanged. Use a separate CPython 3.11.14 venv and install only
 --only-binary :all:`; the existing Python/uv setup commands are in the example
 README. This is host setup, not local training or Docker. Provider-free `check`
 mode remains available on other supported project interpreters. The consumer
-lock includes the 37-package remote launcher lock plus Requests and its two
-otherwise absent dependencies, needed by host chat imports. It leaves remote
-dependency/runtime pins unchanged. Source/runtime
+lock historically supplemented the 37-package launcher closure with Requests
+and its two missing dependencies for host chat imports. The ordinary Modal
+launcher now includes those required engine dependencies directly: install its
+40 exact hashed pins and the engine wheel with `--no-deps`, then run `pip check`
+in that same isolated environment (41 installed distributions). Keep existing
+consumer lock pins unchanged. This closes package dependencies, not image or
+model qualification. Source/runtime
 and live qualification gates still apply; version agreement is not proof of a
 successful deployment. See [Modal's serialized-function guidance](https://modal.com/docs/guide/jupyter-notebooks#known-issues).
 

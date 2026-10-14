@@ -1473,9 +1473,11 @@ jobs:
             -r requirements/modal-launcher-v1.lock
           python -m pip --python "$RUNNER_TEMP/modal-source-controller" install \
             --no-deps "$RUNNER_TEMP"/wheelhouse/synaptic_tuner-*.whl
+          python -m pip --python "$RUNNER_TEMP/modal-source-controller" check
           "$RUNNER_TEMP/modal-source-controller/bin/python" -I - <<'PY'
           import platform
-          from importlib.metadata import version
+          from importlib.metadata import distributions, version
+          assert len(list(distributions())) == 41  # 40 locked dependencies + engine
           assert platform.python_version() == "3.11.14"
           assert version("modal") == "1.5.4"
           PY
