@@ -158,3 +158,37 @@ def test_default_metered_local_client_keeps_legacy_missing_usage_calls():
     wrapped.structured_output([], {})
     assert inner.calls == ["chat", "structured"] and meter.calls == 2
     assert meter.indeterminate
+
+
+def test_paid_backend_raising_usage_accessor_latches_without_swallowing():
+    class UsageFailure(RuntimeError):
+        pass
+
+    class Response:
+        @property
+        def usage(self):
+            raise UsageFailure("private accessor failure")
+
+    backend, meter = Mock(), UsageAccumulator()
+    backend.chat.return_value = Response()
+    client = _MeteredBackendClient(backend, meter, stop_on_unknown=True)
+    with pytest.raises(UsageFailure):
+        client.chat([])
+    with pytest.raises(MeteredCallRefused):
+        client.chat([])
+    assert backend.chat.call_count == meter.calls == meter.unmeasured == 1
+
+
+def test_default_backend_raising_usage_accessor_preserves_legacy_behavior():
+    class Response:
+        @property
+        def usage(self):
+            raise ValueError("legacy accessor failure")
+
+    backend, meter = Mock(), UsageAccumulator()
+    backend.chat.return_value = Response()
+    client = _MeteredBackendClient(backend, meter)
+    for _ in range(2):
+        with pytest.raises(ValueError):
+            client.chat([])
+    assert backend.chat.call_count == 2 and meter.calls == 0

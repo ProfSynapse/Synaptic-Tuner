@@ -588,7 +588,13 @@ class _MeteredBackendClient:
             # The request may have reached the provider: an unmeasured call.
             self._meter.add(None)
             raise
-        self._meter.add(getattr(response, "usage", None))
+        try:
+            usage = getattr(response, "usage", None)
+        except BaseException:
+            if self._stop_on_unknown:
+                self._meter.add(None)
+            raise
+        self._meter.add(usage)
         return response
 
     def __getattr__(self, name: str):
