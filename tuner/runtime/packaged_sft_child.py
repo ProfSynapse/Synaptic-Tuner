@@ -179,9 +179,16 @@ def _installed_import_guard(release, trainer, *, method="sft"):
                 if _digest(stable_read(path)) != expected_hash:
                     raise ValueError("PACKAGED_CHILD_IMPORT_REJECTED")
                 members[path] = expected_hash
+    if method == "grpo":
+        from tuner.runtime.offline_grpo_worker import verify_installed_grpo_members
+        closure = verify_installed_grpo_members().closure
+        root = Path(__file__).absolute().parents[2]
+        allowed = {root / member.path for member in closure.members}
+        members = {path: digest for path, digest in members.items() if path in allowed}
     if trainer not in members:
         raise ValueError("PACKAGED_CHILD_IMPORT_REJECTED")
-    for directory in (trainer.parent / "configs", trainer.parent / "src"):
+    directories = (trainer.parent / "configs", trainer.parent / "src") if method == "sft" else (trainer.parent / "src",)
+    for directory in directories:
         # No unowned directory or linked search root may enter sys.path.
         if directory.is_symlink() or directory.resolve(strict=True) != directory or not any(directory in path.parents for path in members):
             raise ValueError("PACKAGED_CHILD_IMPORT_REJECTED")

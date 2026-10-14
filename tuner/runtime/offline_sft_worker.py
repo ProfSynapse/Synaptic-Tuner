@@ -321,14 +321,25 @@ def _parse_manifest(
     *,
     manifest_path: Path,
     expected_digest: str,
+    method: str = "sft",
 ) -> OfflineSFTWorkerClosure:
+    if method == "sft":
+        identity = (OFFLINE_SFT_CLOSURE_SCHEMA, OFFLINE_SFT_CLOSURE_REF,
+                    OFFLINE_SFT_ENTRYPOINT, OFFLINE_SFT_TRAINER_ENTRYPOINT, OFFLINE_SFT_BOOTSTRAP)
+    elif method == "grpo":
+        from .offline_grpo_worker import (GRPO_CLOSURE_SCHEMA, GRPO_CLOSURE_REF,
+            GRPO_ENTRYPOINT, GRPO_TRAINER_ENTRYPOINT, GRPO_BOOTSTRAP, GRPO_OFFLINE_MEMBERS)
+        identity = (GRPO_CLOSURE_SCHEMA, GRPO_CLOSURE_REF, GRPO_ENTRYPOINT,
+                    GRPO_TRAINER_ENTRYPOINT, GRPO_BOOTSTRAP)
+    else:
+        raise OfflineSFTWorkerError("worker method is unsupported")
     if set(document) != _MANIFEST_FIELDS:
         raise OfflineSFTWorkerError("worker closure manifest fields are malformed")
     if (
-        document["schema_version"] != OFFLINE_SFT_CLOSURE_SCHEMA
-        or document["closure_ref"] != OFFLINE_SFT_CLOSURE_REF
-        or document["entrypoint"] != OFFLINE_SFT_ENTRYPOINT
-        or document["trainer_entrypoint"] != OFFLINE_SFT_TRAINER_ENTRYPOINT
+        document["schema_version"] != identity[0]
+        or document["closure_ref"] != identity[1]
+        or document["entrypoint"] != identity[2]
+        or document["trainer_entrypoint"] != identity[3]
         or document["owned_module_prefixes"] != list(OWNED_MODULE_PREFIXES)
         or document["optional_features"] != []
     ):
@@ -382,11 +393,9 @@ def _parse_manifest(
         or not 0 < payload_bytes <= _MAX_CLOSURE_BYTES
     ):
         raise OfflineSFTWorkerError("worker closure totals or ordering are invalid")
-    required = {
-        OFFLINE_SFT_ENTRYPOINT,
-        OFFLINE_SFT_TRAINER_ENTRYPOINT,
-        OFFLINE_SFT_BOOTSTRAP,
-    }
+    required = set(identity[2:])
+    if method == "grpo" and tuple(paths) != GRPO_OFFLINE_MEMBERS:
+        raise OfflineSFTWorkerError("GRPO worker inventory is unsupported")
     if not required.issubset(set(paths)):
         raise OfflineSFTWorkerError("worker closure lacks a required entrypoint")
     return OfflineSFTWorkerClosure(

@@ -1,0 +1,327 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-packaged-grpo-worker-closure-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "members",
+    "closure_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "synaptic-packaged-grpo-worker-closure/v1"
+    },
+    "members": {
+      "type": "array",
+      "minItems": 13,
+      "maxItems": 13,
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/manifests/offline-grpo-worker-v1.json"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/offline_grpo_worker.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/offline_sft_worker.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_grpo_child.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_grpo_execution.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_grpo_verification.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_grpo_worker_closure.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_sft_child.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_sft_execution.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_training_worker.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_worker_closure.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/releases.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/training/packaged_grpo_compilation.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      ],
+      "items": false
+    },
+    "closure_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

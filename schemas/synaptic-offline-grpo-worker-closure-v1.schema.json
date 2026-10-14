@@ -1,0 +1,3605 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.synapticlabs.ai/synaptic-offline-grpo-worker-closure-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "closure_ref",
+    "entrypoint",
+    "trainer_entrypoint",
+    "owned_module_prefixes",
+    "optional_features",
+    "member_count",
+    "payload_bytes",
+    "closure_digest",
+    "members"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "synaptic-offline-grpo-worker-closure/v1"
+    },
+    "closure_ref": {
+      "const": "synaptic/offline-grpo-worker/v1"
+    },
+    "entrypoint": {
+      "const": "tuner/runtime/packaged_grpo_child.py"
+    },
+    "trainer_entrypoint": {
+      "const": "Trainers/grpo/runtime_v1.py"
+    },
+    "owned_module_prefixes": {
+      "const": [
+        "tuner",
+        "synaptic_tuner",
+        "Trainers",
+        "shared",
+        "SynthChat",
+        "Evaluator",
+        "MechInterp",
+        "configs",
+        "src"
+      ]
+    },
+    "optional_features": {
+      "const": []
+    },
+    "member_count": {
+      "const": 131
+    },
+    "payload_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 536870912
+    },
+    "closure_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "members": {
+      "type": "array",
+      "minItems": 131,
+      "maxItems": 131,
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "SynthChat/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "SynthChat/config/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "SynthChat/config/config_loader.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "SynthChat/config/format_resolver.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "SynthChat/utils/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "SynthChat/utils/prompt_renderer.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "SynthChat/utils/yaml_loader.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "Trainers/grpo/configs/config.yaml"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "Trainers/grpo/runtime_v1.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "Trainers/grpo/src/data_loader.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "Trainers/grpo/src/model_loader.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "Trainers/grpo/src/rewards.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "Trainers/sft/runtime_v1.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/judge/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/judge/interaction_logger.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/judge/judge_service.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/judge/models.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/judge/rubric_loader.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/judge/schema_builder.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/base.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/config.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/exceptions.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/factory.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/providers/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/providers/lmstudio.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/providers/ollama.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/providers/openai_responses.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/providers/openrouter.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/providers/unsloth.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/llm/usage.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/ml/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/ml/retrieval_metrics.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/model_loading/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/model_loading/merge.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/training_utils.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/utilities/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/utilities/env.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/utilities/paths.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/utilities/yaml_loader.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/fitness.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/parsing/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/parsing/configured_formats.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/parsing/enums.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/parsing/response_parser.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/parsing/tool_call_parser.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/parsing/utilities.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/rollout_filters.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/rubric/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/rubric/rubric_cache.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/rubric/rubric_loader.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/rubric/rubric_repository.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/validators/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/validators/base.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/validators/content/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/validators/content/code_validator.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/validators/content/json_validator.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/validators/content/regex_validator.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/validators/content/xml_validator.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/validators/content/yaml_validator.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/validators/cross_scope_validator.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/validation/validators/structure_validator.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/builtins/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/builtins/args_match.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/builtins/assertion_verifier.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/builtins/audio_verifier.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/builtins/llm_judge.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/builtins/retrieval_verifier.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/builtins/structure.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/builtins/substring.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/builtins/tool_sequence.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/composite.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/contract.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/extraction.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "shared/verifiers/registry.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/_version.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/v1/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/v1/_contract.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/v1/_timestamps.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/v1/observations.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/v1/planning.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/v1/providers.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/v1/results.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/v1/training_facade.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/v1/training_input.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/v1/training_sources.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "synaptic_tuner/api/v1/usage.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/cloud/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/cloud/runtime_layout.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/execution/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/execution/contracts.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/execution/evidence.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/execution/lifecycle.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/execution/registry.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/execution/service.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/project/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/project/config_layers.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/project/context.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/project/errors.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/project/execution_source.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/project/git_verification.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/project/manifest.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/project/path_refs.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/project/secrets.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/project/source_bundle.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/artifacts.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/dispatch.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/offline_grpo_worker.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/offline_sft_worker.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_grpo_child.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_grpo_execution.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_grpo_verification.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_grpo_worker_closure.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_sft_child.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_sft_execution.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_training_worker.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/packaged_worker_closure.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/releases.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/runtime/verification.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/training/__init__.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/training/contracts.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/training/grpo_compilation.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/training/packaged_compilation.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/training/packaged_grpo_compilation.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "size_bytes",
+            "sha256",
+            "git_mode"
+          ],
+          "properties": {
+            "path": {
+              "const": "tuner/training/recipes.py"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 67108864
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "git_mode": {
+              "const": "100644"
+            }
+          }
+        }
+      ],
+      "items": false
+    }
+  }
+}

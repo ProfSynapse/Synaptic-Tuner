@@ -50,7 +50,7 @@ class PackagedLocalCPUStageError(PackagedTrainingWorkerError):
 
 
 def admit_packaged_training_release(
-    payload: bytes, *, expected_release_digest: str
+    payload: bytes, *, expected_release_digest: str, method: str = "sft"
 ) -> PackagedRuntimeRelease:
     """Authenticate one canonical release against the installed worker closure.
 
@@ -69,7 +69,13 @@ def admit_packaged_training_release(
         release = parse_packaged_runtime_release(document)
         if release.canonical_bytes() != payload:
             raise ValueError
-        closure = load_packaged_worker_closure()
+        if method == "sft":
+            closure = load_packaged_worker_closure()
+        elif method == "grpo":
+            from tuner.runtime.packaged_grpo_worker_closure import load_packaged_grpo_worker_closure
+            closure = load_packaged_grpo_worker_closure()
+        else:
+            raise ValueError
     except BaseException as exc:
         # The boundary has one externally observable rejection.  In particular,
         # resource/manifest-loader faults must not leak into worker diagnostics.
@@ -91,6 +97,17 @@ def main() -> int:
     # with its embedded immutable bytes before any training side effects.
     print("PACKAGED_TRAINING_WORKER_REJECTED")
     return 2
+
+
+def admit_packaged_grpo(**kwargs):
+    """Fixed GRPO admission; the selected workload is revalidated internally."""
+    from tuner.runtime.packaged_grpo_execution import admit_packaged_grpo as admit
+    return admit(**kwargs)
+
+
+def execute_admitted_packaged_grpo(admitted, **kwargs):
+    from tuner.runtime.packaged_grpo_execution import execute_admitted_packaged_grpo as execute
+    return execute(admitted, **kwargs)
 
 
 def admit_packaged_sft(**kwargs):
@@ -492,13 +509,24 @@ def _ambient_inventory(expected: dict) -> list[dict[str, str]]:
     return inventory
 
 
-def inspect_installed_runtime(expected: dict, *, inventory_scope: str = "ambient") -> dict:
+def inspect_installed_runtime(expected: dict, *, inventory_scope: str = "ambient", method=None) -> dict:
     """Measure reviewed wheel bytes, installed members and worker closure.
 
     Called only by the fixed image inspector after exact-interpreter admission.
     Inputs are build-bound profile data; there is no release digest circularity.
     """
     if type(inventory_scope) is not str or inventory_scope not in {"ambient", "reviewed_roots"}:
+        raise PackagedInstalledRuntimeInspectionError("INPUTS") from None
+    if type(expected) is not dict or type(expected.get("capabilities")) is not dict:
+        raise PackagedInstalledRuntimeInspectionError("INPUTS") from None
+    capabilities = expected["capabilities"]
+    if type(capabilities.get("contracts")) is not dict or type(capabilities.get("compatibility")) is not dict:
+        raise PackagedInstalledRuntimeInspectionError("INPUTS") from None
+    selected = "grpo" if capabilities["contracts"].get("workload_schema") == "synaptic-packaged-grpo-workload/v1" else "sft"
+    if method is None:
+        method = selected
+    if (method != selected or method not in {"sft", "grpo"}
+            or (method == "grpo" and expected.get("capabilities", {}).get("compatibility", {}).get("methods") != ["grpo"])):
         raise PackagedInstalledRuntimeInspectionError("INPUTS") from None
     def canonical(value):
         return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
@@ -577,7 +605,13 @@ def inspect_installed_runtime(expected: dict, *, inventory_scope: str = "ambient
         except BaseException:
             raise PackagedInstalledRuntimeInspectionError("MEMBERS") from None
     try:
-        closure = load_packaged_worker_closure()
+        if method == "sft":
+            closure = load_packaged_worker_closure()
+        elif method == "grpo":
+            from tuner.runtime.packaged_grpo_worker_closure import load_packaged_grpo_worker_closure
+            closure = load_packaged_grpo_worker_closure()
+        else:
+            raise ValueError
     except BaseException:
         raise PackagedInstalledRuntimeInspectionError("CLOSURE") from None
     if inventory_scope == "ambient":
@@ -607,6 +641,8 @@ __all__ = [
     "PackagedLocalCPUStageError",
     "PackagedTrainingWorkerError",
     "admit_packaged_training_release",
+    "admit_packaged_grpo",
+    "execute_admitted_packaged_grpo",
     "admit_packaged_sft",
     "execute_admitted_packaged_sft",
     "main",

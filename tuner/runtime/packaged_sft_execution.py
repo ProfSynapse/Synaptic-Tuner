@@ -396,7 +396,10 @@ def _inspect_release(release, *, allow_equivalent_executable: bool = False,
             raise ValueError
         stage = "INSTALLED_RUNTIME"
         try:
-            measured = inspect_installed_runtime(expected, inventory_scope=inventory_scope)
+            if method == "sft":
+                measured = inspect_installed_runtime(expected, inventory_scope=inventory_scope)
+            else:
+                measured = inspect_installed_runtime(expected, inventory_scope=inventory_scope, method=method)
         except PackagedInstalledRuntimeInspectionError as error:
             if (type(error) is PackagedInstalledRuntimeInspectionError
                     and type(error.stage) is str
