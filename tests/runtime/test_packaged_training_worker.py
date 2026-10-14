@@ -169,6 +169,8 @@ def test_qualification_from_nonisolated_parent_keeps_child_boundary(
     monkeypatch.setattr(worker, "parse_packaged_runtime_release", lambda _: release)
     monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *args, **kwargs: release)
     monkeypatch.setattr(worker, "_parent_trainer_reference", lambda _: trainer_digest)
+    from Trainers.sft import runtime_v1 as core
+    monkeypatch.setattr(worker, "_local_cpu_core", lambda _: core)
     original_flags = sys.flags
     class NonIsolatedFlags:
         isolated = 0
@@ -187,8 +189,8 @@ def test_qualification_from_nonisolated_parent_keeps_child_boundary(
         assert kwargs["stdin"] == subprocess.DEVNULL
         assert len(kwargs["pass_fds"]) == 1
         fd = kwargs["pass_fds"][0]
-        seals = fcntl.fcntl(fd, fcntl.F_GET_SEALS)
-        assert seals & fcntl.F_SEAL_WRITE
+        seals = fcntl.fcntl(fd, core._LINUX_F_GET_SEALS)
+        assert seals & core._LINUX_F_SEAL_WRITE
         assert os.pread(fd, len(worker.LOCAL_CPU_DATA), 0) == worker.LOCAL_CPU_DATA
         expected = worker.local_cpu_result(release, trainer_digest)
         kwargs["stdout"].write(execution._canonical(expected) + extra_output)
@@ -236,6 +238,8 @@ def test_qualification_collapses_child_exit_and_stderr(
     monkeypatch.setattr(worker, "parse_packaged_runtime_release", lambda _: release)
     monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *args, **kwargs: release)
     monkeypatch.setattr(worker, "_parent_trainer_reference", lambda _: trainer_digest)
+    from Trainers.sft import runtime_v1 as core
+    monkeypatch.setattr(worker, "_local_cpu_core", lambda _: core)
 
     def fail_child(command, **kwargs):
         kwargs["stdout"].write(execution._canonical(worker.local_cpu_result(release, trainer_digest)))
@@ -263,3 +267,67 @@ def test_local_cpu_child_rejects_nonisolated_interpreter(monkeypatch: pytest.Mon
     monkeypatch.setattr(packaged_sft_child.sys, "flags", NonIsolatedFlags())
     with pytest.raises(ValueError):
         packaged_sft_child.run_local_cpu_child(["--qualify-local", "transport", "0" * 64])
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        "../runtime_v1.py",
+        "/tmp/core.py",
+        "Trainers/grpo/runtime_v1.py",
+        "tuner/runtime/offline_sft_worker.py",
+        True,
+    ],
+)
+def test_parent_reference_member_override_is_closed(monkeypatch, member):
+    release = _reference_fixture(
+        monkeypatch, _wheel_bytes([(worker._SFT_CORE_MEMBER, b"pass\n")])
+    )
+    with pytest.raises(ValueError):
+        worker._parent_trainer_reference(release, member=member)
+
+
+def test_parent_reference_can_authenticate_fixed_shared_core(monkeypatch):
+    content = b"# fixed shared core\n"
+    release = _reference_fixture(
+        monkeypatch, _wheel_bytes([(worker._SFT_CORE_MEMBER, content)])
+    )
+    assert (
+        worker._parent_trainer_reference(release, member=worker._SFT_CORE_MEMBER)
+        == hashlib.sha256(content).hexdigest()
+    )
+
+
+@pytest.mark.parametrize("changed", [None, "bytes", "origin"])
+def test_parent_core_requires_exact_installed_member_and_loaded_origin(
+    monkeypatch, changed
+):
+    import importlib.metadata
+    from Trainers.sft import runtime_v1 as core
+
+    origin = Path(core.__file__)
+    raw = origin.read_bytes()
+    release = _reference_fixture(
+        monkeypatch, _wheel_bytes([(worker._SFT_CORE_MEMBER, raw)])
+    )
+    pinned_read = worker.stable_read
+
+    def read(path, maximum):
+        if path == origin:
+            assert maximum == worker._MAX_TRAINER_BYTES
+            return b"changed" if changed == "bytes" else raw
+        return pinned_read(path, maximum)
+
+    monkeypatch.setattr(worker, "stable_read", read)
+    monkeypatch.setattr(
+        importlib.metadata,
+        "distribution",
+        lambda name: SimpleNamespace(locate_file=lambda member: origin),
+    )
+    if changed == "origin":
+        monkeypatch.setattr(core, "__file__", str(origin.parent / "unowned.py"))
+    if changed is None:
+        assert worker._local_cpu_core(release) is core
+    else:
+        with pytest.raises(ValueError):
+            worker._local_cpu_core(release)

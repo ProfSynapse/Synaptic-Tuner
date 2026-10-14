@@ -402,7 +402,9 @@ def test_real_diagnostic_dispatch_checks_devices_before_and_after_compile(tmp_pa
     trainer.write_text("raise AssertionError('trainer execution forbidden')\n")
     digest = _digest(trainer.read_bytes())
     monkeypatch.setattr(seam, "_inspect_release", lambda _: trainer)
-    monkeypatch.setattr(child, "_installed_import_guard", lambda *a: child._OwnedImportGuard({trainer: digest}))
+    from Trainers.sft import runtime_v1 as core
+    core_path = Path(core.__file__)
+    monkeypatch.setattr(child, "_installed_import_guard", lambda *a: child._OwnedImportGuard({trainer: digest, core_path: _digest(core_path.read_bytes())}))
     root = Path("/tmp/qualification-fixture")
     transport = root / "transport.json"
     payload = {"schema_version": worker.LOCAL_CPU_PROTOCOL,
@@ -413,7 +415,7 @@ def test_real_diagnostic_dispatch_checks_devices_before_and_after_compile(tmp_pa
     read = child.stable_read
     monkeypatch.setattr(child, "stable_read", lambda path, *args: raw if path == transport else read(path, *args))
     monkeypatch.setattr(child, "sys", SimpleNamespace(argv=["child", "--qualify-local", str(transport), _digest(raw)],
-        flags=SimpleNamespace(isolated=1), stdout=sys.stdout, stderr=sys.stderr))
+        flags=SimpleNamespace(isolated=1), stdout=sys.stdout, stderr=sys.stderr, meta_path=sys.meta_path))
     monkeypatch.setitem(sys.modules, "fcntl", SimpleNamespace(F_SEAL_SEAL=1, F_SEAL_SHRINK=2,
         F_SEAL_GROW=4, F_SEAL_WRITE=8, F_GET_SEALS=9, fcntl=lambda *a: 15))
     monkeypatch.setattr(seam, "_HeldDirectory", lambda path: SimpleNamespace(fd=100, identity=(1, 2), check=lambda: None, close=lambda: None))
@@ -464,11 +466,10 @@ def test_diagnostic_harness_closes_failure_text(monkeypatch, capsys, fault):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="native Linux sealed-descriptor diagnostic protocol")
-@pytest.mark.parametrize("mutation", [None, "environment", "transport", "snapshot", "source", "unsealed", "nvidia_env", "cuda_env"])
+@pytest.mark.parametrize("mutation", [None, "environment", "transport", "snapshot", "source", "unsealed", "nvidia_env", "cuda_env", "core", "fd"])
 def test_native_local_child_diagnostic_authenticates_without_executing_ml(monkeypatch, capsys, mutation):
     import os
     import tempfile
-    import fcntl
     from types import SimpleNamespace
     from tuner.runtime import packaged_training_worker as worker
     from tuner.runtime import packaged_sft_execution as seam
@@ -485,24 +486,28 @@ def test_native_local_child_diagnostic_authenticates_without_executing_ml(monkey
     if mutation == "nvidia_env": os.environ["NVIDIA_VISIBLE_DEVICES"] = "all"
     if mutation == "cuda_env": os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     monkeypatch.setattr(child, "_check_no_gpu_devices", lambda: None)
-    fd = os.memfd_create("qualification-test", os.MFD_ALLOW_SEALING)
-    try:
+    from Trainers.sft import runtime_v1 as core
+    if mutation == "unsealed":
+        fd = core._linux_memfd_create("qualification-input")
         os.write(fd, worker.LOCAL_CPU_DATA)
-        if mutation != "unsealed":
-            fcntl.fcntl(fd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE)
+    else:
+        fd, _ = core._sealed_prepared_dataset(worker.LOCAL_CPU_DATA, content_digest=_digest(worker.LOCAL_CPU_DATA))
+    try:
         with tempfile.TemporaryDirectory(prefix="qualification-", dir="/tmp") as temporary:
             root = Path(temporary)
             trainer = root / "trainer.py"
             trainer.write_text("raise AssertionError('ML MUST NOT EXECUTE')\n")
             digest = _digest(trainer.read_bytes())
             monkeypatch.setattr(seam, "_inspect_release", lambda _: trainer)
-            monkeypatch.setattr(child, "_installed_import_guard", lambda *a: child._OwnedImportGuard({trainer: digest}))
+            from Trainers.sft import runtime_v1 as core
+            core_path = Path(core.__file__)
+            monkeypatch.setattr(child, "_installed_import_guard", lambda *a: child._OwnedImportGuard({trainer: digest, core_path: "0" * 64 if mutation == "core" else _digest(core_path.read_bytes())}))
             fixture = root / "fixture.json"
             fixture.write_bytes(worker.LOCAL_CPU_MODEL if mutation != "snapshot" else b"substitution")
             fixture.chmod(0o400)
             info = fixture.stat()
             payload = {"schema_version": worker.LOCAL_CPU_PROTOCOL,
-                "release": release.to_dict(), "input_fd": fd,
+                "release": release.to_dict(), "input_fd": True if mutation == "fd" else fd,
                 "root": str(root), "root_identity": [root.stat().st_dev, root.stat().st_ino],
                 "member": {"path": "fixture.json", "size_bytes": len(worker.LOCAL_CPU_MODEL),
                     "sha256": _digest(worker.LOCAL_CPU_MODEL), "device": info.st_dev, "inode": info.st_ino}}

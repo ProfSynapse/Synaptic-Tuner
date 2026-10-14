@@ -41,7 +41,7 @@ class PackagedTrainingWorkerError(RuntimeError):
 
 LOCAL_CPU_FAILURE_STAGES = frozenset({
     "PARENT_RELEASE", "CHILD_RESULT", "RELEASE_ADMISSION", "INPUT_FD",
-    "INPUT_WRITE", "INPUT_SEAL", "FIXTURE_SETUP", "FIXTURE_WRITE",
+    "INPUT_WRITE", "INPUT_SEAL", "INPUT_PREPARATION", "FIXTURE_SETUP", "FIXTURE_WRITE",
     "TRANSPORT", "POST_CHILD_CUSTODY", "CLEANUP",
 })
 
@@ -136,6 +136,7 @@ _MAX_BUILD_INPUTS_BYTES = 128 * 1024
 _MAX_WHEEL_BYTES = 256 * 1024 * 1024
 _MAX_TRAINER_BYTES = 4 * 1024 * 1024
 _TRAINER_MEMBER = "Trainers/sft/train_sft.py"
+_SFT_CORE_MEMBER = "Trainers/sft/runtime_v1.py"
 _WHEEL_BASENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+-]*\.whl\Z")
 
 
@@ -182,10 +183,14 @@ def _local_cpu_method(release):
     raise ValueError("PACKAGED_CPU_METHOD_REJECTED")
 
 
-def _parent_trainer_reference(release) -> str:
+def _parent_trainer_reference(release, *, member=None) -> str:
     """Derive only the pinned trainer reference; installed admission belongs to -I child."""
     method = _local_cpu_method(release)
     trainer_member = _TRAINER_MEMBER if method == "sft" else "Trainers/grpo/runtime_v1.py"
+    if member is not None:
+        if type(member) is not str or member not in (trainer_member, _SFT_CORE_MEMBER):
+            raise ValueError
+        trainer_member = member
     raw = stable_read(Path("/opt/synaptic-runtime/build-inputs.json"), _MAX_BUILD_INPUTS_BYTES)
     def reject_constant(_value):
         raise ValueError
@@ -219,6 +224,22 @@ def _parent_trainer_reference(release) -> str:
     return hashlib.sha256(raw_trainer).hexdigest()
 
 
+def _local_cpu_core(release):
+    """Use only the fixed core member authenticated by the retained package."""
+    from importlib.metadata import distribution
+
+    expected = _parent_trainer_reference(release, member=_SFT_CORE_MEMBER)
+    installed = Path(distribution(release.package_name).locate_file(_SFT_CORE_MEMBER))
+    if hashlib.sha256(stable_read(installed, _MAX_TRAINER_BYTES)).hexdigest() != expected:
+        raise ValueError
+    from Trainers.sft import runtime_v1 as core
+
+    if (Path(core.__file__) != installed
+            or hashlib.sha256(stable_read(installed, _MAX_TRAINER_BYTES)).hexdigest() != expected):
+        raise ValueError
+    return core
+
+
 def qualify_installed_child(release_document):
     """Diagnostic only: exercise the installed child, never synthesize training evidence."""
     stage = "RELEASE_ADMISSION"
@@ -236,7 +257,6 @@ def qualify_installed_child(release_document):
 
     try:
         import os
-        import fcntl
         import subprocess
         import tempfile
         from contextlib import ExitStack
@@ -251,17 +271,12 @@ def qualify_installed_child(release_document):
         )
         stage = "PARENT_RELEASE"
         trainer_digest = _parent_trainer_reference(release)
-        stage = "INPUT_FD"
-        if os.name != "posix":
-            raise ValueError
-        fd = os.memfd_create("qualification-input", os.MFD_ALLOW_SEALING)
+        stage = "INPUT_PREPARATION"
+        core = _local_cpu_core(release)
+        fd, _ = core._sealed_prepared_dataset(
+            LOCAL_CPU_DATA, content_digest=_digest(LOCAL_CPU_DATA),
+        )
         owned.callback(os.close, fd)
-        stage = "INPUT_WRITE"
-        if os.write(fd, LOCAL_CPU_DATA) != len(LOCAL_CPU_DATA):
-            raise ValueError
-        stage = "INPUT_SEAL"
-        seals = fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
-        fcntl.fcntl(fd, fcntl.F_ADD_SEALS, seals)
         stage = "FIXTURE_SETUP"
         temporary = owned.enter_context(tempfile.TemporaryDirectory(prefix="qualification-", dir="/tmp"))
         root = Path(temporary)
