@@ -1,7 +1,9 @@
 """Fixed local fixture child supervisor, implementing EnvironmentRuntime.
 
 No shell, user code, provider client or credentials cross this boundary. Process
-custody is local to the Popen owner, not restorable from a PID or serialized data.
+custody begins at acknowledged fixed-guardian handoff, not restorable from a PID
+or serialized data. Owner death triggers guardian termination and cleanup; guardian
+death, pre-handoff death and machine loss remain outside that guarantee.
 This is process supervision and bounded fixture I/O, not a security sandbox.
 Popen construction and parent filesystem setup/cleanup are synchronous OS calls;
 finite IPC/termination waits do not impose a general wall-clock bound on them.
@@ -96,6 +98,11 @@ class WorkerEnvironmentRuntime(EnvironmentRuntime):
         self._spawn_started = False
         self._spawn_uncertain = False
         self._request_id = 0
+        self._owner_write = None
+        self._status_read = None
+        self._worker_pid = None
+        self._shutdown_status = None
+        self._custody = False
         self._input_bound = min(_MAX_FRAME, 6 * limits.max_content_bytes +
                                 limits.max_entries * (6 * limits.max_path_bytes + 64) + 8192)
         self._output_bound = min(_MAX_FRAME, 6 * max(limits.max_output_bytes, limits.max_snapshot_bytes) + 8192)
@@ -151,13 +158,43 @@ class WorkerEnvironmentRuntime(EnvironmentRuntime):
             self._guard()
             descriptors = tuple({self._storage._root_fd, *(fd for _, _, fd in self._storage._anchors)})
             entry = Path(__file__).with_name('local_worker_child.py').resolve(strict=True)
-            self._spawn_started = True
-            self._process = subprocess.Popen([sys.executable, '-I', str(entry)],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                env={'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8'}, pass_fds=descriptors,
-                close_fds=True, shell=False)
+            command_read, command_write = os.pipe()
+            reply_read, reply_write = os.pipe()
+            owner_read, owner_write = os.pipe()
+            status_read, status_write = os.pipe()
+            self._owner_write, self._status_read = owner_write, status_read
+            try:
+                initial = {'limits': asdict(self.limits), 'anchors': self._storage._anchors,
+                    'root_fd': self._storage._root_fd, 'name': self._storage._name,
+                    'identity': self._storage._created_identity, 'deadline': float(self._deadline),
+                    'command_read': command_read, 'reply_write': reply_write,
+                    'owner_read': owner_read, 'status_write': status_write}
+                initial_bytes = _encode(initial, 8192)
+                self._spawn_started = True
+                self._process = subprocess.Popen([sys.executable, '-I', str(entry), 'guardian'],
+                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    env={'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8'},
+                    pass_fds=(*descriptors, command_read, reply_write, owner_read, status_write),
+                    close_fds=True, shell=False)
+                self._process.stdin.write(initial_bytes)
+                self._process.stdin.close()
+                self._process.stdin = os.fdopen(command_write, 'wb', buffering=0)
+                command_write = None
+                self._process.stdout = os.fdopen(reply_read, 'rb', buffering=0)
+                reply_read = None
+            finally:
+                for fd in (command_read, reply_write, owner_read, status_write, command_write, reply_read):
+                    if fd is not None:
+                        os.close(fd)
             os.set_blocking(self._process.stdin.fileno(), False)
             os.set_blocking(self._process.stdout.fileno(), False)
+            custody = self._read_status(self._deadline)
+            if (type(custody) is not dict or set(custody) != {'custody', 'worker_pid'} or
+                    custody['custody'] is not True or type(custody['worker_pid']) is not int or
+                    custody['worker_pid'] <= 0):
+                raise WorkerLifecycleError('worker_start_uncertain')
+            self._worker_pid = custody['worker_pid']
+            self._custody = True
             self._request('initialize', [{'limits': asdict(self.limits),
                 'anchors': self._storage._anchors, 'root_fd': self._storage._root_fd,
                 'name': self._storage._name, 'identity': self._storage._created_identity,
@@ -305,31 +342,73 @@ class WorkerEnvironmentRuntime(EnvironmentRuntime):
         # A definite operation error is not an IPC uncertainty or automatic retry.
         raise error('worker_operation_rejected')
 
+    def _read_status(self, deadline):
+        raw = bytearray()
+        length = None
+        while length is None or len(raw) < length + 4:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([self._status_read], [], [], remaining)[0]:
+                raise WorkerLifecycleError('worker_termination_uncertain')
+            chunk = os.read(self._status_read, (4 if length is None else length + 4) - len(raw))
+            if not chunk:
+                raise WorkerLifecycleError('worker_termination_uncertain')
+            raw.extend(chunk)
+            if length is None and len(raw) >= 4:
+                length = struct.unpack('!I', raw[:4])[0]
+                if not 0 < length <= 4096:
+                    raise WorkerLifecycleError('worker_protocol_invalid')
+        if len(raw) != length + 4:
+            raise WorkerLifecycleError('worker_protocol_invalid')
+        return _decode(raw[4:])
+
     def teardown(self):
         self._failed = True
-        process = self._process
         if self._spawn_uncertain:
             raise WorkerLifecycleError('worker_start_uncertain')
-        if process is not None:
-            try:
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=0.2)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=2)
-                # Ownership stays retained until wait confirms exact child exit.
-                process.wait(timeout=0)
-            except Exception:
-                raise WorkerLifecycleError('worker_termination_uncertain') from None
-            for pipe in (process.stdin, process.stdout):
-                if pipe is not None:
-                    pipe.close()
-        try:
+        process = self._process
+        if process is None:
+            for attribute in ('_owner_write', '_status_read'):
+                fd = getattr(self, attribute)
+                if fd is not None:
+                    os.close(fd)
+                    setattr(self, attribute, None)
             self._storage.teardown()
+            return
+        if self._owner_write is not None:
+            os.close(self._owner_write)
+            self._owner_write = None
+        try:
+            if self._shutdown_status is None:
+                self._shutdown_status = self._read_status(time.monotonic() + 3)
+            process.wait(timeout=3)
+            status = self._shutdown_status
+            if (type(status) is not dict or set(status) != {'worker_exited', 'cleanup'} or
+                    status['worker_exited'] is not True or type(status['cleanup']) is not bool or
+                    process.returncode != 0):
+                raise WorkerLifecycleError('worker_termination_uncertain')
         except Exception:
-            raise WorkerLifecycleError('worker_cleanup_uncertain') from None
+            raise WorkerLifecycleError('worker_termination_uncertain') from None
+        for pipe in (process.stdin, process.stdout):
+            if pipe is not None and not pipe.closed:
+                pipe.close()
+        if self._status_read is not None:
+            os.close(self._status_read)
+            self._status_read = None
+        if status['cleanup']:
+            try:
+                self._storage._close()
+            except Exception:
+                raise WorkerLifecycleError('worker_cleanup_uncertain') from None
+        else:
+            # Guardian has authenticated exact worker exit and relinquished cleanup.
+            # First report the failed cleanup; a later explicit teardown may retry.
+            if not getattr(self, '_cleanup_retry', False):
+                self._cleanup_retry = True
+                raise WorkerLifecycleError('worker_cleanup_uncertain')
+            try:
+                self._storage.teardown()
+            except Exception:
+                raise WorkerLifecycleError('worker_cleanup_uncertain') from None
 
     def mkdir(self, path):
         return self._request('mkdir', [path])
@@ -413,3 +492,53 @@ def _run_child():
         maximum = _MAX_FRAME if runtime is None else min(_MAX_FRAME, 6 * max(runtime.limits.max_output_bytes, runtime.limits.max_snapshot_bytes) + 8192)
         sys.stdout.buffer.write(_encode(reply, maximum))
         sys.stdout.buffer.flush()
+
+
+def _run_guardian():
+    """Own exact child and descriptors; owner EOF is cleanup intent, not recovery."""
+    initial = _child_read(8192)
+    runtime = BoundedLocalEnvironmentRuntime._from_inherited_descriptors(
+        FilesystemLimits(**initial['limits']), tuple(tuple(row) for row in initial['anchors']),
+        initial['root_fd'], initial['name'], initial['identity'], initial['deadline'])
+    child = None
+    status = initial['status_write']
+    def publish(value):
+        try:
+            os.write(status, _encode(value, 4096))
+        except BrokenPipeError:
+            pass  # Owner died; descriptor cleanup still belongs to guardian.
+    try:
+        entry = Path(__file__).with_name('local_worker_child.py').resolve(strict=True)
+        descriptors = tuple({runtime._root_fd, *(fd for _, _, fd in runtime._anchors)})
+        child = subprocess.Popen([sys.executable, '-I', str(entry)],
+            stdin=initial['command_read'], stdout=initial['reply_write'], stderr=subprocess.DEVNULL,
+            env={'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8'}, pass_fds=descriptors,
+            close_fds=True, shell=False)
+        os.close(initial['command_read'])
+        os.close(initial['reply_write'])
+        publish({'custody': True, 'worker_pid': child.pid})
+        while child.poll() is None:
+            if time.monotonic() >= initial['deadline']:
+                break
+            if select.select([initial['owner_read']], [], [], 0.05)[0]:
+                if os.read(initial['owner_read'], 1) == b'':
+                    break
+        if child.poll() is None:
+            child.terminate()
+            try:
+                child.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=2)
+        child.wait(timeout=0)
+    except Exception:
+        # Exit unconfirmed: preserve root, never delete underneath a live worker.
+        publish({'worker_exited': False, 'cleanup': False})
+        return
+    cleanup = False
+    try:
+        runtime.teardown()
+        cleanup = True
+    except Exception:
+        pass
+    publish({'worker_exited': True, 'cleanup': cleanup})
