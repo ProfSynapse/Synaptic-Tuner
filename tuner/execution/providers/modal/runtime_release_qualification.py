@@ -717,14 +717,16 @@ class ModalRuntimeReleaseQualificationWorker:
                     marker_sha256=dispatch.transport_probe.marker_sha256)
             from tuner.runtime.packaged_training_worker import (
                 PackagedLocalCPUStageError, inspect_reviewed_root_inventory,
-                qualify_installed_child,
+                qualify_installed_child, _local_cpu_method,
             )
             release_payload = dispatch.runtime_release.to_dict()
             from tuner.runtime.packaged_sft_execution import (
                 PackagedReleaseInspectionError, _inspect_parent_release,
             )
             try:
-                _inspect_parent_release(dispatch.runtime_release)
+                method = _local_cpu_method(dispatch.runtime_release)
+                _inspect_parent_release(dispatch.runtime_release,
+                    **({"method": method} if method == "grpo" else {}))
             except PackagedReleaseInspectionError as error:
                 stage = "PARENT_RUNTIME_" + error.stage if type(error.stage) is str else ""
                 if type(error) is not PackagedReleaseInspectionError or stage not in PARENT_RUNTIME_FAILURE_STAGES:

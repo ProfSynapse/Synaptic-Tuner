@@ -42,6 +42,13 @@ def _release() -> PackagedTrainingRuntimeReleaseV1:
     )
 
 
+def _cpu_release(**changes):
+    from tests.runtime.test_packaged_runtime_releases import _release_values
+    values = _release_values(worker_entrypoint=PACKAGED_TRAINING_WORKER_ENTRYPOINT)
+    values.update(changes)
+    return PackagedTrainingRuntimeReleaseV1.build(**values)
+
+
 def test_admission_accepts_exact_embedded_release() -> None:
     release = _release()
     assert admit_packaged_training_release(
@@ -89,7 +96,7 @@ def _wheel_bytes(members: list[tuple[str, bytes]]) -> bytes:
 def _reference_fixture(
     monkeypatch: pytest.MonkeyPatch, wheel_raw: bytes, *, filename: str = "synaptic_tuner-1.2.3-py3-none-any.whl",
     build_digest: str | None = None, release_digest: str | None = None,
-) -> SimpleNamespace:
+) -> PackagedTrainingRuntimeReleaseV1:
     wheel_digest = hashlib.sha256(wheel_raw).hexdigest()
     inputs = {"wheel": {"filename": filename, "distribution": "synaptic-tuner",
                         "version": "1.2.3", "sha256": build_digest or wheel_digest}}
@@ -104,7 +111,7 @@ def _reference_fixture(
         return wheel_raw
 
     monkeypatch.setattr(worker, "stable_read", read)
-    return SimpleNamespace(package_digest=release_digest or wheel_digest)
+    return _cpu_release(package_digest=release_digest or wheel_digest)
 
 
 def test_parent_reference_uses_pinned_wheel_not_parent_interpreter(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -157,10 +164,7 @@ def test_qualification_from_nonisolated_parent_keeps_child_boundary(
 
     from tuner.runtime import packaged_sft_execution as execution
 
-    release = SimpleNamespace(
-        manifest_digest="a" * 64, python_executable="/opt/python/bin/python",
-        canonical_bytes=lambda: b"release",
-    )
+    release = _cpu_release(python_executable="/opt/python/bin/python")
     trainer_digest = hashlib.sha256(b"pass\n").hexdigest()
     monkeypatch.setattr(worker, "parse_packaged_runtime_release", lambda _: release)
     monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *args, **kwargs: release)
@@ -206,7 +210,7 @@ def test_qualification_from_nonisolated_parent_keeps_child_boundary(
 def test_qualification_distinguishes_parent_release_inspection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    release = SimpleNamespace(manifest_digest="a" * 64, canonical_bytes=lambda: b"release")
+    release = _cpu_release()
     monkeypatch.setattr(worker, "parse_packaged_runtime_release", lambda _: release)
     monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *args, **kwargs: release)
     monkeypatch.setattr(worker, "_parent_trainer_reference", lambda _: (_ for _ in ()).throw(RuntimeError("PRIVATE_SENTINEL")))
@@ -227,10 +231,7 @@ def test_qualification_collapses_child_exit_and_stderr(
 
     from tuner.runtime import packaged_sft_execution as execution
 
-    release = SimpleNamespace(
-        manifest_digest="a" * 64, python_executable="/opt/python/bin/python",
-        canonical_bytes=lambda: b"release",
-    )
+    release = _cpu_release(python_executable="/opt/python/bin/python")
     trainer_digest = hashlib.sha256(b"pass\n").hexdigest()
     monkeypatch.setattr(worker, "parse_packaged_runtime_release", lambda _: release)
     monkeypatch.setattr(worker, "admit_packaged_training_release", lambda *args, **kwargs: release)
