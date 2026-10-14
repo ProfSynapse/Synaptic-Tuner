@@ -1354,3 +1354,30 @@ unpromoted capability refusals. Docker cold reads still require original image
 qualification assets and mount roots; HF cold reads use the retained reader and
 remain read-only. These CPU controls do not establish live SFT provider parity,
 GPU training, provider billing, physical cancellation or model quality.
+
+
+### Captured GRPO candidate installed acceptance — 2026-10-14
+
+The additive `smollm2-135m-grpo-candidate-v1` profile retains the actual
+396-distribution CPU base inventory (SHA256
+`46f0feddd1ba6d5e155dfb227d92679f9afd65634b98d80260cf0517b4b102cd`).
+Its source-owned build profile starts from a real previously accepted wheel;
+the existing current-source build path binds the actual replacement wheel.
+The four-message example is prepared by the existing service with real byte
+and semantic commitments. It selects three steps, four generations, L40S,
+300-second child and 900-second provider bounds with finite G4 measurements.
+
+Independent review accepted source `fb01d666` and CI/guidance `8e2d27ea`.
+A fresh sdist-derived wheel, SHA256 `14b699380b762fc27d42c83f827f9a844cf94feac075608d91573d45aebd2026`, passed
+base resource checks and **256 installed GRPO tests** under CPython 3.14.4,
+including all nine candidate controls without skips. Runtime YAML/inventory
+are byte-exact in source, wheel and installation; the host build profile is
+excluded from the wheel. Existing runtime code, old profiles and locked
+member inventories/pins are unchanged.
+
+These are candidate configuration and CPU control-flow results. The test
+Git source and replacement-wheel fixtures do not establish live source/build
+authority. The captured base is not the augmented training image; actual
+image build/CPU qualification, model preparation and GPU GRPO remain open.
+Constant rewards or unchanged parameters remain inconclusive rather than a
+qualification pass. No provider effect was performed for this change.
