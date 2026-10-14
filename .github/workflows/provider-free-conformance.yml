@@ -19,6 +19,11 @@ on:
       - "Trainers/image_profiles/smollm2_135m_packaged_grpo_candidate_v1/**"
       - "examples/grpo_captured_candidate/**"
       - "tests/training/test_grpo_captured_candidate.py"
+      - "tests/runtime/test_modal_build_inspector.py"
+      - "tests/execution/providers/test_modal_runtime_build.py"
+      - "tests/training/test_modal_host_runtime.py"
+      - "tests/training/test_modal_host_diagnostic_projection.py"
+      - "tuner/handlers/modal_job_config_handler.py"
       - "Trainers/image_profiles/qwen35_4b_conversation_sft_candidate_v1/**"
       - "tests/contract/test_data_conversation_sft_handoff_v1.py"
       - "tests/contract/test_environment_admission_v1.py"
@@ -560,9 +565,12 @@ jobs:
           import tuner.training.modal_local_preparation as local_preparation
           import tuner.training.modal_host_requests as host_requests
           import tuner.runtime_profiles as runtime_profiles
+          import tuner.runtime.modal_build_inspector as build_inspector
+          import tuner.training.modal_host_runtime as host_runtime
+          import tuner.handlers.modal_job_config_handler as job_handler
 
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (retention, runner, sqlite_store, retained_reader, runs_handler, recipe, prepared_copy, grpo_preparation, runtime_build, local_preparation, host_requests, runtime_profiles):
+          for module in (retention, runner, sqlite_store, retained_reader, runs_handler, recipe, prepared_copy, grpo_preparation, runtime_build, local_preparation, host_requests, runtime_profiles, build_inspector, host_runtime, job_handler):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -577,6 +585,9 @@ jobs:
               "runtime/test_packaged_runtime_releases.py",
               "tuner/test_runtime_profiles.py",
               "execution/providers/test_modal_runtime_build.py",
+              "runtime/test_modal_build_inspector.py",
+              "training/test_modal_host_runtime.py",
+              "training/test_modal_host_diagnostic_projection.py",
               "execution/test_observation_logs.py",
               "training/test_modal_standalone_runner.py",
               "training/test_modal_run_retention_io.py",
@@ -632,6 +643,10 @@ jobs:
           os.chdir(root)
           raise SystemExit(pytest.main([
               "-q", "-p", "no:cacheprovider",
+              str(root / "tests/runtime/test_modal_build_inspector.py"),
+              str(root / "tests/execution/providers/test_modal_runtime_build.py"),
+              str(root / "tests/training/test_modal_host_runtime.py"),
+              str(root / "tests/training/test_modal_host_diagnostic_projection.py"),
               str(root / "tests/training/test_modal_method_preparation.py"),
               str(root / "tests/training/test_modal_source_handoff.py"),
               str(root / "tests/training/test_modal_grpo_recipe.py"),

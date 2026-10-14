@@ -765,6 +765,22 @@ image construction.
 
 ## Failure diagnostics (including closed start context)
 
+Image capture failures now retain only fixed inspector phases and, for
+installed-inventory rejection, the existing finite inner inspection predicate.
+When observed, the claim-bound private diagnostic also records the native exit
+code, exact image/Sandbox IDs and confirmed or unresolved cleanup. A capture
+failure remains primary when cleanup is unresolved. Malformed or absent failure
+output cannot establish an inner cause; these fields never authorize retry or
+resource adoption. Historical captures that discarded these fields cannot be
+retrospectively diagnosed from the broad `CAPTURE_OUTPUT` code.
+
+The normal image installer force-reinstalls each exact hash-pinned local wheel
+with no index, dependencies or cache, preserving the before/after `pip check`
+comparison. This supplies the required direct-URL provenance even when the base
+already has the same package version. Offline regression evidence establishes
+that installation behavior, not the cause of a historical failed image capture.
+
+
 Packaged trainer failures recognize the already-loaded Torch OOM exception
 identity as `SFT_TRAINER_CHILD_EXEC_TORCH_OOM`, with a finite milestone suffix
 when the installed trainer set the trusted callback. Torch's CUDA alias shares
