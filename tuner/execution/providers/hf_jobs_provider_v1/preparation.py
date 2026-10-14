@@ -186,7 +186,7 @@ class HFJobsPreparation:
             execution_binding_digest=binding.binding_digest)
 
     def payload(self, preparation, kind):
-        if kind not in {EffectKind.STAGE, EffectKind.SUBMIT}:
+        if kind not in {EffectKind.STAGE, EffectKind.SUBMIT, EffectKind.CANCEL}:
             raise HFJobsError("capability_unavailable")
         if (preparation.provider != self.selection.provider
                 or preparation.plan_fingerprint != self.plan.plan_fingerprint
