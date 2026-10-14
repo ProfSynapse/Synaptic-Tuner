@@ -543,3 +543,37 @@ def test_fifo_original_leaf_rejected_without_blocking(tmp_path):
         assert time.monotonic() - started < 1
     finally:
         close(values)
+
+
+def test_partial_write_reservation_sticks_and_sink_cannot_finish(tmp_path, monkeypatch):
+    import synaptic_tuner.api.v1.reference.local_publication as production
+
+    spool = LocalArtifactSpoolV1(
+        tmp_path,
+        maximum_artifact_bytes=4,
+        maximum_total_bytes=5,
+        deadline=time.monotonic() + 10,
+    )
+    try:
+        first = spool.open("a" * 64, "adapter", 4)
+
+        def partial(fd, chunk):
+            assert os.write(fd, chunk[:2]) == 2
+            raise OSError("test interrupted partial write")
+
+        monkeypatch.setattr(production, "_write", partial)
+        with pytest.raises(OSError):
+            first.write(b"1234")
+        assert os.fstat(first.leaf.fd).st_size == 2
+        assert spool._total_bytes == 4
+        with pytest.raises(ValueError):
+            first.finish()
+        with pytest.raises(ValueError):
+            first.write(b"x")
+        second = spool.open("b" * 64, "other", 4)
+        with pytest.raises(ValueError):
+            second.write(b"12")
+        assert os.fstat(second.leaf.fd).st_size == 0
+        assert spool._total_bytes == 4
+    finally:
+        spool.close()

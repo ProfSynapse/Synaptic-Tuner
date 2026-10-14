@@ -342,10 +342,16 @@ class _Sink:
             or total + len(chunk) > self.spool.maximum_total_bytes
         ):
             raise _invalid()
-        _write(self.leaf.fd, chunk)
+        # Reserve before any write: an interrupted syscall may have persisted
+        # an unknown prefix. Never refund or reuse that uncertain sink.
         self.size += len(chunk)
         self.spool._total_bytes += len(chunk)
-        self.leaf.refresh_written()
+        try:
+            _write(self.leaf.fd, chunk)
+            self.leaf.refresh_written()
+        except BaseException:
+            self.aborted = True
+            raise
 
     def finish(self):
         if self.finished or self.aborted:
@@ -395,10 +401,12 @@ class LocalArtifactSpoolV1:
             or (publication_id, role) in self._sinks
         ):
             raise _invalid()
-        if publication_id not in self._trees:
-            self._trees[publication_id] = _Tree(self.root, publication_id, create=True)
         if len(self._sinks) >= 100:
             raise _invalid()
+        if publication_id not in self._trees:
+            if len(self._trees) >= 100:
+                raise _invalid()
+            self._trees[publication_id] = _Tree(self.root, publication_id, create=True)
         sink = _Sink(self, publication_id, role, maximum_bytes)
         self._sinks[publication_id, role] = sink
         return sink
