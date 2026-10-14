@@ -4,6 +4,9 @@ import ast
 import re
 import sys
 import tomllib
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from pathlib import Path
 
 
@@ -27,7 +30,7 @@ def test_modal_extra_and_launcher_lock_are_exact():
         r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^ ]+) --hash=sha256:([0-9a-f]{64})$"
     )
     parsed = [pattern.fullmatch(line) for line in lines]
-    assert all(parsed) and len(lines) == 37
+    assert all(parsed) and len(lines) == 40
     packages = {match.group(1).lower().replace("_", "-") for match in parsed}
     assert len(packages) == len(lines)
     assert {
@@ -93,3 +96,23 @@ def test_provider_specific_public_contract_still_does_not_import_modal_sdk():
     assert hasattr(module, "ModalVerificationPolicyV1")
     assert hasattr(module, "build_modal_coordinator_deployment")
     assert hasattr(module, "compose_modal_source_finalizer")
+
+
+def test_launcher_pins_satisfy_all_required_engine_dependencies():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pins = {}
+    for line in (ROOT / "requirements/modal-launcher-v1.lock").read_text().splitlines():
+        if line and not line.startswith("#"):
+            name, version = line.split(" --hash=", 1)[0].split("==", 1)
+            pins[canonicalize_name(name)] = version
+    for declaration in project["project"]["dependencies"]:
+        requirement = Requirement(declaration)
+        environment = {"python_version": "3.11", "python_full_version": "3.11.14",
+                       "sys_platform": "linux", "platform_machine": "x86_64", "extra": ""}
+        if requirement.marker is None or requirement.marker.evaluate(environment):
+            assert canonicalize_name(requirement.name) in pins, declaration
+            assert pins[canonicalize_name(requirement.name)] in requirement.specifier, declaration
+    for declaration in ("charset-normalizer>=2,<4", "urllib3>=1.26,<3",
+                        "idna>=2.5,<4", "certifi>=2023.5.7"):
+        requirement = Requirement(declaration)
+        assert pins[canonicalize_name(requirement.name)] in requirement.specifier
