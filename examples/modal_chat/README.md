@@ -33,8 +33,9 @@ uv --no-config --no-cache pip install \
 
 Use that venv's Python for the commands below. This installs the lightweight
 launcher only, not model weights, a local GPU runtime or Docker. The consumer
-lock includes the existing 37-package remote launcher lock and adds Requests'
-three missing host dependencies; it does not change the remote runtime lock.
+lock inherits the complete 40-package launcher closure, including Requests and
+its dependencies. Do not add conflicting duplicate pins. Install the engine
+wheel with `--no-deps` and run `pip check` in this same isolated environment.
 Do not use a
 newer CLI/Python as a substitute for the reviewed pins. Modal documents the
 serialized-function constraint in its [Python compatibility guidance](https://modal.com/docs/guide/jupyter-notebooks#known-issues).

@@ -1348,8 +1348,7 @@ lock historically supplemented the 37-package launcher closure with Requests
 and its two missing dependencies for host chat imports. The ordinary Modal
 launcher now includes those required engine dependencies directly: install its
 40 exact hashed pins and the engine wheel with `--no-deps`, then run `pip check`
-in that same isolated environment (41 installed distributions). Keep existing
-consumer lock pins unchanged. This closes package dependencies, not image or
+in that same isolated environment (41 installed distributions). The consumer lock includes that same launcher file without duplicate pins. This closes package dependencies, not image or
 model qualification. Source/runtime
 and live qualification gates still apply; version agreement is not proof of a
 successful deployment. See [Modal's serialized-function guidance](https://modal.com/docs/guide/jupyter-notebooks#known-issues).

@@ -116,3 +116,13 @@ def test_launcher_pins_satisfy_all_required_engine_dependencies():
                         "idna>=2.5,<4", "certifi>=2023.5.7"):
         requirement = Requirement(declaration)
         assert pins[canonicalize_name(requirement.name)] in requirement.specifier
+
+
+def test_consumer_lock_inherits_complete_launcher_without_conflicting_pins():
+    consumer = ROOT / "examples/modal_chat/requirements.lock"
+    lines = [line.strip() for line in consumer.read_text().splitlines()
+             if line.strip() and not line.lstrip().startswith("#")]
+    assert lines == ["-r ../../requirements/modal-launcher-v1.lock"]
+    assert (consumer.parent / lines[0].removeprefix("-r ")).resolve() == (
+        ROOT / "requirements/modal-launcher-v1.lock"
+    ).resolve()
