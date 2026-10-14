@@ -7,8 +7,9 @@ updated: 2026-10-14
 # API v1 support and qualification matrix
 
 This is the current support view of the locally accepted preparation stack
-through PR #236 on 2026-10-14, not a stable release certification. Main is
-`ea52fb57` through merged PR #233; PRs #234–236 still await exact CI/merge.
+through PR #236 plus the source-archive correction on 2026-10-14, not a stable
+release certification. Main is `db2459a6` through merged PR #234; PRs #235–236
+and the archive correction still await exact CI/merge.
 `df166a75` in the frontmatter is the historical matrix baseline. The
 [stable release plan](stable-v1-release.md) retains current acceptance and exact
 dated source/wheel evidence. SFT requires Docker, Modal and HF Jobs live parity;
@@ -107,10 +108,11 @@ through `SYNAPTIC_ENGINE_ROOT` / `ProjectContext.engine_root`. It builds that ex
 source while retaining installed policy/inspector agreement, original source
 intent and existing pushed/gitlink requirements where applicable. A wheel alone
 is not a Git build checkout; cold known-run reads do not replan current recipes
-or rebuild an image. Actual cold `--prepare-local` source-wheel creation is currently blocked by
-omitted build helper/schema/tool assets in its archive; the correction and real
-offline build proof are pending. The source-root handoff tests do not qualify
-that broken cold path. Exact launcher and provider image/child pins stay separate
+or rebuild an image. The omitted source-build helper/schema/tool assets are now
+included in the reviewed archive. An actual pinned offline build passes within
+39 source controls, with 163 installed Modal controls on a fresh sdist-built wheel.
+The correction still needs CI/merge and a fresh normal local preparation attempt;
+it is not augmented image or GPU qualification. Exact launcher and provider image/child pins stay separate
 from the library's broad Python metadata. Linux/POSIX descriptor/lock/guardian
 operations and no local GPU are explicit boundaries, not Windows/macOS runtime
 qualification. Final supported platform/asset/release artifacts remain a gate.

@@ -31,8 +31,8 @@ The Python API is a library contract, not a deployed HTTP/MCP service.
 ## Current release status — 2026-10-14
 
 The source distribution is still **1.1.0 / Beta**, not a stable release. At this
-checkpoint, main is `ea52fb57` through merged [#233](https://github.com/ProfSynapse/Synaptic-Tuner/pull/233). PRs
-[#234](https://github.com/ProfSynapse/Synaptic-Tuner/pull/234)–[#236](https://github.com/ProfSynapse/Synaptic-Tuner/pull/236) have locally accepted installed evidence
+checkpoint, main is `db2459a6` through merged [#234](https://github.com/ProfSynapse/Synaptic-Tuner/pull/234). PRs
+[#235](https://github.com/ProfSynapse/Synaptic-Tuner/pull/235)–[#236](https://github.com/ProfSynapse/Synaptic-Tuner/pull/236) have locally accepted installed evidence
 and are awaiting their stack's CI/merge;
 local acceptance is not a main-merge or publication claim. No stable version,
 tag or package publication has been selected. The dated log below retains exact
@@ -48,7 +48,7 @@ overlapping installed lane totals, not a cumulative unique-test count.
 | Modal GRPO | Public compiler/preparation, fixed isolated child, native verification, normal runner and retained known-run reads are implemented. The actual captured SmolLM candidate passed **256 installed controls** and retains the observed **396-distribution base**. | Qualify the actual augmented image/CPU closure, pinned model/tokenizer and one bounded **Modal GPU GRPO** run with real update/grouped reward evidence; constant/unchanged observations remain inconclusive. Other GRPO providers remain deferred. |
 | Local publication | Caller-owned durable store/spool/create-only destination passed **377 installed controls + one existing skip**; native RunsAPI join passed **73 installed Docker/publication controls** with five-role streams and cold marker lookup. | Usable HF model-repository publication remains a separate implementation/live gate: expected-parent submission and verified owned immutable snapshot at the returned OID/current tip, without claiming RPC causality or an introducing commit after a lost reply. |
 | Environment owner death | Guardian-backed fixed worker passed **388 installed controls + one existing skip**, including real owner SIGKILL/stopped-worker termination and retained-identity cleanup after acknowledged custody. | Keep pre-handoff owner loss, guardian/machine loss and unconfirmed cleanup explicit. This is local ownership cleanup, not resumable generation or a security sandbox. |
-| Packaging/platforms | Fresh sdist-built wheels, neutral consumers, installed origins and exact declared schemas/catalogs/profiles/locks are tested. Host examples/build declarations are checkout-owned; explicit source-root handoff is implemented. | Actual cold `--prepare-local` source-wheel creation is blocked by omitted build helper/assets in the source archive; a correction is under review. Then freeze final advertised inventory/platform/install guidance and release artifacts; metadata `>=3.10` is not qualification. |
+| Packaging/platforms | Fresh sdist-built wheels, neutral consumers, installed origins and declared assets are tested. The corrected offline source archive passed **39 source controls**, including a real pinned build, and **163 installed Modal controls**. Host examples/build declarations remain checkout-owned. | Merge the correction, repeat normal local preparation on its final source, then freeze advertised inventory/platform/install guidance and release artifacts; metadata `>=3.10` is not qualification. |
 
 **Recovery means retained known-run/status/history/artifact access and truthful
 uncertainty without replay.** Implemented cold readers reuse original stored
@@ -59,7 +59,8 @@ observed terminal status and confirmed owned-process termination are distinct.
 The real provider cancellation/recovery/parity gates remain required; this scope
 clarification does not waive them.
 
-Remaining functional work includes the actual cold source-wheel/archive fix,
+The source-wheel/archive correction has local acceptance and still needs CI/merge
+and a fresh normal preparation attempt. Remaining functional work includes
 usable HF model-repository publication and the HF cancellation/reconciliation
 configuration-candidate audit: its default flags remain off and may need further
 work before the advertised qualified route is usable. The accepted local stack
@@ -1500,3 +1501,27 @@ The process controls use real SIGKILL and a new first SQLite opener, retaining
 scripted fixture host inputs through fork. They do not establish independent
 remote-provider reconstruction or live training/publication. HF repository
 publication remains a separate destination and qualification gate.
+
+### Real offline source-wheel build acceptance — 2026-10-14
+
+Normal local GRPO preparation on `9285cd1d` failed before provider effects:
+the retained build reported `OFFLINE_WHEEL_FAILED`, and exact subprocess
+diagnostics identified the missing `_build_support` packaging helper. The fixed
+source archive includes that helper, `MANIFEST.in`, both declared tool catalogs
+and the public schemas, alongside the existing package trees. It retains the
+clean source/commit checks and exact offline builder pins.
+
+Root integration `e3b92ef2` passed **39 source controls** in 16.67 seconds,
+including an actual CPython 3.11.14 offline build from a genuine Git snapshot.
+The pre-fix allowlist reproduced the closed build failure; emitted schemas,
+catalogs and candidate resources now match their source bytes. Fresh sdist-built
+wheel SHA256 `d464d3ec1fd15037fb11482d4f6e0f7fb8c60e317d03a9a18a6e8a67c6e93320`
+passed neutral base-resource checks and **163 installed Modal controls** under
+CPython 3.12.15 in 130.95 seconds. All seven runtime/source lock checks remain
+current without pin or hash changes. The same real build control is included in
+the existing pinned Modal diagnostic CI job, triggered by its packaging inputs.
+
+This closes the demonstrated source-archive omission. The original failed
+attempt remains retained; a new normal preparation binds the final source.
+No image, provider resource, model download or GPU qualification was performed
+by these controls.
