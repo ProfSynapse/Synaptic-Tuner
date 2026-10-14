@@ -792,3 +792,27 @@ dispersion and parameter updates. Separate isolated execution, native artifact
 verification, ordinary host integration and bounded live qualification remain
 release requirements. See [the declaration contract](public-grpo-compilation.md)
 and the canonical fine-tuning skill's GRPO reference for the exact scope.
+
+### Shared packaged training input custody and child supervision
+
+The packaged SFT controller now reuses an internal retained-input helper while
+keeping its original compiler, trainer invocation and SFT evidence parser.
+Cleanup failures reject execution. The shared raw child runner also supports an
+explicit absolute deadline with an owned process group and a finite five-second
+reap-confirmation wait; unconfirmed cleanup reports failure. Existing SFT calls
+retain their prior externally bounded behavior. This helper alone does not
+enable GRPO, provider cancellation or an end-to-end workflow timeout.
+
+Fresh source-archive-built wheel
+`3cd95da74a29fee96e6d0dfde98b74243b037ec240ad3aecd7269be78c679a8c`
+passed the base-only neutral consumer and 298 installed conversation, SFT
+execution, custody and process-control cases. Both changed modules and the
+refreshed five-member manifest matched source and installation exactly. The
+existing five-member inventory and runtime pins are unchanged.
+
+The broader local Python 3.12 run passed 637 cases and skipped one; twelve
+existing Linux sealing checks could not run because that portable interpreter
+lacks the required `fcntl` constants. The affected child/worker modules passed
+196 cases with one skip under an isolated system Python 3.14 environment that
+provides them. No runtime fallback or substituted constants were introduced.
+GitHub's supported Python 3.12 CI remains required before merge.
