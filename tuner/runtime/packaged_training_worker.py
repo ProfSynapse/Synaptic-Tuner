@@ -39,11 +39,18 @@ class PackagedTrainingWorkerError(RuntimeError):
     """Fail-closed packaged-runtime admission rejection."""
 
 
+LOCAL_CPU_FAILURE_STAGES = frozenset({
+    "PARENT_RELEASE", "CHILD_RESULT", "RELEASE_ADMISSION", "INPUT_FD",
+    "INPUT_WRITE", "INPUT_SEAL", "FIXTURE_SETUP", "FIXTURE_WRITE",
+    "TRANSPORT", "POST_CHILD_CUSTODY", "CLEANUP",
+})
+
+
 class PackagedLocalCPUStageError(PackagedTrainingWorkerError):
     """Closed, non-authorizing boundary code for local CPU qualification."""
 
     def __init__(self, stage: str) -> None:
-        if stage not in ("PARENT_RELEASE", "CHILD_RESULT"):
+        if type(stage) is not str or stage not in LOCAL_CPU_FAILURE_STAGES:
             raise ValueError("invalid local CPU stage")
         self.stage = stage
         super().__init__("PACKAGED_LOCAL_CPU_REJECTED")
@@ -218,66 +225,101 @@ def qualify_installed_child(release_document):
     import fcntl
     import subprocess
     import tempfile
+    from contextlib import ExitStack
     from tuner.runtime.packaged_sft_execution import _canonical, _digest, _HeldDirectory, _HeldModelFile
-    release = parse_packaged_runtime_release(release_document)
-    method = _local_cpu_method(release)
-    release = admit_packaged_training_release(release.canonical_bytes(), expected_release_digest=release.manifest_digest,
-        **({"method": method} if method == "grpo" else {}))
+
+    stage = "RELEASE_ADMISSION"
+    owned = ExitStack()
+    primary = None
+
+    def close_writer(fd):
+        # Preserve a write failure when closing its owned descriptor also fails.
+        failing = sys.exc_info()[0] is not None
+        try:
+            os.close(fd)
+        except BaseException:
+            if not failing:
+                raise PackagedLocalCPUStageError("CLEANUP") from None
+
     try:
+        release = parse_packaged_runtime_release(release_document)
+        method = _local_cpu_method(release)
+        release = admit_packaged_training_release(
+            release.canonical_bytes(), expected_release_digest=release.manifest_digest,
+            **({"method": method} if method == "grpo" else {}),
+        )
+        stage = "PARENT_RELEASE"
         trainer_digest = _parent_trainer_reference(release)
-    except BaseException:
-        raise PackagedLocalCPUStageError("PARENT_RELEASE") from None
-    if os.name != "posix":
-        raise ValueError
-    fd = os.memfd_create("qualification-input", os.MFD_ALLOW_SEALING)
-    try:
+        stage = "INPUT_FD"
+        if os.name != "posix":
+            raise ValueError
+        fd = os.memfd_create("qualification-input", os.MFD_ALLOW_SEALING)
+        owned.callback(os.close, fd)
+        stage = "INPUT_WRITE"
         if os.write(fd, LOCAL_CPU_DATA) != len(LOCAL_CPU_DATA):
             raise ValueError
+        stage = "INPUT_SEAL"
         seals = fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
         fcntl.fcntl(fd, fcntl.F_ADD_SEALS, seals)
-        with tempfile.TemporaryDirectory(prefix="qualification-", dir="/tmp") as temporary:
-            root = Path(temporary)
-            held = _HeldDirectory(root)
-            leaf = None
-            try:
-                target = os.open("fixture.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=held.fd)
-                try:
-                    if os.write(target, LOCAL_CPU_MODEL) != len(LOCAL_CPU_MODEL): raise ValueError
-                    os.fsync(target)
-                    os.fchmod(target, 0o400)
-                    info = os.fstat(target)
-                finally:
-                    os.close(target)
-                member = {"path": "fixture.json", "size_bytes": len(LOCAL_CPU_MODEL), "sha256": _digest(LOCAL_CPU_MODEL), "device": info.st_dev, "inode": info.st_ino}
-                leaf = _HeldModelFile(root / "fixture.json", held, member)
-                payload = _canonical({"schema_version": LOCAL_CPU_PROTOCOL, "release": release_document,
-                    "input_fd": fd, "root": str(root), "root_identity": list(held.identity), "member": member})
-                transport = os.open("transport.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400, dir_fd=held.fd)
-                try:
-                    if os.write(transport, payload) != len(payload): raise ValueError
-                finally:
-                    os.close(transport)
-                command = [release.python_executable, "-I", "-m", "tuner.runtime.packaged_sft_child",
-                           "--qualify-local", str(root / "transport.json"), _digest(payload)]
-                # Output goes to bounded private tmpfs; never an unbounded PIPE allocation.
-                with tempfile.TemporaryFile(dir=root) as stdout, tempfile.TemporaryFile(dir=root) as stderr:
-                    try:
-                        child = subprocess.run(command, env=local_cpu_environment(release), cwd=root,
-                            pass_fds=(fd,), stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, timeout=60, check=False)
-                        stdout.seek(0); stderr.seek(0)
-                        raw, errors = stdout.read(16385), stderr.read(16385)
-                    except BaseException:
-                        raise PackagedLocalCPUStageError("CHILD_RESULT") from None
-                held.check(); leaf.check()
-                expected = local_cpu_result(release, trainer_digest)
-                if child.returncode != 0 or errors or raw != _canonical(expected):
-                    raise PackagedLocalCPUStageError("CHILD_RESULT")
-                return expected
-            finally:
-                if leaf is not None: leaf.close()
-                held.close()
-    finally:
-        os.close(fd)
+        stage = "FIXTURE_SETUP"
+        temporary = owned.enter_context(tempfile.TemporaryDirectory(prefix="qualification-", dir="/tmp"))
+        root = Path(temporary)
+        held = _HeldDirectory(root)
+        owned.callback(held.close)
+        stage = "FIXTURE_WRITE"
+        target = os.open("fixture.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=held.fd)
+        try:
+            if os.write(target, LOCAL_CPU_MODEL) != len(LOCAL_CPU_MODEL):
+                raise ValueError
+            os.fsync(target)
+            os.fchmod(target, 0o400)
+            info = os.fstat(target)
+        finally:
+            close_writer(target)
+        member = {"path": "fixture.json", "size_bytes": len(LOCAL_CPU_MODEL), "sha256": _digest(LOCAL_CPU_MODEL), "device": info.st_dev, "inode": info.st_ino}
+        leaf = _HeldModelFile(root / "fixture.json", held, member)
+        owned.callback(leaf.close)
+        stage = "TRANSPORT"
+        payload = _canonical({"schema_version": LOCAL_CPU_PROTOCOL, "release": release_document,
+            "input_fd": fd, "root": str(root), "root_identity": list(held.identity), "member": member})
+        transport = os.open("transport.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400, dir_fd=held.fd)
+        try:
+            if os.write(transport, payload) != len(payload):
+                raise ValueError
+        finally:
+            close_writer(transport)
+        command = [release.python_executable, "-I", "-m", "tuner.runtime.packaged_sft_child",
+                   "--qualify-local", str(root / "transport.json"), _digest(payload)]
+        # Output uses private files, existing bounded reads (16 KiB + 1), and
+        # the child deadline; there is no unbounded PIPE allocation claim.
+        stdout = owned.enter_context(tempfile.TemporaryFile(dir=root))
+        stderr = owned.enter_context(tempfile.TemporaryFile(dir=root))
+        stage = "CHILD_RESULT"
+        child = subprocess.run(command, env=local_cpu_environment(release), cwd=root,
+            pass_fds=(fd,), stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, timeout=60, check=False)
+        stdout.seek(0)
+        stderr.seek(0)
+        raw, errors = stdout.read(16385), stderr.read(16385)
+        stage = "POST_CHILD_CUSTODY"
+        held.check()
+        leaf.check()
+        stage = "CHILD_RESULT"
+        expected = local_cpu_result(release, trainer_digest)
+        if child.returncode != 0 or errors or raw != _canonical(expected):
+            raise ValueError
+    except BaseException as error:
+        primary = (error if type(error) is PackagedLocalCPUStageError
+                   else PackagedLocalCPUStageError(stage))
+    try:
+        # ExitStack attempts every registered close even if one fails. Cleanup
+        # uncertainty cannot replace the original diagnostic boundary.
+        owned.close()
+    except BaseException:
+        if primary is None:
+            primary = PackagedLocalCPUStageError("CLEANUP")
+    if primary is not None:
+        raise primary from None
+    return expected
 
 
 def local_cpu_main(release_document):
