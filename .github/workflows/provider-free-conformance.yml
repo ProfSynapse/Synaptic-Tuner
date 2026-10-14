@@ -842,7 +842,7 @@ jobs:
               str(root / "tests/training/test_conversation_input_preparation.py")]))
           PYCODE
 
-      - name: Exercise installed conversation SFT compiler and isolated worker
+      - name: Exercise installed conversation SFT compiler and packaged training custody
         if: matrix.suite == 'core'
         working-directory: ${{ runner.temp }}
         run: |
@@ -862,7 +862,8 @@ jobs:
           for name in ("Trainers.sft.runtime_v1", "Trainers.sft.src.data_loader",
                        "Trainers.sft.src.preprocessing", "shared.sft_preprocessing",
                        "tuner.runtime.offline_sft_worker", "tuner.runtime.verification",
-                       "tuner.training.methods.sft", "tuner.training.packaged_compilation"):
+                       "tuner.training.methods.sft", "tuner.training.packaged_compilation",
+                       "tuner.runtime.packaged_sft_execution", "tuner.runtime.packaged_sft_child"):
               location = Path(importlib.util.find_spec(name).origin).resolve()
               assert location.is_relative_to(prefix) and not location.is_relative_to(checkout), location
           root = Path(os.environ["RUNNER_TEMP"]) / "installed-conversation-sft-tests"
@@ -876,6 +877,8 @@ jobs:
               "training/test_sft_compilation.py",
               "training/test_packaged_execution_material.py",
               "runtime/test_packaged_runtime_releases.py",
+              "runtime/test_packaged_sft_execution.py",
+              "runtime/test_packaged_grpo_execution.py",
               "training/test_training_compiler.py",
           )
           for relative in helpers:
@@ -884,12 +887,19 @@ jobs:
               shutil.copy2(checkout / "tests" / relative, target)
           for package in ("tests", "tests/training", "tests/runtime", "tests/trainers", "tests/trainers/sft"):
               (root / package / "__init__.py").touch()
+          installed = Path(importlib.util.find_spec("tuner").origin).resolve().parent.parent
+          (root / "schemas").mkdir()
+          for name in ("synaptic-packaged-sft-terminal-v1.schema.json",
+                       "synaptic-packaged-sft-training-lineage-v1.schema.json"):
+              shutil.copy2(installed / "schemas" / name, root / "schemas" / name)
           sys.path.insert(0, str(root))
           os.chdir(root)
           import pytest
           raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
               str(root / "tests/training/test_conversation_sft_support.py"),
               str(root / "tests/trainers/sft/test_conversation_data_loader.py"),
+              str(root / "tests/runtime/test_packaged_sft_execution.py"),
+              str(root / "tests/runtime/test_packaged_grpo_execution.py"),
               str(root / "tests/trainers/sft/test_runtime_v1.py") + "::test_real_decoder_and_isolated_worker_preserve_exact_closure"]))
           PYCODE
 
