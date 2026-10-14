@@ -1,4 +1,4 @@
-# Dedicated HF SFT host fixture
+# Dedicated public Docker SFT host fixture
 
 This is a host-project qualification branch, never an engine main/feature PR.
 Keep the exact reviewed engine Gitlink and canonical source remote. Engine code
@@ -12,5 +12,6 @@ credential values belong only in approved named secret stores.
 The eight authored paired documents publish syntunia-sft-row/v1 raw_text with
 full-token loss, not messages/v2. A publication/source pin is not a runtime,
 model/hardware, cancellation or paid qualification grant. Never replay unknown
-submission or erase consumed state. This fixture creation authorizes only local
-preparation and explicitly requested read-only account/bucket discovery.
+submission or erase consumed state. This fixture authorizes only configuration/source preparation. Docker image,
+model and GPU effects require the independently reviewed exact qualification
+plan; preserved HF templates and historical paths are not active authorizations.
