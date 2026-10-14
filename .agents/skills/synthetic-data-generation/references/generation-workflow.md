@@ -416,3 +416,26 @@ projection and explicit group splits, and retain the returned source. This is
 a preparation/CPU SFT contract; qualified runtime releases do not yet admit the
 new conversation format. Never substitute an unrelated ingestion bundle or invent chronological
 lineage to make a handoff test pass.
+
+
+## Fixed environment worker ownership
+
+The public retained-input environment session can use the fixed local filesystem
+worker. After acknowledged guardian custody, a small guardian owns its exact
+worker process and retained scratch descriptors. Owner-process death or normal
+shutdown triggers bounded termination waits; scratch cleanup follows confirmed
+worker exit using the original descriptor identities. Stopping the worker does
+not stop its guardian. This is local process supervision, not a security sandbox.
+
+Pre-handoff owner death, guardian death and machine loss remain outside that
+cleanup guarantee. A child stuck in uninterruptible kernel sleep can prevent
+confirmed exit; scratch must remain and cleanup is uncertain. Setup and filesystem
+cleanup are synchronous OS operations, without a general hard completion deadline.
+A living owner may explicitly retry failed cleanup only after the guardian's
+confirmed worker exit and custody relinquishment. Never adopt a PID or delete an
+unproven stale root.
+
+This does not resume an interrupted generation row or replay an uncertain paid
+request. Reopened run/spend records remain the existing API's authority; process
+cleanup alone does not prove a cancelled or successful Data run. CPU owner-death
+tests prove only the fixed-worker lifecycle under their controlled OS conditions.
