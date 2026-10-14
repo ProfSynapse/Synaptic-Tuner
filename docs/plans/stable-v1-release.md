@@ -1035,3 +1035,31 @@ changed in the fixed 131/13-member GRPO inventories; all seven checks are curren
 
 The same installed wheel also passed all 163 recipe, retention and profile
 controls (132.31 seconds) and 247 public GRPO/material controls (1.70 seconds).
+
+### Ordinary Modal GRPO runner
+
+The normal host runner now accepts a GRPO recipe with an explicitly compatible
+host-owned named profile. It retains the same prepared local inputs through
+actual CPU qualification, final material binding, public planning/start and
+cleanup. CLI execution and CPU qualification report distinct GRPO result tags;
+SFT defaults remain unchanged. Quote and restricted metrics qualification remain
+unavailable for GRPO. No candidate profile is bundled or promoted.
+
+The joined CPU controls exercise the real isolated CPU qualification protocol,
+signed receipt, public lifecycle, owned GRPO child, native verification, signed
+completion and five public artifact downloads. Explicit image/provider/ML
+substitutes keep this provider-free. A bad qualification signature prevents
+training; a lost submission reply retains the consumed uncertain claim. These
+controls do not establish cold-host recovery or live GPU qualification.
+
+Independent source and CI/skill review passed. Root source tests passed 32
+joined/recipe controls (16.23 seconds). Fresh sdist-built wheel
+`40e1aa15b91d863c4fd7965424fef8ca7f6362262b24768e2ea137b561f8f964`
+passed the base-only consumer and 402 installed custody/runner cases on local
+Python 3.14 (31.27 seconds); the sole portable SFT version rejection passed on
+Python 3.12 (0.99 seconds). This is split local evidence; CI retains all 403
+on Python 3.12. All three changed production modules match reviewed bytes.
+All seven source lock checks remain current without refresh.
+
+The same wheel passed the complete existing installed recipe/retention/profile
+lane: 163 controls in 132.37 seconds, including the updated recipe gates.
