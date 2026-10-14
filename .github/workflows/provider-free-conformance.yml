@@ -1216,6 +1216,10 @@ jobs:
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
+          for name in ("tuner.training.coordinator_material", "tuner.runtime.dispatch", "synaptic_tuner.api.v1.reference.sqlite_store"):
+              location = Path(importlib.import_module(name).__file__).resolve()
+              assert not location.is_relative_to(checkout), location
+              assert location.is_relative_to(Path(sys.prefix)), location
           root = Path(os.environ["RUNNER_TEMP"]) / "installed-hf-host-tests"
           schema_root = root / "schemas"
           schema_root.mkdir(parents=True)
@@ -1223,6 +1227,7 @@ jobs:
           for name in ("synaptic-sft-workload-v1.schema.json", "synaptic-execution-source-v1.schema.json"):
               shutil.copy2(installed / "schemas" / name, schema_root / name)
           for name in (
+              "examples/test_hf_training_qualification.py",
               "execution/providers/test_hf_jobs_public_family.py",
               "execution/providers/test_hf_jobs_public_lifecycle.py",
               "execution/providers/test_hf_jobs_retained_reader.py",
@@ -1237,6 +1242,13 @@ jobs:
                   if parent == root:
                       break
                   (parent / "__init__.py").touch()
+          # Host-owned consumer inputs, not production Python or a checkout
+          # production import path. The shared launch dependency is integrated
+          # separately; both consumer modules exercise the installed wheel.
+          consumer = root / "examples" / "training_qualification"
+          consumer.mkdir(parents=True)
+          for name in ("launch.py", "hf_host.py"):
+              shutil.copy2(checkout / "examples" / "training_qualification" / name, consumer / name)
           import pytest
           sys.path.insert(0, str(root))
           os.chdir(root)
@@ -1244,7 +1256,8 @@ jobs:
               str(root / "tests/execution/providers/test_hf_jobs_public_family.py"),
               str(root / "tests/execution/providers/test_hf_jobs_public_lifecycle.py"),
               str(root / "tests/execution/providers/test_hf_jobs_retained_reader.py"),
-              str(root / "tests/execution/providers/test_hf_jobs_process_readback.py")]))
+              str(root / "tests/execution/providers/test_hf_jobs_process_readback.py"),
+              str(root / "tests/examples/test_hf_training_qualification.py")]))
           PYCODE
 
       - name: Exercise installed model preparation with the candidate image Hub SDK
