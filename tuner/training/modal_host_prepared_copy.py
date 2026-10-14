@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from copy import deepcopy
 from dataclasses import dataclass
 import stat
 
@@ -135,7 +134,7 @@ def inspect_mounted_prepared_dataset(source: Path, *, prepared_format="syntunia-
         if snapshot_validator is not None:
             if not callable(snapshot_validator):
                 raise TypeError("snapshot validator must be callable")
-            snapshot_validator(deepcopy(verified), dataset)
+            snapshot_validator(parser(directory, manifest, dataset), dataset)
         if (_read_member(fd, "manifest.json", manifest_bound) != manifest
                 or _read_member(fd, "dataset.jsonl", dataset_bound) != dataset
                 or os.fstat(fd).st_ino != opened.st_ino):

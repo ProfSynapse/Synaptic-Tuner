@@ -602,3 +602,80 @@ assert not any(name.split('.')[0] in ('torch','transformers','unsloth','modal','
     subprocess.run(
         [sys.executable, "-I", "-c", code], check=True, capture_output=True, timeout=15
     )
+
+
+def callback_publication(tmp_path, prepared_format):
+    """Real existing format parsers include immutable MappingProxyType metadata."""
+    from tuner.dataset_prep import prepare_dataset_v2
+    from tuner.dataset_prep.conversation_messages import publish_conversation_dataset
+    from tests.dataset_prep.test_context_messages_v2 import _config
+    from tests.dataset_prep.test_conversation_messages import build
+
+    output = tmp_path / "datasets"
+    if prepared_format == "syntunia-sft-row/v2":
+        _, _, _, config = _config(tmp_path / "source")
+        published = prepare_dataset_v2(config, output)
+    else:
+        output.mkdir(mode=0o700)
+        published = publish_conversation_dataset(output, build())
+    return published.path, published.semantic_identity
+
+
+@pytest.mark.parametrize(
+    "prepared_format", ["syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"]
+)
+@pytest.mark.parametrize("mutate", [False, True])
+def test_all_supported_snapshot_callbacks_preserve_authoritative_record(
+    tmp_path, prepared_format, mutate, monkeypatch
+):
+    from tuner.training.modal_host_prepared_copy import inspect_mounted_prepared_dataset
+
+    path, original = callback_publication(tmp_path, prepared_format)
+    raw = (path / "dataset.jsonl").read_bytes()
+    import tuner.training.modal_host_prepared_copy as copying
+
+    reads = []
+    original_read = copying._read_member
+
+    def observed_read(*args):
+        reads.append(args[1])
+        return original_read(*args)
+
+    monkeypatch.setattr(copying, "_read_member", observed_read)
+    received = []
+
+    def validate(record, data):
+        received.append((record, data))
+        if mutate:
+            object.__setattr__(record.semantic_identity, "dataset_digest", "f" * 64)
+
+    result = inspect_mounted_prepared_dataset(
+        path, prepared_format=prepared_format, snapshot_validator=validate
+    )
+    assert reads == ["manifest.json", "dataset.jsonl", "manifest.json", "dataset.jsonl"]
+    assert received[0][1] == raw
+    assert result is not received[0][0] and result.semantic_identity == original
+    assert (path / "dataset.jsonl").read_bytes() == raw
+    assert result.semantic_identity.dataset_digest != "f" * 64
+
+
+@pytest.mark.parametrize(
+    "prepared_format", ["syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"]
+)
+def test_all_supported_snapshot_callbacks_keep_final_read_checks(
+    tmp_path, prepared_format
+):
+    from tuner.training.modal_host_prepared_copy import (
+        inspect_mounted_prepared_dataset,
+        ModalPreparedCopyUnavailable,
+    )
+
+    path, _ = callback_publication(tmp_path, prepared_format)
+
+    def change(record, raw):
+        (path / "dataset.jsonl").write_bytes(raw + b" ")
+
+    with pytest.raises(ModalPreparedCopyUnavailable):
+        inspect_mounted_prepared_dataset(
+            path, prepared_format=prepared_format, snapshot_validator=change
+        )
