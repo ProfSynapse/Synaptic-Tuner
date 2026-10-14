@@ -81,6 +81,7 @@ def inspect() -> dict[str, object]:
             raise ValueError("package locations differ")
         phase = "INSTALLED_INVENTORY"
         measured = inspect_installed_runtime(expected)
+        phase = "OUTPUT"
         return {
             "schema_version": "synaptic-modal-build-capture/v1",
             "image_id": os.environ["MODAL_IMAGE_ID"],

@@ -91,7 +91,7 @@ def _validate_capture_diagnostic(value: object) -> dict[str, object]:
         raise ValueError("invalid inspector phase")
     if stage is not None and (phase != "INSTALLED_INVENTORY" or type(stage) is not str or stage not in INSTALLED_RUNTIME_INSPECTION_STAGES):
         raise ValueError("invalid inventory stage")
-    if value["cleanup_status"] not in {"CONFIRMED", "UNRESOLVED"}:
+    if type(value["cleanup_status"]) is not str or value["cleanup_status"] not in {"CONFIRMED", "UNRESOLVED"}:
         raise ValueError("invalid capture cleanup")
     return dict(value)
 

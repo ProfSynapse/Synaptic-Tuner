@@ -95,3 +95,21 @@ def test_main_does_not_emit_failure_exception_text(build_inputs, monkeypatch, ca
     captured = capsys.readouterr()
     assert "private-sentinel" not in captured.out + captured.err
     assert json.loads(captured.out)["phase"] == "INPUT"
+
+
+
+def test_completed_inventory_then_inspector_self_read_failure_is_output_phase(build_inputs, monkeypatch, capsys):
+    expected, path = build_inputs
+    expected["python"]["executable_digest"] = hashlib.sha256(Path(sys.executable).resolve(strict=True).read_bytes()).hexdigest()
+    path.write_text(json.dumps(expected), encoding="utf-8")
+    monkeypatch.setenv("MODAL_SANDBOX_ID", "sb-Exact123")
+    original = Path.read_bytes
+    def read_bytes(selected):
+        if selected == Path(inspector.__file__):
+            raise OSError("private-inspector-path")
+        return original(selected)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    assert inspector.main() == 2
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["phase"] == "OUTPUT"
+    assert "private-inspector-path" not in captured.out + captured.err
