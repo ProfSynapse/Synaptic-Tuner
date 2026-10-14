@@ -1012,6 +1012,47 @@ jobs:
               str(root / "tests/execution/providers/test_modal_grpo_cpu_qualification.py")]))
           PYCODE
 
+      - name: Exercise installed bounded GRPO evidence with pinned CPU Torch
+        if: matrix.suite == 'core'
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -m venv --copies "$RUNNER_TEMP/grpo-evidence-venv"
+          "$RUNNER_TEMP/grpo-evidence-venv/bin/python" -m pip install torch==2.9.0+cpu --index-url https://download.pytorch.org/whl/cpu
+          "$RUNNER_TEMP/grpo-evidence-venv/bin/python" -m pip install "$RUNNER_TEMP"/sdist-wheelhouse/synaptic_tuner-*.whl pytest==8.4.2 datasets==5.1.0
+          SYNAPTIC_TEST_GRPO_CPU_EVIDENCE=1 "$RUNNER_TEMP/grpo-evidence-venv/bin/python" -I -B - <<'PYCODE'
+          import importlib.util
+          import os
+          from pathlib import Path
+          import shutil
+          import sys
+          import torch
+          import datasets
+          assert torch.__version__ == "2.9.0+cpu" and torch.version.cuda is None
+          assert datasets.__version__ == "5.1.0"
+          prefix = Path(sys.prefix).resolve()
+          checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          assert Path(torch.__file__).resolve().is_relative_to(prefix)
+          for name in ("Trainers.grpo.runtime_v1", "tuner.training.packaged_grpo_compilation",
+                       "tuner.runtime.packaged_grpo_child", "tuner.runtime.packaged_grpo_verification"):
+              origin = Path(importlib.util.find_spec(name).origin).resolve()
+              assert origin.is_relative_to(prefix) and not origin.is_relative_to(checkout), origin
+          # Reuse only the test helper closure copied by the preceding custody step.
+          root = Path(os.environ["RUNNER_TEMP"]) / "installed-conversation-sft-tests"
+          tests = ("trainers/grpo/test_qualification_evidence.py",
+                   "runtime/test_grpo_evidence_binding.py",
+                   "runtime/test_grpo_evidence_child.py")
+          for relative in tests:
+              shutil.copy2(checkout / "tests" / relative, root / "tests" / relative)
+          scratch = Path(os.environ["RUNNER_TEMP"]) / "g4tmp"
+          scratch.mkdir(mode=0o700)
+          os.environ["TMPDIR"] = str(scratch)
+          sys.path.insert(0, str(root))
+          os.chdir(root)
+          import pytest
+          raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider"] +
+              [str(root / "tests" / relative) for relative in tests]))
+          PYCODE
+
       - name: Exercise installed public evaluation comparison and report readers
         if: matrix.suite == 'core'
         working-directory: ${{ runner.temp }}
