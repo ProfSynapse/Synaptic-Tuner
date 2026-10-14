@@ -92,6 +92,8 @@ def capture(source, destination, *, mutation=None):
 
 def install(source, config, setter=setattr):
     """Only package/wheel image observations are substituted, with real parsers."""
+    import importlib
+    import importlib.machinery
     from tuner.runtime import packaged_worker_closure as outer
     from tuner.runtime import packaged_grpo_worker_closure as grpo
     from tuner.runtime import offline_grpo_worker as offline
@@ -101,6 +103,23 @@ def install(source, config, setter=setattr):
 
     source = Path(source)
     assert Path(worker.__file__).absolute().parents[2] == source
+    # The declared fixture image has physical wheel namespace roots. An
+    # editable test launcher additionally exposes setuptools' synthetic path
+    # hook, which is not part of that image and correctly fails the real guard.
+    # Bind only these two fixture namespaces; do not alter ambient search paths
+    # or the production import guard's rejection of foreign namespace roots.
+    for name, directory in (
+        ("Trainers", source / "Trainers"),
+        ("Trainers.sft", source / "Trainers/sft"),
+    ):
+        assert directory.is_dir() and not directory.is_symlink()
+        module = importlib.import_module(name)
+        assert getattr(module, "__file__", None) is None
+        spec = importlib.machinery.PathFinder.find_spec(name, [str(directory.parent)])
+        assert spec is not None and spec.origin is None
+        assert list(spec.submodule_search_locations) == [str(directory)]
+        setter(module, "__path__", [str(directory)])
+        setter(module, "__spec__", spec)
     wheel_raw = Path(config["wheel"]).read_bytes()
     assert hashlib.sha256(wheel_raw).hexdigest() == config["wheel_sha256"]
     metadata = canonical(

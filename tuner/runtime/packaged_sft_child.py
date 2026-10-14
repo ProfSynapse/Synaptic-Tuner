@@ -419,9 +419,18 @@ def run_local_cpu_child(args):
         **options)
     _check_local_cpu_environment(release)
     trainer = _inspect_release(release, **options)
+    guard = _installed_import_guard(release, trainer, **options)
+    sys.meta_path.insert(0, guard)
+    try:
+        from Trainers.sft import runtime_v1 as core
+        core_path = Path(core.__file__)
+        if core_path not in guard.members or _digest(stable_read(core_path)) != guard.members[core_path]:
+            raise ValueError("PACKAGED_CHILD_IMPORT_REJECTED")
+    finally:
+        sys.meta_path.remove(guard)
     fd = payload["input_fd"]
-    seals = fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
-    if type(fd) is not int or fd < 3 or fcntl.fcntl(fd, fcntl.F_GET_SEALS) & seals != seals or os.pread(fd, len(LOCAL_CPU_DATA) + 1, 0) != LOCAL_CPU_DATA: raise ValueError
+    seals = core._LINUX_F_SEAL_SEAL | core._LINUX_F_SEAL_SHRINK | core._LINUX_F_SEAL_GROW | core._LINUX_F_SEAL_WRITE
+    if type(fd) is not int or fd < 3 or fcntl.fcntl(fd, core._LINUX_F_GET_SEALS) & seals != seals or os.pread(fd, len(LOCAL_CPU_DATA) + 1, 0) != LOCAL_CPU_DATA: raise ValueError
     root = Path(payload["root"])
     if root.parent != Path("/tmp") or not root.name.startswith("qualification-") or Path(args[1]) != root / "transport.json": raise ValueError
     held = _HeldDirectory(root)
@@ -434,7 +443,6 @@ def run_local_cpu_child(args):
                 or member["path"] != "fixture.json" or member["size_bytes"] != len(LOCAL_CPU_MODEL)
                 or member["sha256"] != _digest(LOCAL_CPU_MODEL)): raise ValueError
         leaf = _HeldModelFile(root / "fixture.json", held, member)
-        guard = _installed_import_guard(release, trainer, **options)
         _check_no_gpu_devices()
         _OwnedSourceLoader("__main__", str(trainer), guard.members[trainer]).get_code("__main__")
         _check_no_gpu_devices()
