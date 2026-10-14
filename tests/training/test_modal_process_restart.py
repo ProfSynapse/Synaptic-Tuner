@@ -150,6 +150,14 @@ def _consumer(root, role):
     class Call:
         is_hydrated = True
         object_id = state.get('call_ref', 'fc-owned')
+        def __init__(self):
+            self.client = client
+        def cancel(self, *, terminate_containers):
+            assert role == 'cancel' and terminate_containers is True
+            with (root / 'cancel-events').open('a') as stream:
+                stream.write(self.object_id + '\n')
+            if state.get('cancel_lost'):
+                raise RuntimeError('controlled cancellation reply loss')
         def hydrate(self, supplied):
             assert supplied is client
             return self
@@ -169,17 +177,47 @@ def _consumer(root, role):
     def forbidden(*args, **kwargs):
         raise AssertionError('consumer cannot create execution authority or effects')
     patch.setattr(TrainingAPI, 'start', forbidden)
-    patch.setattr(ModalPackagedHostEffectsV1, 'authorize', forbidden)
-    patch.setattr(ModalPackagedHostEffectsV1, 'bind', forbidden)
+    mutation = role in {'cancel', 'reconcile'}
+    if not mutation:
+        patch.setattr(ModalPackagedHostEffectsV1, 'authorize', forbidden)
+        patch.setattr(ModalPackagedHostEffectsV1, 'bind', forbidden)
     patch.setattr(runner, '_qualified_runtime', forbidden)
     patch.setattr(reader, 'validate_local_launcher', lambda: None)
     patch.setattr(reader, 'open_modal_host_scope', lambda **kwargs: (client, scope))
     patch.setattr(reader, 'observe_modal_host_scope', lambda **kwargs: (scope.account_ref, scope.workspace_ref, scope.environment_ref, scope.client_ref))
     patch.setattr(reader._CurrentPackagedDeploymentReader, 'observe', lambda *args, **kwargs: facts)
+    if role == 'cancel' and state.get('cancel_receipt_gap'):
+        from tuner.execution.providers.modal.packaged_effects import ModalPackagedFoundationEffectExecutor
+        original_execute = ModalPackagedFoundationEffectExecutor.execute_once
+        def lost_receipt(self, payload, request):
+            original_execute(self, payload, request)
+            assert payload.payload_kind == 'cancel-payload/v2'
+            raise RuntimeError('controlled post-ack receipt loss')
+        patch.setattr(ModalPackagedFoundationEffectExecutor, 'execute_once', lost_receipt)
     run_root = root / 'host/state/synaptic-training' / run.run_id
-    with reader.open_retained_modal_runs(root=run_root, run=run, modal_profile='fixture', modal_environment='main', sdk=sdk) as view:
+    from tuner.handlers.runs_handler import _CurrentCancellationGrant
+    opener = reader.open_retained_modal_lifecycle if mutation else reader.open_retained_modal_runs
+    with opener(root=run_root, run=run, modal_profile='fixture', modal_environment='main', sdk=sdk,
+                **({'cancellation_grants': _CurrentCancellationGrant(run)} if mutation else {})) as view:
         before = view.runs.show(run).state.value
-        if role == 'pending':
+        if role == 'cancel':
+            if state.get('cancel_receipt_gap'):
+                from synaptic_tuner.api.v1.runs_facade import RunOperationError
+                with pytest.raises(RunOperationError) as failure:
+                    view.runs.cancel(run, 'operator stop')
+                assert failure.value.code.value == 'state_conflict'
+                workflow = view.runs._operations._workflows.get(run)
+                record = view.runs._operations._operations._foundation.get(workflow.cancel.effect_id)
+                assert workflow.phase.value == 'cancel_intent_recorded'
+                assert record.attempt_count == 1 and record.dispatch.value == 'orphaned_unproven'
+                assert not record.results
+                return {'pid': os.getpid(), 'before': before, 'state': workflow.phase.value,
+                        'cancel_intent': workflow.cancel.to_dict(), 'attempt_count': record.attempt_count,
+                        'dispatch': record.dispatch.value, 'census_digest': _census_digest(root, run.to_dict())}
+            assert view.runs.cancel(run, 'operator stop').state.value == 'reconcile_required'
+        elif role == 'reconcile':
+            assert view.runs.reconcile(run).state.value == 'reconcile_required'
+        elif role == 'pending':
             outcome = view.runs.outcome(run)
             assert outcome.state.value == before == state.get('expected_state', 'queued')
             assert reads == ['poll']
@@ -209,12 +247,23 @@ def _consumer(root, role):
                 observed[artifact_role] = hashlib.sha256(path.read_bytes()).hexdigest()
             assert observed == state['artifact_hashes']
         restored = view.runs.show(run)
+        workflow = view.runs._operations._workflows.get(run)
+        cancel_intent = None if workflow.cancel is None else workflow.cancel.to_dict()
         if state.get('expected_cancel') is not None:
             original = view.runs._operations._workflows.get(run)
-            assert original.cancel.to_dict() == state['expected_cancel']
+            if role == 'reconcile':
+                prior = state['expected_cancel']
+                current = original.cancel.to_dict()
+                for key in ('command_digest', 'effect_id', 'kind'):
+                    assert current[key] == prior[key]
+                for key in ('foundation_binding_digests', 'foundation_outcome_digests'):
+                    assert current[key][:len(prior[key])] == prior[key]
+            else:
+                assert original.cancel.to_dict() == state['expected_cancel']
             assert original.bound_cancellation is None
     return {'pid': os.getpid(), 'before': before, 'state': restored.state.value,
             'verified_artifacts': len(restored.artifacts), 'reads': reads,
+            'cancel_intent': cancel_intent,
             'census_digest': _census_digest(root, run.to_dict())}
 
 

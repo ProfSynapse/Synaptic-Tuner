@@ -466,8 +466,8 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1 | ModalGRPORecipePlan
                              cancellation_grants=None) -> ModalStandaloneRunResultV1:
     """Prepare, quote, build, submit, authenticate, verify, and save once.
 
-    No user callback, manually built wheel or provider-specific public API is
-    part of this command.  The public TrainingAPI and RunsAPI own the run.
+    Manual runtime-builder/source callbacks and provider-specific public APIs
+    are not part of this command; current cancellation permission is caller-owned.  The public TrainingAPI and RunsAPI own the run.
     """
     if (os.name != "posix" or platform.python_version() != "3.11.14"):
         raise ModalLocalPreparationUnavailable("LAUNCHER_PYTHON")

@@ -109,6 +109,7 @@ class ModalSFTRecipePlanV1:
     def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": "synaptic-modal-sft-recipe-plan/v1",
+            **({"allow_cancel_reconcile": True} if self.recipe.allow_cancel_reconcile else {}),
             "runtime_profile": self.recipe.runtime_profile,
             "profile_sha256": self.profile_sha256,
             "profile_base_image": self.profile_base_image,
@@ -381,6 +382,7 @@ class ModalGRPORecipePlanV1:
     def to_dict(self):
         return {
             "schema_version": "synaptic-modal-grpo-recipe-plan/v1", "method": "grpo",
+            **({"allow_cancel_reconcile": True} if self.recipe.allow_cancel_reconcile else {}),
             "runtime_profile": self.recipe.runtime_profile, "profile_sha256": self.profile_sha256,
             "profile_base_image": self.profile_base_image,
             "runtime_material_intent_digest": self.runtime_material_intent_digest,

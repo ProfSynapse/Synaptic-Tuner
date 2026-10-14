@@ -369,7 +369,7 @@ def _typed_inputs(retained):
 
 @contextmanager
 def _open_retained_modal(*, root, run, modal_profile, modal_environment, sdk, clock=None, cancellation_grants=None, lifecycle=False):
-    """Open one exact retained call; provider reads only, local CAS writes allowed."""
+    """Original known call; explicit lifecycle may cancel/lookup, never restore sources or submit."""
     opened = False
     try:
         if type(run) is not TrainingRunRef or not isinstance(root, Path):
