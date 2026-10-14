@@ -933,3 +933,31 @@ Both changed production files matched reviewed bytes; all six source lock checks
 remain current without additional refresh. Explicit test-package imports keep
 the combined installed test collection independent of pytest's import order.
 Independent source and CI review passed; provider/model qualification is open.
+
+### Fixed GRPO worker routing and native readback
+
+The existing Modal packaged dispatch and executor now select the exact GRPO
+compiler and isolated runtime. GRPO native verification must finish before
+signed completion is published. The existing reader authenticates completion
+and streams all five native roles; GRPO evaluation and SFT-only execution hooks
+are rejected explicitly. SFT callback behavior and capability flags are retained.
+
+The fresh sdist-built wheel
+`5c94c413aa4c8c5f6cf070486eed5e12834b94b29f76e9565deb421ad12534b7`
+passed the base-only consumer and 355 installed SFT/GRPO tests (13.96 seconds);
+all three changed production modules matched reviewed source bytes. The 239
+focused source cases and independent source/CI review passed. All six lock checks
+remain current without inventory or hash changes. The joined CPU test uses the
+actual isolated owned child, native verifier, HMAC completion and reader streams
+with explicit model/image/provider substitutes. Fresh reader construction and
+wrong-signature rejection are covered; full public-host SQLite restart, ordinary
+recipe launch and live GRPO qualification remain separate integration gates.
+
+The diagnostic readers now recognize the same nine fixed GRPO failure stages as
+the worker issuer. Unknown and private values still reject; no additional
+diagnostics are exposed. The correction passed 896 source controls with the
+pinned Modal 1.5.4 SDK and 249 installed-reader controls (11.48 seconds). The
+fresh sdist-built wheel is
+`fc09461f14a4639aefcf26b0cc65c3227d1afb017734d2d3ab220aac2cdac35c`;
+its base-only consumer passes and the changed reader is byte-exact. All seven
+source lock checks remain current without refresh.

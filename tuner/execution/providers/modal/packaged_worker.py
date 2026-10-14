@@ -244,6 +244,15 @@ class ModalPackagedEvidenceSigner(Protocol):
     def sign(self, purpose: str, payload: bytes, key_ref: str) -> bytes: ...
 
 
+_GRPO_FAILURE_STAGES = frozenset({
+    "ADMISSION", "REVALIDATION", "PREPARATION", "INVOCATION", "TRAINER",
+    "CHILD_DEADLINE", "CLEANUP_UNCERTAIN", "ARTIFACT",
+})
+PACKAGED_WORKER_FAILURE_STAGES = PACKAGED_WORKER_FAILURE_STAGES | frozenset(
+    "GRPO_" + value for value in _GRPO_FAILURE_STAGES
+) | {"GRPO_UNKNOWN"}
+
+
 class InstalledPackagedSFTTrainerExecutor:
     """Production implementation of the separate generic trainer executor."""
 
@@ -268,6 +277,26 @@ class InstalledPackagedSFTTrainerExecutor:
         on_metric_frame=None,
         on_metric_exhausted=None,
     ):
+        from .packaged_dispatch import _packaged_workload
+        selected = json.loads(workload_bytes)
+        if selected.get("schema_version") == "synaptic-packaged-grpo-workload/v1":
+            _packaged_workload(workload_bytes)
+            from tuner.runtime.packaged_grpo_execution import (
+                admit_packaged_grpo, execute_admitted_packaged_grpo,
+            )
+            if self._runner is not None or on_training_complete is not None:
+                raise ValueError("GRPO does not admit SFT runner or evaluation hooks")
+            admitted = admit_packaged_grpo(
+                runtime_release=runtime_release, provider_binding=provider_binding,
+                execution_binding=execution_binding, workload_bytes=workload_bytes,
+                artifact_policy=artifact_policy, paths=paths, environment=environment,
+            )
+            return execute_admitted_packaged_grpo(
+                admitted, model_preparer=self._model_preparer,
+                **({"on_metric_frame": on_metric_frame,
+                    "on_metric_exhausted": on_metric_exhausted}
+                   if on_metric_frame is not None else {}),
+            )
         admitted = admit_packaged_sft(
             runtime_release=runtime_release,
             provider_binding=provider_binding,
@@ -568,8 +597,13 @@ class ModalPackagedWorker:
                     raise ValueError("staged packaged input differs")
             stage = "PATH_CLAIM"
             paths = self._paths(dispatch)
-            stage = "SFT_ADMISSION"
-            configuration = json.loads(dispatch.workload_bytes)["configuration"]["document"]
+            from .packaged_dispatch import _packaged_workload
+            workload = json.loads(dispatch.workload_bytes)
+            grpo = workload.get("schema_version") == "synaptic-packaged-grpo-workload/v1"
+            if grpo:
+                _packaged_workload(dispatch.workload_bytes)
+            stage = "GRPO_ADMISSION" if grpo else "SFT_ADMISSION"
+            configuration = workload["configuration"]["document"] if not grpo else {}
             post_training = configuration.get("post_training")
             capture = configuration.get("observation_capture")
             if capture is not None:
@@ -655,6 +689,10 @@ class ModalPackagedWorker:
                     if type(exc) is PackagedSFTExecutionError
                     and exc.stage in _SFT_FAILURE_STAGES else "SFT_UNKNOWN"
                 )
+            elif stage == "GRPO_ADMISSION":
+                from tuner.runtime.packaged_grpo_execution import PackagedGRPOExecutionError
+                stage = ("GRPO_" + exc.stage if type(exc) is PackagedGRPOExecutionError
+                         and exc.stage in _GRPO_FAILURE_STAGES else "GRPO_UNKNOWN")
             return packaged_worker_failure(stage)
         finally:
             if publisher is not None:
