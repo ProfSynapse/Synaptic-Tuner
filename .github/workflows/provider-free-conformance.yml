@@ -24,6 +24,9 @@ on:
       - "tests/contract/test_paid_http_bounds_v1.py"
       - "tests/contract/test_nontraining_qualification_consumer.py"
       - "examples/nontraining/**"
+      - "examples/training_qualification/**"
+      - "tests/examples/test_docker_training_qualification.py"
+      - "tests/examples/test_hf_training_qualification.py"
       - "shared/llm/base.py"
       - "shared/llm/providers/openrouter.py"
       - "shared/llm/providers/openai_responses.py"
@@ -727,6 +730,7 @@ jobs:
           root = Path(os.environ["RUNNER_TEMP"]) / "installed-docker-host-tests"
           for name in (
               "training/test_docker_host_composition.py",
+              "examples/test_docker_training_qualification.py",
               "execution/providers/docker_provider_v1/conftest.py",
               "execution/providers/docker_provider_v1/test_local_source.py",
               "execution/providers/docker_provider_v1/test_preparation.py",
@@ -740,11 +744,16 @@ jobs:
                   if parent == root:
                       break
                   (parent / "__init__.py").touch()
+          consumer = root / "examples/training_qualification"
+          consumer.mkdir(parents=True, exist_ok=True)
+          for name in ("launch.py", "docker_host.py"):
+              shutil.copy2(checkout / "examples/training_qualification" / name, consumer / name)
           import pytest
           sys.path.insert(0, str(root))
           os.chdir(root)
           raise SystemExit(pytest.main(["-q", "-p", "no:cacheprovider",
-              str(root / "tests/training/test_docker_host_composition.py")]))
+              str(root / "tests/training/test_docker_host_composition.py"),
+              str(root / "tests/examples/test_docker_training_qualification.py")]))
           PYCODE
 
       - name: Exercise installed public GRPO declarations, preparation and host material

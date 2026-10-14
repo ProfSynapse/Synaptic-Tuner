@@ -394,3 +394,26 @@ Key sections:
 For cloud runs, evolutionary SFT is now expressible through `run-experiment` specs or `cloud-pipeline --train-evolutionary-*` overrides. Keep the first run short and capped by `max_steps`; the wrapper adds real per-step overhead.
 
 See `reference/training-config.md` for full config documentation.
+
+
+## Public training qualification consumer
+
+The checkout-owned `examples/training_qualification/launch.py` exercises the
+existing public TrainingAPI and RunsAPI with caller-owned configuration, named
+secret references and SQLite stores. See its README and Docker/HF templates.
+Run the installed interpreter from a neutral directory using
+`python -I /absolute/checkout/examples/training_qualification/launch.py ...`;
+the example itself is not a packaged engine module.
+
+`plan` checks existing material/compiler/profile bindings without resolving
+credentials or contacting a provider. Full public preflight is deferred until
+host composition in `start`. State is create-only: an unknown submission never
+authorizes replay. Successful native verification precedes downloading the five
+SFT artifacts through the public streams.
+
+Docker cold composition uses retained material/profile/request bytes, original
+named keys, qualification assets and local mount roots. It is not source-free
+recovery or remote Docker path mapping. HF cold reads use the existing retained
+reader and original named keys without restoring input authority. Default
+capability refusals remain in force. CPU scripted-provider tests do not qualify
+an image, GPU training, physical termination, provider billing or live parity.
