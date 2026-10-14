@@ -64,6 +64,7 @@ class ModalSFTRecipeV1:
     post_training: dict[str, object] | None = None
     observation_capture: dict[str, object] | None = None
     prepared_format: str = "syntunia-sft-row/v2"
+    allow_cancel_reconcile: bool = False
 
     def training_input(self, dataset_ref: str) -> TrainingInputV1:
         return TrainingInputV1(
@@ -208,11 +209,18 @@ def resolve_modal_sft_build(profile: RuntimeProfile, profiles_root: Path,
     return build_path, intent
 
 
+
+def _cancel_selection(config):
+    value = config.get("allow_cancel_reconcile", False)
+    if type(value) is not bool:
+        raise ValueError("exact cancellation capability selection required")
+    return value
+
 def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV1:
     """Load the existing YAML shape, rejecting provider authority and unknown controls."""
     cfg = _section(load_recipe(path, "cloud"), {
         "name", "description", "target", "method", "provider", "job", "run",
-        "model", "dataset", "training", "lora", "artifacts", "post_training", "observation_capture",
+        "model", "dataset", "training", "lora", "artifacts", "post_training", "observation_capture", "allow_cancel_reconcile",
     }, "recipe")
     if cfg.get("target") != "cloud" or cfg.get("provider") != "modal" or cfg.get("method") != "sft":
         raise ValueError("Modal SFT requires target: cloud, provider: modal, method: sft")
@@ -306,6 +314,7 @@ def load_modal_sft_recipe(path: Path, *, profiles_root: Path) -> ModalSFTRecipeV
         (validate_observation_capture_config(cfg["observation_capture"])
          if "observation_capture" in cfg else None),
         prepared_format,
+        _cancel_selection(cfg),
     )
 
 
@@ -325,6 +334,7 @@ class ModalGRPORecipeV1:
     child_max_seconds: int
     prepared_format: str = "synaptic-grpo-prompts/v1"
     qualification_evidence: object = None
+    allow_cancel_reconcile: bool = False
 
     def limits(self):
         value = {"child_max_seconds": self.child_max_seconds}
@@ -391,7 +401,7 @@ def load_modal_grpo_recipe(path: Path, *, profiles_root: Path) -> ModalGRPORecip
     """Consume exact existing public GRPO fields; no reward directory fallback."""
     cfg = _section(load_recipe(path, "cloud"), {
         "name", "description", "target", "provider", "method", "job", "run",
-        "dataset", "training_input", "limits",
+        "dataset", "training_input", "limits", "allow_cancel_reconcile",
     }, "GRPO recipe")
     run = _section(cfg.get("run"), {"method", "dry_run"}, "GRPO run")
     if (cfg.get("target") != "cloud" or cfg.get("provider") != "modal" or cfg.get("method") != "grpo"
@@ -436,7 +446,7 @@ def load_modal_grpo_recipe(path: Path, *, profiles_root: Path) -> ModalGRPORecip
         model=public.model.ref, model_revision=public.model.revision, method="grpo")
     return ModalGRPORecipeV1(cfg.get("name", path.stem), locator, digest, rows, job["runtime_profile"],
         public, job["accelerator"], job["accelerator_count"], job["timeout_seconds"], maximum, child_limit,
-        qualification_evidence=evidence)
+        qualification_evidence=evidence, allow_cancel_reconcile=_cancel_selection(cfg))
 
 
 def load_modal_recipe(path, *, profiles_root):

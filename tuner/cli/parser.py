@@ -149,18 +149,24 @@ class _SynapticArgumentParser(argparse.ArgumentParser):
         if command == "runs":
             import re
             allowed = {"--run", "--modal-profile", "--modal-environment", "--json", "--env-file"}
+            if parsed.subcommand == "cancel":
+                allowed.add("--reason")
             if parsed.subcommand == "download":
                 allowed.update({"--artifact-role", "--dest"})
             if _explicit_long_options(arguments) - allowed:
-                self.error("runs accepts only retained readback options")
+                self.error("runs accepts only exact retained run options")
             action = getattr(parsed, "subcommand", None)
-            if action not in {"show", "observe", "verify", "download"}:
-                self.error("runs requires show, observe, verify, or download")
+            if action not in {"show", "observe", "verify", "download", "cancel", "reconcile"}:
+                self.error("runs requires show, observe, verify, download, cancel, or reconcile")
             if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", parsed.run or "")
                     or parsed.run == "latest"):
                 self.error("runs requires --run with one exact retained run id")
             if not parsed.modal_profile or not parsed.modal_environment:
                 self.error("runs requires explicit --modal-profile and --modal-environment")
+            if action == "cancel" and (not parsed.reason or not parsed.reason.strip()):
+                self.error("runs cancel requires --reason")
+            if action != "cancel" and parsed.reason is not None:
+                self.error("--reason requires runs cancel")
             if action == "download":
                 if not parsed.artifact_role or not parsed.dest:
                     self.error("runs download requires --artifact-role and --dest")
@@ -645,6 +651,7 @@ Examples:
 
     # Cloud-specific flags
     parser.add_argument("--run", help="Exact retained run id for runs; cloud run slug/prefix for cloud-eval or cloud-gym.")
+    parser.add_argument("--reason", help="Operator reason for an exact retained run cancellation.")
     parser.add_argument("--artifact-role", choices=("final_model", "tokenizer", "training_lineage", "training_metrics", "workload_record"), help="Verified artifact role for runs download.")
     parser.add_argument("--method", choices=list(TRAINING_METHODS), help="Training method for cloud-pipeline, or training method filter for cloud-eval/cloud-gym.")
     parser.add_argument("--bucket", help="Override HF bucket identifier for cloud-eval/cloud-gym/bucket.")

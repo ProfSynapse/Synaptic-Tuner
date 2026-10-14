@@ -21,6 +21,8 @@ from synaptic_tuner.api.v1.reference.stores import (
     InMemoryDurableRecordStoreV1, InMemoryDurableStreamStoreV1,
 )
 from synaptic_tuner.api.v1.reference.training import ReferenceRequestPortsV1
+from synaptic_tuner.api.v1.training_facade import AuthorizationRequirement
+from tuner.execution.foundation_v2.commands import CancelCommandV2
 from synaptic_tuner.api.v1.secrets import SecretRef
 from tuner.execution.coordinator_v1.model import ProviderExecutionBindingV1
 from tuner.execution.foundation_v2.canonical import canonical_bytes, domain_digest
@@ -95,15 +97,43 @@ def _transport_logs_authorized(qualification, effects, components):
     return True
 
 
-def _modal_packaged_descriptor(*, logs: bool):
-    """The two existing descriptor identities; this is not a log proof."""
-    if type(logs) is not bool:
+def _modal_packaged_descriptor(*, logs: bool, allow_cancel_reconcile: bool = False):
+    """Fixed initial capability shapes; this does not replace a log proof."""
+    if type(logs) is not bool or type(allow_cancel_reconcile) is not bool:
         raise TypeError("exact descriptor capability required")
     return ProviderDescriptor(
         "synaptic-provider-descriptor/v1", "modal", "Modal packaged training",
-        "0.1.0", ProviderCapabilities(True, logs, False, False, True, False),
+        "0.1.0", ProviderCapabilities(True, logs, allow_cancel_reconcile, allow_cancel_reconcile, True, False),
     )
 
+
+
+class _ModalCurrentGrants:
+    """Current caller permission plus existing exact Modal command binding."""
+    def __init__(self, effects, cancellation_grants):
+        if cancellation_grants is not None:
+            require_methods(cancellation_grants, "authorize", "bind")
+        self._effects, self._current = effects, cancellation_grants
+
+    @staticmethod
+    def _cancel(requirements):
+        return requirements == (AuthorizationRequirement("training.cancel", False),)
+
+    def authorize(self, requirements):
+        if self._cancel(requirements):
+            if self._current is None:
+                raise ValueError("current cancellation permission unavailable")
+            return self._current.authorize(requirements)
+        return self._effects.authorize(requirements)
+
+    def bind(self, grant, *, operation, requirements):
+        if type(operation) is CancelCommandV2:
+            if not self._cancel(requirements) or self._current is None:
+                raise ValueError("current cancellation permission unavailable")
+            self._current.bind(grant, operation=operation, requirements=requirements)
+            return self._effects.bind(self._effects.authorize(requirements),
+                                      operation=operation, requirements=requirements)
+        return self._effects.bind(grant, operation=operation, requirements=requirements)
 
 def _modal_read_authorities(*, key, clock, bindings, binding_authority,
                             foundation_authenticator, assessment_authenticator,
@@ -149,6 +179,7 @@ def _compose_modal_packaged_reference_host(
     qualification_admission=None,
     cpu_qualification=None,
     records=None, streams=None,
+    allow_cancel_reconcile=False, cancellation_grants=None,
 ) -> ModalPackagedReferenceHostV1:
     """Compose only from already-captured and admitted packaged material.
 
@@ -209,7 +240,8 @@ def _compose_modal_packaged_reference_host(
                 or maximum_cost_minor_units != admitted["maximum_cost_minor_units"]):
             raise ValueError("metrics_qualification_binding_invalid")
     descriptor = _modal_packaged_descriptor(logs=qualification_admission is not None or
-        _transport_logs_authorized(cpu_qualification, effects, components))
+        _transport_logs_authorized(cpu_qualification, effects, components),
+        allow_cancel_reconcile=allow_cancel_reconcile)
     executor = adapter.effect_executor
     reconciliation = adapter.reconciliation_adapter
     provider = ProviderRef("modal", executor.profile_ref)
@@ -242,7 +274,8 @@ def _compose_modal_packaged_reference_host(
         components=components, context=context,
     )
     ports = ReferenceHostPortsV1(
-        records, streams, clock, effects, secrets,
+        records, streams, clock,
+        (_ModalCurrentGrants(effects, cancellation_grants) if allow_cancel_reconcile else effects), secrets,
     )
     authority = compose_reference_authority(
         clock=clock, secrets=secrets, authority_secret=authority_secret,
@@ -263,6 +296,7 @@ def _compose_modal_packaged_reference_host(
         family=family, ports=ports,
         requests=ReferenceRequestPortsV1(request_ports, request_ports, request_ports),
         authority=authority, input_preparation=input_preparation,
+        **({"allow_current_cancel_authorization": True} if allow_cancel_reconcile else {}),
     )
     reader.bind_foundation(composed.foundation)
     reader.bind_workflows(composed.stores.workflow_store)

@@ -462,7 +462,8 @@ def qualify_modal_standalone_job(*, plan: ModalSFTRecipePlanV1 | ModalGRPORecipe
 def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1 | ModalGRPORecipePlanV1, context: object,
                              modal_profile: str, modal_environment: str,
                              fresh_attempt: bool = False,
-                             metrics_admission: MetricsQualificationAdmission | None = None) -> ModalStandaloneRunResultV1:
+                             metrics_admission: MetricsQualificationAdmission | None = None,
+                             cancellation_grants=None) -> ModalStandaloneRunResultV1:
     """Prepare, quote, build, submit, authenticate, verify, and save once.
 
     No user callback, manually built wheel or provider-specific public API is
@@ -679,6 +680,8 @@ def run_modal_standalone_job(*, plan: ModalSFTRecipePlanV1 | ModalGRPORecipePlan
                 maximum_cost_minor_units=recipe.maximum_cost_minor_units,
                 cpu_qualification=qualification,
                 records=workflow_storage, streams=workflow_storage,
+                **({"allow_cancel_reconcile": True, "cancellation_grants": cancellation_grants}
+                   if recipe.allow_cancel_reconcile else {}),
             )
             api = host.api
             phase = "RUN_PUBLIC_PREPARE"
