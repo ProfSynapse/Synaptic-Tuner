@@ -145,3 +145,18 @@ Only successful consumer-config validation and preview publish `consumer.json`;
 closed failures leave retained partial evidence without an advertised ready
 configuration. Full public preflight remains deferred until genuine warm host
 composition. Existing capabilities and cold lifecycle restrictions are unchanged.
+
+Ordinary HF staging verifies the exact source/input inventory and every member's
+bytes through one bounded SDK download group. The original absolute staging
+budget also covers upload and readback; batching does not reset it or prove why a
+historical attempt failed. Each download keeps its own private directory and
+checked file descriptors. Unconfirmed SDK work retains scratch and consumed
+claims.
+
+For a retained `stage_reconcile_required` attempt, the existing `show` command
+can return authenticated **local** workflow phase and a closed stage diagnostic.
+It uses the original authority key, workflow history, Foundation assessment and
+material commitments, without a provider client or original input/source files.
+A missing diagnostic remains unavailable; this is neither provider job evidence
+nor cancellation, recovery, absence proof or permission to replay. Known-job
+`show` and native verification keep their existing authenticated reader path.
