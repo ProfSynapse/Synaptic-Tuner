@@ -179,7 +179,7 @@ def test_real_recipe_core_preplan_is_honest_and_exact(tmp_path):
         "split_counts",
         "runtime_release",
     }
-    assert doc["execution_status"].startswith("unsupported")
+    assert doc["execution_status"] == "runtime-binding-and-cpu-qualification-required"
     assert plan.prepared_identity.content_digest == hashlib.sha256(raw).hexdigest()
     assert plan.recipe.training_input(plan.prepared_identity.ref).method.value == "grpo"
 
@@ -433,7 +433,7 @@ def test_private_copy_preparation_final_hook_and_public_plan_without_start(
         holder.close()
 
 
-def test_automatic_paths_reject_before_local_or_provider_bootstrap(
+def test_unqualified_launcher_rejects_before_local_or_provider_bootstrap(
     tmp_path, monkeypatch
 ):
     project, engine, profiles, _, recipe, _, _ = setup(tmp_path)
@@ -445,20 +445,13 @@ def test_automatic_paths_reject_before_local_or_provider_bootstrap(
         "prepare_modal_standalone_local",
         lambda **kw: pytest.fail("no preparation"),
     )
-    for function in (
-        runner.run_modal_standalone_job,
-        runner.qualify_modal_standalone_job,
-    ):
-        with pytest.raises(
-            runner.ModalStandaloneRunUnavailable,
-            match="modal_grpo_dispatch_unsupported",
-        ):
-            function(
-                plan=plan,
-                context=object(),
-                modal_profile="fixture",
-                modal_environment="fixture",
-            )
+    monkeypatch.setattr(runner.platform, "python_version", lambda: "3.12.15")
+    with pytest.raises(local.ModalLocalPreparationUnavailable):
+        runner.run_modal_standalone_job(plan=plan, context=object(),
+            modal_profile="fixture", modal_environment="fixture")
+    with pytest.raises(runner.ModalStandaloneRunUnavailable, match="modal_host_qualification_unavailable"):
+        runner.qualify_modal_standalone_job(plan=plan, context=object(),
+            modal_profile="fixture", modal_environment="fixture")
 
 
 def test_final_hook_rejects_lost_custody_wrong_profile_and_changed_build_material(
@@ -553,12 +546,12 @@ def test_handler_core_plan_and_execution_gates_without_bootstrap(tmp_path, monke
         project_root=project, engine_root=engine, invocation_cwd=project
     )
     monkeypatch.setattr(
-        ModalJobConfigHandler, "_execute", lambda *a, **kw: pytest.fail("no execution")
+        ModalJobConfigHandler, "_execute", lambda *a, **kw: 0
     )
     monkeypatch.setattr(
         ModalJobConfigHandler,
         "_qualify",
-        lambda *a, **kw: pytest.fail("no qualification"),
+        lambda *a, **kw: 0,
     )
     monkeypatch.setattr(
         ModalJobConfigHandler,
@@ -581,12 +574,12 @@ def test_handler_core_plan_and_execution_gates_without_bootstrap(tmp_path, monke
         code = handler.handle()
         if flag == "plan":
             assert code == 0 and outputs[0]["method"] == "grpo" and not errors
+        elif flag == "quote":
+            assert code == 2 and errors[-1]["code"] == "MODAL_GRPO_DISPATCH_UNSUPPORTED" and not outputs
         else:
-            assert (
-                code == 2
-                and errors[-1]["code"] == "MODAL_GRPO_DISPATCH_UNSUPPORTED"
-                and not outputs
-            )
+            # This planning test only proves routing; the standalone join suite
+            # exercises real CPU receipts, public start and native artifacts.
+            assert code == 0 and not errors and not outputs
 
 
 def test_grpo_profile_load_is_lightweight_in_fresh_process(tmp_path):

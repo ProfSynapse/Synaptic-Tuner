@@ -921,7 +921,9 @@ jobs:
                        "tuner.execution.providers.modal.packaged_worker",
                        "tuner.execution.providers.modal.packaged_reader",
                        "tuner.runtime.packaged_training_worker",
-                       "tuner.execution.providers.modal.runtime_release_qualification"):
+                       "tuner.execution.providers.modal.runtime_release_qualification",
+                       "tuner.training.modal_standalone_runner", "tuner.training.modal_recipe",
+                       "tuner.handlers.modal_job_config_handler"):
               location = Path(importlib.util.find_spec(name).origin).resolve()
               assert location.is_relative_to(prefix) and not location.is_relative_to(checkout), location
           from importlib.resources import files
@@ -981,18 +983,29 @@ jobs:
               "runtime/test_packaged_training_worker.py",
               "execution/providers/test_modal_grpo_cpu_qualification.py",
               "execution/providers/test_modal_runtime_release_qualification.py",
+              "dataset_prep/test_context_messages_v2.py",
+              "execution/providers/test_modal_runtime_build.py",
+              "execution/test_observation_logs.py",
+              "training/test_modal_grpo_recipe.py",
+              "training/test_modal_standalone_runner.py",
+              "training/test_modal_grpo_standalone_runner.py",
           )
           for relative in helpers:
               target = root / "tests" / relative
               target.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(checkout / "tests" / relative, target)
-          for package in ("tests", "tests/training", "tests/runtime", "tests/trainers", "tests/trainers/sft", "tests/trainers/grpo", "tests/contract", "tests/execution", "tests/execution/providers"):
+          for package in ("tests", "tests/dataset_prep", "tests/training", "tests/runtime", "tests/trainers", "tests/trainers/sft", "tests/trainers/grpo", "tests/contract", "tests/execution", "tests/execution/providers"):
               (root / package / "__init__.py").touch()
           installed = Path(importlib.util.find_spec("tuner").origin).resolve().parent.parent
           (root / "schemas").mkdir()
           for name in ("synaptic-packaged-sft-terminal-v1.schema.json",
                        "synaptic-packaged-sft-training-lineage-v1.schema.json"):
               shutil.copy2(installed / "schemas" / name, root / "schemas" / name)
+          # Explicit host-owned build fixture, not a bundled or qualified profile.
+          host_profile = "Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c/profile.yaml"
+          target = root / host_profile
+          target.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(checkout / host_profile, target)
           sys.path.insert(0, str(root))
           os.chdir(root)
           import pytest
@@ -1009,7 +1022,8 @@ jobs:
               str(root / "tests/execution/providers/test_modal_packaged_grpo_routing.py"),
               str(root / "tests/runtime/test_packaged_cpu_methods.py"),
               str(root / "tests/runtime/test_packaged_training_worker.py"),
-              str(root / "tests/execution/providers/test_modal_grpo_cpu_qualification.py")]))
+              str(root / "tests/execution/providers/test_modal_grpo_cpu_qualification.py"),
+              str(root / "tests/training/test_modal_grpo_standalone_runner.py")]))
           PYCODE
 
       - name: Exercise installed bounded GRPO evidence with pinned CPU Torch

@@ -262,9 +262,6 @@ class ModalJobConfigHandler(BaseHandler):
                     }
                 self.output(document)
                 return 0
-            if type(plan) is ModalGRPORecipePlanV1 and not getattr(self.args, "prepare_local", False):
-                self.output_error("Modal GRPO provider dispatch is not supported", code="MODAL_GRPO_DISPATCH_UNSUPPORTED")
-                return 2
             if getattr(self.args, "qualify", False):
                 return self._qualify(plan)
             if getattr(self.args, "prepare_local", False):
@@ -323,6 +320,7 @@ class ModalJobConfigHandler(BaseHandler):
             return 2
         try:
             from tuner.training.modal_standalone_runner import run_modal_standalone_job
+            from tuner.training.modal_recipe import ModalGRPORecipePlanV1
             admission = None
             if getattr(self.args, "qualify_metrics", None) is not None:
                 from tuner.training.modal_metrics_qualification import load_admission
@@ -339,7 +337,8 @@ class ModalJobConfigHandler(BaseHandler):
             metrics = getattr(result, "metrics_qualification", None)
             succeeded = evaluation_passed is not False and (metrics is None or metrics["delivery_verdict"] == "delivered_precompletion" and metrics["durability_acknowledged"] is True)
             self.output({
-                "schema_version": "synaptic-modal-sft-run-result/v1",
+                "schema_version": ("synaptic-modal-grpo-run-result/v1"
+                    if type(plan) is ModalGRPORecipePlanV1 else "synaptic-modal-sft-run-result/v1"),
                 "run": result.run.to_dict(),
                 "verified_artifacts": [str(path) for path in result.artifact_paths],
                 "evaluation_path": None if evaluation_path is None else str(evaluation_path),
