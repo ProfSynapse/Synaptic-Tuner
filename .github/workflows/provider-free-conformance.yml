@@ -23,6 +23,10 @@ on:
       - "tests/execution/providers/test_modal_runtime_build.py"
       - "tests/training/test_modal_host_runtime.py"
       - "tests/training/test_modal_host_diagnostic_projection.py"
+      - "tests/training/test_modal_terminal_status_reader.py"
+      - "tests/execution/providers/test_modal_terminal_status_sdk154.py"
+      - "tests/training/test_modal_cold_cancellation.py"
+      - "tests/training/test_modal_cold_cancellation_process.py"
       - "tuner/handlers/modal_job_config_handler.py"
       - "Trainers/image_profiles/qwen35_4b_conversation_sft_candidate_v1/**"
       - "tests/contract/test_data_conversation_sft_handoff_v1.py"
@@ -568,9 +572,11 @@ jobs:
           import tuner.runtime.modal_build_inspector as build_inspector
           import tuner.training.modal_host_runtime as host_runtime
           import tuner.handlers.modal_job_config_handler as job_handler
+          import tuner.training.modal_host_reader as host_reader
+          import tuner.execution.providers.modal.facade as modal_facade
 
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (retention, runner, sqlite_store, retained_reader, runs_handler, recipe, prepared_copy, grpo_preparation, runtime_build, local_preparation, host_requests, runtime_profiles, build_inspector, host_runtime, job_handler):
+          for module in (retention, runner, sqlite_store, retained_reader, runs_handler, recipe, prepared_copy, grpo_preparation, runtime_build, local_preparation, host_requests, runtime_profiles, build_inspector, host_runtime, job_handler, host_reader, modal_facade):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -588,6 +594,15 @@ jobs:
               "runtime/test_modal_build_inspector.py",
               "training/test_modal_host_runtime.py",
               "training/test_modal_host_diagnostic_projection.py",
+              "training/test_modal_host_reader.py",
+              "training/test_modal_terminal_status_reader.py",
+              "training/test_modal_cold_cancellation.py",
+              "execution/coordinator_v1/test_state_machine.py",
+              "execution/providers/test_modal_packaged_binding.py",
+              "execution/providers/test_modal_packaged_dispatch.py",
+              "training/test_modal_post_training_compilation.py",
+              "training/test_packaged_execution_material.py",
+              "training/test_training_compiler.py",
               "execution/test_observation_logs.py",
               "training/test_modal_standalone_runner.py",
               "training/test_modal_run_retention_io.py",
@@ -647,6 +662,8 @@ jobs:
               str(root / "tests/execution/providers/test_modal_runtime_build.py"),
               str(root / "tests/training/test_modal_host_runtime.py"),
               str(root / "tests/training/test_modal_host_diagnostic_projection.py"),
+              str(root / "tests/training/test_modal_terminal_status_reader.py"),
+              str(root / "tests/training/test_modal_cold_cancellation.py"),
               str(root / "tests/training/test_modal_method_preparation.py"),
               str(root / "tests/training/test_modal_source_handoff.py"),
               str(root / "tests/training/test_modal_grpo_recipe.py"),
@@ -1028,7 +1045,8 @@ jobs:
                        "tuner.execution.providers.modal.runtime_release_qualification",
                        "tuner.training.modal_standalone_runner", "tuner.training.modal_recipe",
                        "tuner.handlers.modal_job_config_handler",
-                       "tuner.training.modal_host_reader", "tuner.training.modal_retained_reader"):
+                       "tuner.training.modal_host_reader", "tuner.training.modal_retained_reader",
+                       "tuner.training.modal_host_composition", "tuner.handlers.runs_handler"):
               location = Path(importlib.util.find_spec(name).origin).resolve()
               assert location.is_relative_to(prefix) and not location.is_relative_to(checkout), location
           from importlib.resources import files
@@ -1097,6 +1115,7 @@ jobs:
               "training/test_modal_process_restart.py",
               "training/test_modal_grpo_process_restart.py",
               "training/test_uncertain_cancel_modal_observation.py",
+              "training/test_modal_cold_cancellation_process.py",
           )
           for relative in helpers:
               target = root / "tests" / relative
@@ -1133,7 +1152,8 @@ jobs:
               str(root / "tests/execution/providers/test_modal_grpo_cpu_qualification.py"),
               str(root / "tests/training/test_modal_grpo_standalone_runner.py"),
               str(root / "tests/training/test_modal_grpo_process_restart.py"),
-              str(root / "tests/training/test_uncertain_cancel_modal_observation.py")]))
+              str(root / "tests/training/test_uncertain_cancel_modal_observation.py"),
+              str(root / "tests/training/test_modal_cold_cancellation_process.py")]))
           PYCODE
 
       - name: Exercise installed bounded GRPO evidence with pinned CPU Torch
@@ -1502,7 +1522,7 @@ jobs:
           PY
 
       - name: Run packaged-call, progress and base-capture contracts with the pinned SDK
-        run: python -B -m pytest -q -p no:cacheprovider tests/training/test_inspect_modal_packaged_call.py tests/execution/providers/test_modal_sdk_progress_handle.py tests/execution/providers/test_modal_sdk_cancel_handle.py tests/execution/providers/test_modal_training_base_capture.py
+        run: python -B -m pytest -q -p no:cacheprovider tests/training/test_inspect_modal_packaged_call.py tests/execution/providers/test_modal_sdk_progress_handle.py tests/execution/providers/test_modal_sdk_cancel_handle.py tests/execution/providers/test_modal_training_base_capture.py tests/execution/providers/test_modal_terminal_status_sdk154.py
 
       - name: Set up exact source-wheel builder Python
         id: modal-source-python
