@@ -36,6 +36,9 @@ Status vocabulary:
 - **Unavailable/disabled:** absent implementation, missing required host port or
   capability refusal. Legacy CLI behavior is identified separately.
 
+The [API v1 compatibility policy](../architecture/api-v1-compatibility.md) defines
+public compatibility; this matrix records operational support and qualification.
+
 ## Included workflow operations
 
 | Family / operation | Current accepted support | Backend evidence and stable gap |

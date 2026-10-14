@@ -334,9 +334,12 @@ Python 3.12.3, GPU execution or live HF behavior. Those release gates remain ope
   observe, outcomes, logs, artifacts/verification, cancel and reconcile.
   Distinguish contract-only, implemented/provider-free, live-qualified and
   unavailable states. Unsupported operations must be filtered before execution.
-- [ ] Define stable error categories, uncertain outcomes, identity/provenance,
-  pagination, bounds, compatibility and deprecation policy. Provider parity means
-  consistent public semantics, not identical hardware or provider internals.
+- [x] Define stable error categories, uncertain outcomes, identity/provenance,
+  pagination, bounds, compatibility and deprecation in the reviewed
+  [API v1 compatibility policy](../architecture/api-v1-compatibility.md).
+  Provider parity means consistent public semantics, not identical hardware or
+  provider internals. This policy does not close operational/live qualification,
+  package metadata or the remaining contract inventory gates.
 - [ ] Separate base library Python/platform support from exact provider launcher,
   image and trainer pins. The measured Modal launcher is POSIX CPython 3.11.14
   with Modal 1.5.4; Python 3.12 contract CI does not prove Python 3.10 or arbitrary
