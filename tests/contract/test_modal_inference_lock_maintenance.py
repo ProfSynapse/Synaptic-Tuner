@@ -96,7 +96,7 @@ def _fixture(root: Path) -> tuple[dict[str, object], dict[str, object]]:
 
 
 def test_reviewed_source_inventory_is_exact_and_fixed() -> None:
-    assert maintenance.SOURCE_MEMBER_COUNT == 119
+    assert maintenance.SOURCE_MEMBER_COUNT == 124
     assert len(maintenance.SOURCE_MEMBERS) == maintenance.SOURCE_MEMBER_COUNT
     assert maintenance.SOURCE_MEMBERS == tuple(sorted(maintenance.SOURCE_MEMBERS))
     assert len(set(maintenance.SOURCE_MEMBERS)) == maintenance.SOURCE_MEMBER_COUNT
@@ -104,7 +104,7 @@ def test_reviewed_source_inventory_is_exact_and_fixed() -> None:
         hashlib.sha256(
             ("\n".join(maintenance.SOURCE_MEMBERS) + "\n").encode()
         ).hexdigest()
-        == "5109950e21ca195c25ce1bc1c8769210bd4c173876bfccbb75bc67ae03dd7ab9"
+        == "84604d2c46f217d069e225fa2c2f758ad842a0dfd3e701a7735aac0b644f02d4"
     )
 
 
@@ -223,7 +223,7 @@ def test_exact_reviewed_predecessor_migrates_only_the_additive_source(
     closure["members"] = [
         item
         for item in closure["members"]
-        if item["path"] != maintenance.ADDITIVE_SOURCE_MIGRATION
+        if item["path"] not in maintenance.ADDITIVE_SOURCE_MIGRATIONS
     ]
     closure["member_count"] = maintenance.PREVIOUS_SOURCE_MEMBER_COUNT
     closure["payload_bytes"] = sum(
@@ -239,7 +239,7 @@ def test_exact_reviewed_predecessor_migrates_only_the_additive_source(
     runtime["source_inventory"] = [
         item
         for item in runtime["source_inventory"]
-        if item["path"] != maintenance.ADDITIVE_SOURCE_MIGRATION
+        if item["path"] not in maintenance.ADDITIVE_SOURCE_MIGRATIONS
     ]
     by_path = {item["path"]: item for item in runtime["source_inventory"]}
     by_path[maintenance.CLOSURE_RELATIVE].update(

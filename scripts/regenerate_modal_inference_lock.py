@@ -134,20 +134,31 @@ SOURCE_MEMBERS = (
     "tuner/runtime/artifacts.py",
     "tuner/runtime/dispatch.py",
     "tuner/runtime/offline_sft_worker.py",
+    "tuner/runtime/releases.py",
     "tuner/runtime/verification.py",
     "tuner/training/__init__.py",
     "tuner/training/contracts.py",
     "tuner/training/coordinator_material.py",
+    "tuner/training/grpo_compilation.py",
     "tuner/training/methods/__init__.py",
     "tuner/training/methods/sft.py",
+    "tuner/training/packaged_compilation.py",
+    "tuner/training/packaged_grpo_compilation.py",
+    "tuner/training/post_training.py",
     "tuner/training/recipes.py",
 )
-SOURCE_MEMBER_COUNT = 119
-ADDITIVE_SOURCE_MIGRATION = "tuner/execution/providers/modal/prepared_input.py"
+SOURCE_MEMBER_COUNT = 124
+ADDITIVE_SOURCE_MIGRATIONS = frozenset({
+    "tuner/runtime/releases.py",
+    "tuner/training/grpo_compilation.py",
+    "tuner/training/packaged_compilation.py",
+    "tuner/training/packaged_grpo_compilation.py",
+    "tuner/training/post_training.py",
+})
 PREVIOUS_SOURCE_MEMBERS = tuple(
-    path for path in SOURCE_MEMBERS if path != ADDITIVE_SOURCE_MIGRATION
+    path for path in SOURCE_MEMBERS if path not in ADDITIVE_SOURCE_MIGRATIONS
 )
-PREVIOUS_SOURCE_MEMBER_COUNT = 118
+PREVIOUS_SOURCE_MEMBER_COUNT = 119
 
 
 class MaintenanceFault(RuntimeError):
@@ -265,7 +276,7 @@ def _validate_additive_predecessor(
     closure_bytes: bytes,
     dependency: bytes,
 ) -> None:
-    """Accept only the exact reviewed 118-member predecessor inventory."""
+    """Accept only the exact reviewed 119-member predecessor inventory."""
 
     members = closure["members"]
     inventory = runtime["source_inventory"]
@@ -311,9 +322,9 @@ def _production_additive_predecessor(
 
     current_required = inference_runtime._REQUIRED_SOURCES
     previous_required = frozenset(
-        path for path in current_required if path != ADDITIVE_SOURCE_MIGRATION
+        path for path in current_required if path not in ADDITIVE_SOURCE_MIGRATIONS
     )
-    if current_required - previous_required != {ADDITIVE_SOURCE_MIGRATION}:
+    if current_required - previous_required != ADDITIVE_SOURCE_MIGRATIONS:
         raise MaintenanceFault("ADDITIVE_MIGRATION_POLICY_INVALID")
     try:
         inference_runtime._REQUIRED_SOURCES = previous_required
@@ -394,7 +405,7 @@ def refresh(root: Path) -> tuple[bytes, bytes, bytes, bytes]:
         or PREVIOUS_SOURCE_MEMBERS != tuple(sorted(PREVIOUS_SOURCE_MEMBERS))
         or len(PREVIOUS_SOURCE_MEMBERS) != PREVIOUS_SOURCE_MEMBER_COUNT
         or set(SOURCE_MEMBERS) - set(PREVIOUS_SOURCE_MEMBERS)
-        != {ADDITIVE_SOURCE_MIGRATION}
+        != ADDITIVE_SOURCE_MIGRATIONS
         or closure.get("member_count") != existing_count
         or type(closure.get("payload_bytes")) is not int
         or type(closure.get("closure_digest")) is not str

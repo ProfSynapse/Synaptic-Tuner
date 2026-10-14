@@ -555,10 +555,17 @@ def _workload_model(attempt: int) -> tuple[str, str, str]:
         != raw
     ):
         raise ValueError("workload record is not canonical")
-    model = doc["configuration"]["document"]["model"]
-    if doc.get("identities", {}).get("model") != model:
-        raise ValueError("workload model identity mismatch")
-    values = (model["ref"], model["revision"], model["tokenizer_revision"])
+    if doc.get("schema_version") == "synaptic-packaged-grpo-workload/v1":
+        from tuner.training.packaged_grpo_compilation import parse_packaged_grpo_workload
+
+        validated = parse_packaged_grpo_workload(raw)
+        model = validated.document["core_workload"]["model"]
+        values = (model["model_id"], model["revision"], model["tokenizer_revision"])
+    else:
+        model = doc["configuration"]["document"]["model"]
+        if doc.get("identities", {}).get("model") != model:
+            raise ValueError("workload model identity mismatch")
+        values = (model["ref"], model["revision"], model["tokenizer_revision"])
     if (
         type(values[0]) is not str
         or not values[0]

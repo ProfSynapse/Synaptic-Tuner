@@ -44,7 +44,7 @@ overlapping installed lane totals, not a cumulative unique-test count.
 | Data/environment/evaluation consumer | **337 installed controls** exercise public generate/improve/validate, actual local fixture workers, measured scripted response/judge calls, immutable exports, reports/comparison and SQLite readback. Paid-call uncertainty stops later paid dispatches; bounded HTTP acquisition is implemented. | Genuine bounded paid backend/judge/account acceptance, representative scenario/source coverage and advertised cancellation behavior. CPU scripted calls are not live model/account qualification. |
 | Ordinary SFT consumers | Shared checkout consumer with installed production passed **Docker 61 / HF 80** controls, including public start, known reads, native five-role verification/download and uncertain-submit non-replay. Modal also has the normal retained-run/public lifecycle and historical exact-source live evidence. | Final-source **Docker/Modal/HF** live SFT parity, real cancellation/reconciliation and known-run recovery with original inputs/keys. Historical Modal success does not qualify the final stack. |
 | Modal GRPO | Public compiler/preparation, fixed isolated child, native verification, normal runner and retained known-run reads are implemented. The actual captured SmolLM candidate passed **256 installed controls** and retains the observed **396-distribution base**. | Qualify the actual augmented image/CPU closure, pinned model/tokenizer and one bounded **Modal GPU GRPO** run with real update/grouped reward evidence; constant/unchanged observations remain inconclusive. Other GRPO providers remain deferred. |
-| Artifact publication | Caller-owned durable store/spool/create-only destination passed **377 installed controls + one existing skip**; native RunsAPI join passed **73 installed Docker/publication controls** with five-role streams and cold marker lookup. Optional HF SFT publication passed **115 installed controls**, including owned snapshot lookup after process death. | Live repository/account/destination qualification remains open; expected-parent submission and verified owned immutable snapshot do not establish RPC causality or an introducing commit after a lost reply. The GRPO native renderer join is still unaccepted work. |
+| Artifact publication | Caller-owned durable store/spool/create-only destination passed **377 installed controls + one existing skip**; native RunsAPI join passed **73 installed Docker/publication controls** with five-role streams and cold marker lookup. Optional HF SFT publication passed **115 installed controls**, including owned snapshot lookup after process death. The native GRPO renderer/publication join passed **145 combined installed HF controls**, **256 GRPO controls** and **39 source-closure controls** (overlapping lane totals) on wheel source `371d4b05`. | Live repository/account/destination qualification remains open; expected-parent submission and verified owned immutable snapshot do not establish RPC causality or an introducing commit after a lost reply. The GRPO join uses actual native verification over synthetic CPU model files; genuine GPU training and live publication qualification remain open. |
 | Environment owner death | Guardian-backed fixed worker passed **388 installed controls + one existing skip**, including real owner SIGKILL/stopped-worker termination and retained-identity cleanup after acknowledged custody. | Keep pre-handoff owner loss, guardian/machine loss and unconfirmed cleanup explicit. This is local ownership cleanup, not resumable generation or a security sandbox. |
 | Packaging/platforms | Fresh sdist-built wheels, neutral consumers, installed origins and declared assets are tested. The corrected offline source archive passed **39 source controls**, including a real pinned build, and **163 installed Modal controls**. Host examples/build declarations remain checkout-owned. The complete launcher passed **11 source controls / 163 installed Modal controls**, with 40 hashed dependencies plus engine and a passing dependency check. Fresh attempt C on exact `439608b6` passed actual four-row preparation, normal `--plan` and `--prepare-local`, producing its real source wheel. | Freeze advertised inventory/platform/install guidance and release artifacts; metadata `>=3.10` is not qualification. C authorized no provider effects and does not qualify a later final source, augmented image or model. |
 
@@ -63,8 +63,8 @@ is installed accepted. Configured source-free known-job HF cancellation and
 reconciliation passed **133 installed HF controls** and **163 paired installed
 Modal controls** on fresh-wheel source `5c8542f2`; these are overlapping lane
 totals. Initial descriptor opt-in and current permission are required, defaults
-remain off, and lost acknowledgments never authorize replay. The GRPO publication
-join is still unaccepted. The accepted local stack still requires exact CI/merge
+remain off, and lost acknowledgments never authorize replay. The native GRPO publication join is installed accepted with synthetic CPU model
+files, without fabricating a TrainingAPI success. The accepted local stack still requires exact CI/merge
 and final supported-composition review. Live qualification remains SFT on all
 three providers, GRPO on one, genuine paid nontraining workflows and the admitted
 publication destination. Then complete the existing final contract/platform/
@@ -1527,3 +1527,23 @@ This closes the demonstrated source-archive omission. The original failed
 attempt remains retained; a new normal preparation binds the final source.
 No image, provider resource, model download or GPU qualification was performed
 by these controls.
+
+### Native GRPO publication installed acceptance — 2026-10-14
+
+Wheel source `371d4b05` passed the base consumer, 256 installed GRPO controls
+(2.05 s), 39 source-closure controls (2.04 s), and the corrected combined HF
+publication suite: 145 passed (250.09 s). These totals overlap. All seven source
+closure checks were CURRENT. The original combined run retained 142 passes and
+three test portability failures: an import census counted third-party installed
+files, and a golden fixture embedded the author's interpreter path. Corrected
+test-only fixtures passed against the same production wheel; this was not a
+production transport defect. The retained corrected log is
+`grpo-model-publication-installed-20261014/installed-hf-grpo-publication-corrected.log`.
+
+The real native verifier, original five roles, trusted source port, admitted
+renderer and public ArtifactsAPI consume explicitly synthetic CPU model files.
+Warm and uncertain-reply/cold immutable-snapshot controls do not fabricate a
+genuine TrainingAPI success or qualify GPU training, live uploads, model loading
+or model quality. The reviewed inference inventory adds exactly five pure parser
+members (119 to 124); GRPO 131/outer 13 refresh only source hashes. Runtime,
+dependency and image pins remain unchanged. Final-source live gates remain open.

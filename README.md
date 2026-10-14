@@ -21,6 +21,41 @@
   <sub><i>Training is powered by <a href="https://github.com/unslothai/unsloth">Unsloth</a> — huge thanks to their team.</i></sub>
 </div>
 
+## Public API and host consumers (Beta)
+
+`synaptic_tuner.api.v1` provides Data generation/improvement/validation,
+evaluation and report comparison, training, known-run observation/verification,
+and verified artifact download/publication through caller-configured ports.
+The source package is **1.1.0 / Beta**; see the [support matrix](docs/plans/api-v1-support-matrix.md)
+and [release plan](docs/plans/stable-v1-release.md) for current acceptance.
+
+Install a reviewed wheel into your environment and inspect the packaged CLI:
+
+```sh
+python -m pip install /absolute/path/synaptic_tuner-1.1.0-py3-none-any.whl
+synaptic --help
+```
+
+The host owns configuration, credentials, grants and storage. The
+[storage guide](docs/architecture/reference-host-storage.md) shows the optional
+SQLite composition. Existing [nontraining](examples/nontraining/README.md) and
+[SFT](examples/training_qualification/README.md) checkout consumers join the
+public APIs; run their absolute paths with the installed engine from a neutral directory:
+
+```sh
+python -I /absolute/checkout/examples/nontraining/qualification.py plan /absolute/private/consumer.yaml
+python -I /absolute/checkout/examples/training_qualification/launch.py plan /absolute/private/consumer.json
+```
+
+Replace template placeholders first. Nontraining planning is effect-free; SFT
+planning previews material/profile, with full public preflight at host composition.
+Consumers and source-owned build declarations remain checkout inputs.
+Base install checks cover Ubuntu Python 3.10–3.14 and Windows/macOS Python 3.12.
+Descriptor workers/publication require local POSIX; effectful Modal uses exact
+CPython 3.11.14 / Modal 1.5.4 and its hashed launcher closure. HF/ML dependencies
+use separate pinned environments. The utility routes below support legacy
+config-first generation, training, evaluation and deployment.
+
 ## The Problem
 
 Fine-tuning a local LLM is a multi-step pipeline that most people never finish. You need to generate quality training data, format it correctly, pick the right training method, configure dozens of hyperparameters, evaluate the results, then figure out GGUF quantization and deployment. Each step has its own tools, formats, and gotchas. Most tutorials cover one piece — you're left stitching the rest together yourself.
@@ -162,7 +197,7 @@ SynthChat (env-backed data)  →  SFT (local or HF Jobs)  →  cloud eval / exac
 - `Trainers/grpo/configs/config.yaml` is the older static projected-dataset GRPO path.
 - `Trainers/grpo/configs/env_config.yaml` is the current environment-backed multi-step GRPO path.
 - Local NVIDIA `train -> grpo` now routes to the env-backed trainer and will bootstrap the isolated GRPO runtime if it is missing.
-- The canonical alignment flow is documented in [.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md](/Users/jrosenbaum/Documents/Code/Synthetic%20Conversations/.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md).
+- The canonical alignment flow is documented in [.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md](.skills/fine-tuning/protocols/environment-backed-alignment-pipeline.md).
 
 ## Config-Driven Architecture
 

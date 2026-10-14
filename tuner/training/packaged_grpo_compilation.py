@@ -1,10 +1,15 @@
 """Fixed packaged GRPO projection, separate from developer core workload bytes."""
 from __future__ import annotations
 
-from synaptic_tuner.api.v1.training_sources import PreparedTrainingInputIdentity
+import json
+
+from synaptic_tuner.api.v1._contract import PreparedTrainingInputIdentity
 from synaptic_tuner.api.v1.training_input import TrainingInputV1
 from tuner.runtime.releases import parse_packaged_runtime_release
-from tuner.training.grpo_compilation import GRPO_WORKLOAD_SCHEMA, GRPO_ENTRYPOINT, compile_grpo_input
+from tuner.training.grpo_compilation import (
+    GRPO_WORKLOAD_SCHEMA, GRPO_ENTRYPOINT, compile_grpo_input,
+    _sha, _finite_tree, validate_qualification_evidence_policy,
+)
 from tuner.training.packaged_compilation import PACKAGED_CONTEXT_SCHEMA, PACKAGED_ENTRYPOINT, _domain
 from tuner.training.recipes import CompiledWorkload, canonical_json_bytes
 
@@ -50,7 +55,6 @@ def _declared_input(document):
 
 
 def _core(document):
-    from Trainers.grpo.runtime_v1 import _sha, _canonical, _finite_tree
     if (type(document) is not dict or set(document) != _CORE_FIELDS
             or document["schema_version"] != GRPO_WORKLOAD_SCHEMA
             or document["method"] != "grpo" or document["entrypoint"] != GRPO_ENTRYPOINT
@@ -60,8 +64,8 @@ def _core(document):
     prepared = PreparedTrainingInputIdentity.from_dict(document["prepared_input"])
     if (prepared.format != "synaptic-grpo-prompts/v1" or prepared.size_bytes > 65536
             or prepared.content_digest != document["dataset_sha256"]
-            or _sha(_canonical(document["config"])) != document["config_sha256"]
-            or _sha(_canonical({"documents": document["reward_documents"],
+            or _sha(canonical_json_bytes(document["config"])) != document["config_sha256"]
+            or _sha(canonical_json_bytes({"documents": document["reward_documents"],
                                "schema": document["reward_schema"]})) != document["rewards_sha256"]):
         raise ValueError("PACKAGED_GRPO_CORE_REJECTED")
     declared = _declared_input(document)
@@ -95,7 +99,6 @@ def compile_packaged_grpo_workload(*, core_workload, context, child_max_seconds,
         raise ValueError("PACKAGED_GRPO_LIMIT_REJECTED")
     limits = {"child_max_seconds": child_max_seconds}
     if qualification_evidence is not None:
-        from Trainers.grpo.runtime_v1 import validate_qualification_evidence_policy
         limits["qualification_evidence"] = validate_qualification_evidence_policy(qualification_evidence)
     document = {
         "schema_version": PACKAGED_GRPO_WORKLOAD_SCHEMA, "method": "grpo",
@@ -109,8 +112,18 @@ def compile_packaged_grpo_workload(*, core_workload, context, child_max_seconds,
                             canonical_json_bytes(document))
 
 
+def _document(raw, maximum):
+    # Preserve the execution parser's exact canonical-byte admission without
+    # importing process/worker machinery into this pure compiler boundary.
+    if type(raw) is not bytes or not 0 < len(raw) <= maximum:
+        raise ValueError
+    value = json.loads(raw)
+    if type(value) is not dict or canonical_json_bytes(value) != raw:
+        raise ValueError
+    return value
+
+
 def parse_packaged_grpo_workload(raw):
-    from tuner.runtime.packaged_sft_execution import _document
     document = _document(raw, 1024 * 1024)
     if (set(document) != {"schema_version", "method", "entrypoint", "core_workload",
                          "context", "limits", "artifacts"}
@@ -120,7 +133,6 @@ def parse_packaged_grpo_workload(raw):
         raise ValueError("PACKAGED_GRPO_WORKLOAD_REJECTED")
     optional = {}
     if "qualification_evidence" in document["limits"]:
-        from Trainers.grpo.runtime_v1 import validate_qualification_evidence_policy
         optional["qualification_evidence"] = validate_qualification_evidence_policy(document["limits"]["qualification_evidence"])
     compiled = compile_packaged_grpo_workload(core_workload=_core(document["core_workload"]),
         context=document["context"], child_max_seconds=document["limits"]["child_max_seconds"], **optional)

@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 from shared.training_utils import build_trainer_config, reject_unknown_config_keys
+from tuner.training.grpo_compilation import (
+    _finite_tree, _EVIDENCE_CAPS as _EVIDENCE_CAPS, validate_qualification_evidence_policy,
+)
 
 GRPO_CONFIG_SCHEMA = {
     "model": {
@@ -193,29 +196,6 @@ def _canonical(value):
 
 def _sha(raw):
     return hashlib.sha256(raw).hexdigest()
-
-
-def _finite_tree(value, depth=0, budget=None):
-    if budget is None:
-        budget = [20000]
-    budget[0] -= 1
-    if budget[0] < 0:
-        raise ValueError("input node bound exceeded")
-    if depth > 32:
-        raise ValueError("input depth exceeded")
-    if type(value) is float and not math.isfinite(value):
-        raise ValueError("nonfinite input")
-    if type(value) is dict:
-        for key, child in value.items():
-            if type(key) is not str:
-                raise ValueError("invalid input key")
-            _finite_tree(child, depth + 1, budget)
-    elif type(value) is list:
-        for child in value:
-            _finite_tree(child, depth + 1, budget)
-    elif type(value) not in (str, int, float, bool, type(None)):
-        raise ValueError("invalid input type")
-
 
 def admit_grpo_inputs(*, config, dataset_bytes, reward_documents, reward_schema,
                       model_identity, workload):
@@ -561,22 +541,7 @@ def train_grpo_trainer(trainer, *, resume=None):
 
 
 _EVIDENCE_SCHEMA = "synaptic-grpo-qualification-evidence/v1"
-_EVIDENCE_CAPS = {
-    "max_trainable_bytes": 268435456,
-    "max_trainable_tensors": 4096,
-    "max_reward_values": 1048576,
-}
 _EVIDENCE_CHUNK_BYTES = 1024 * 1024
-
-
-def validate_qualification_evidence_policy(value):
-    """Pure optional policy admission; imports no ML dependencies."""
-    if type(value) is not dict or set(value) != set(_EVIDENCE_CAPS):
-        raise ValueError("invalid GRPO evidence policy")
-    for name, maximum in _EVIDENCE_CAPS.items():
-        if type(value[name]) is not int or not 1 <= value[name] <= maximum:
-            raise ValueError("invalid GRPO evidence bound")
-    return dict(value)
 
 
 class _QualificationMeasurements:
