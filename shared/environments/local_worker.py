@@ -158,10 +158,17 @@ class WorkerEnvironmentRuntime(EnvironmentRuntime):
             self._guard()
             descriptors = tuple({self._storage._root_fd, *(fd for _, _, fd in self._storage._anchors)})
             entry = Path(__file__).with_name('local_worker_child.py').resolve(strict=True)
-            command_read, command_write = os.pipe()
-            reply_read, reply_write = os.pipe()
-            owner_read, owner_write = os.pipe()
-            status_read, status_write = os.pipe()
+            allocated = []
+            try:
+                for _ in range(4):
+                    allocated.append(os.pipe())
+            except BaseException:
+                for pair in allocated:
+                    for fd in pair:
+                        os.close(fd)
+                raise
+            (command_read, command_write), (reply_read, reply_write), \
+                (owner_read, owner_write), (status_read, status_write) = allocated
             self._owner_write, self._status_read = owner_write, status_read
             try:
                 initial = {'limits': asdict(self.limits), 'anchors': self._storage._anchors,

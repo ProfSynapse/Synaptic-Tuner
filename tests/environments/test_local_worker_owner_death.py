@@ -129,3 +129,31 @@ def test_guardian_unconfirmed_worker_exit_preserves_scratch(tmp_path, monkeypatc
         for fd in (command_write, reply_read, owner_read, status_read):
             os.close(fd)
         storage.teardown()
+
+
+@pytest.mark.parametrize('failure', [1, 2, 3, 4])
+def test_partial_pipe_allocation_closes_every_owned_descriptor(tmp_path, monkeypatch, failure):
+    import os
+    from shared.environments.bounded_local_runtime import FilesystemLimits
+    from shared.environments.fixture_parser import EnvironmentFixture
+    parent = tmp_path / 'private'
+    parent.mkdir(mode=0o700)
+    original = os.pipe
+    calls = 0
+    allocated = []
+    def pipe():
+        nonlocal calls
+        calls += 1
+        if calls == failure:
+            raise OSError('injected pipe allocation failure')
+        result = original()
+        allocated.extend(result)
+        return result
+    monkeypatch.setattr(worker.os, 'pipe', pipe)
+    runtime = worker.WorkerEnvironmentRuntime(parent, FilesystemLimits(30,4096,2048,4096,8,128,10))
+    with pytest.raises(OSError):
+        runtime.setup(EnvironmentFixture())
+    assert not list(parent.iterdir()) and runtime._process is None
+    for fd in allocated:
+        with pytest.raises(OSError):
+            os.fstat(fd)
