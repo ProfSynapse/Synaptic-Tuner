@@ -1381,3 +1381,24 @@ authority. The captured base is not the augmented training image; actual
 image build/CPU qualification, model preparation and GPU GRPO remain open.
 Constant rewards or unchanged parameters remain inconclusive rather than a
 qualification pass. No provider effect was performed for this change.
+
+
+### Local publication installed acceptance — 2026-10-14
+
+The optional local spool and create-only destination reuse the existing public
+publication operations, authority and durable store. They retain private file
+descriptors, verify streamed bytes and persist an authenticated original receipt
+marker. Fresh-process recovery after a killed producer performs lookup only;
+missing/incomplete markers stay ambiguous. No default destination was enabled.
+
+Root review accepted `d0ae02d0` with correction `a381fc52` and CI/docs
+`03e4597e`. Review corrections preserve immutable leaf permissions/identity
+after writes and conservatively reserve chunks before possibly partial writes.
+Final focused controls passed **29 tests**. Fresh sdist-derived wheel SHA256
+`3664d77d001e11d842ccb59e1f360b123c7e5f6633416e7b375b584389f8b483` passed base resources and the exact installed
+lifecycle/publication suite: **377 passed, one existing non-worker cancellation
+skip**, under CPython 3.14.4. The new module matches source, wheel and install.
+
+This qualifies the local adapter and lookup-recovery behavior with fixture-signed
+sources. Joining actual native-verified RunsAPI artifacts and implementing an HF
+model destination remain subsequent nodes; no remote publication was performed.
