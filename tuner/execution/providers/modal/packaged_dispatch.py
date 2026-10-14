@@ -83,10 +83,14 @@ def _packaged_workload(payload: bytes) -> CompiledWorkload:
     try:
         document = CanonicalDocument(payload.decode("utf-8"))
         value = document.to_dict()
-        configuration = value["configuration"]["document"]
-        compiled = compile_packaged_sft_workload(
-            resolved_config=CanonicalDocument.from_mapping(configuration),
-        )
+        if value.get("schema_version") == "synaptic-packaged-grpo-workload/v1":
+            from tuner.training.packaged_grpo_compilation import parse_packaged_grpo_workload
+            compiled = parse_packaged_grpo_workload(payload)
+        else:
+            configuration = value["configuration"]["document"]
+            compiled = compile_packaged_sft_workload(
+                resolved_config=CanonicalDocument.from_mapping(configuration),
+            )
     except Exception:
         raise ValueError("packaged workload is invalid") from None
     if compiled.canonical_bytes != payload:

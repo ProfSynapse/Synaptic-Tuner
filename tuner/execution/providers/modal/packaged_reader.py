@@ -457,6 +457,10 @@ class ModalPackagedReader:
             canonical_evaluation_document_bytes, MAX_EVALUATION_RECORD_BYTES,
             validate_evaluation_record,
         )
+        from .packaged_dispatch import _packaged_workload
+        selected = _packaged_workload(workload_bytes)
+        if selected.method != "sft":
+            raise ValueError("packaged GRPO evaluation is unsupported")
         workload = json.loads(workload_bytes)
         compiled = compile_packaged_sft_workload(
             resolved_config=CanonicalDocument.from_mapping(workload["configuration"]["document"]))
