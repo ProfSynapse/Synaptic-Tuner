@@ -976,7 +976,7 @@ resources and preserves an earlier failure; `CALL_CLEANUP` is emitted only when
 cleanup is the primary failure. Historical generic `CALL_INSTALLED_CHILD` cannot
 be retrospectively narrowed by this change. The raw-call maintenance diagnostic
 continues to recognize only its documented historical serialized frames.
-Neither label warrants relaxing the child's exact interpreter or installed-package
+None of these labels warrants relaxing the child's exact interpreter or installed-package
 checks. Keep the generic/local child qualifier parent-process-agnostic. Modal
 training additionally admits the Function parent, so its CPU self-check must
 exercise that same parent runtime check before issuing successful qualification;
