@@ -708,3 +708,102 @@ def test_evaluation_run_ref_is_pure_and_rejects_invalid_plan(configured, monkeyp
     object.__setattr__(plan, "scenario_digest", "invalid")
     with pytest.raises(ValueError):
         evaluation_run_ref(plan)
+
+
+@pytest.mark.parametrize("effort", [None, True, 1, "", "NONE", "unknown"])
+def test_provider_effort_invalid_before_open(configured, effort):
+    config, _, _ = configured
+    config["provider"]["thinking_effort"] = effort
+    with pytest.raises(ValueError, match="thinking_effort"):
+        consumer.validate_config(config)
+
+
+@pytest.mark.parametrize("effort", [None, "none"])
+def test_real_openai_serialized_effort_and_temperature(configured, monkeypatch, effort):
+    config, _, _ = configured
+    config["provider"]["backend"] = "openai_responses"
+    if effort is not None:
+        config["provider"]["thinking_effort"] = effort
+    payloads = []
+
+    def http_double(url, payload, headers, **kwargs):
+        payloads.append(json.loads(json.dumps(payload)))
+        return {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "fixture"}],
+                }
+            ],
+            "usage": {"input_tokens": 3, "output_tokens": 5},
+        }
+
+    monkeypatch.setattr(
+        consumer.OpenAIResponsesClient, "_bounded_json_post", staticmethod(http_double)
+    )
+    secrets = SimpleNamespace(resolve=lambda ref: "test-only-key")
+    clients = consumer.DataClients(config, secrets, consumer.time.monotonic() + 30)
+    client = clients.create(backend="openai_responses", model="gpt-6-luna")
+    result = client.chat(
+        [{"role": "user", "content": "fixture"}], temperature=0.7, max_tokens=32
+    )
+    assert result.text == "fixture" and clients.calls == 1
+    assert payloads[0]["temperature"] == 0.7
+    if effort is None:
+        assert "reasoning" not in payloads[0]
+    else:
+        assert payloads[0]["reasoning"] == {"effort": "none"}
+
+
+def test_actual_judge_services_openai_request_shapes(configured, monkeypatch):
+    from SynthChat.services.core.judge_service import JudgeService as DataJudge
+    from shared.judge import JudgeService, JudgeConfig
+
+    config, _, _ = configured
+    config["provider"]["backend"] = "openai_responses"
+    config["provider"]["thinking_effort"] = "none"
+    payloads = []
+
+    def http_double(url, payload, headers, **kwargs):
+        payloads.append(json.loads(json.dumps(payload)))
+        return {
+            "output": [
+                {"type": "message", "content": [{"type": "output_text", "text": "{}"}]}
+            ],
+            "usage": {"input_tokens": 3, "output_tokens": 5},
+        }
+
+    monkeypatch.setattr(
+        consumer.OpenAIResponsesClient, "_bounded_json_post", staticmethod(http_double)
+    )
+    clients = consumer.DataClients(
+        config,
+        SimpleNamespace(resolve=lambda ref: "test-only-key"),
+        consumer.time.monotonic() + 30,
+    )
+    client = clients.create(backend="openai_responses", model="gpt-6-luna")
+    schema = SimpleNamespace(build_combined_schema=lambda rubrics: {"type": "object"})
+    data_judge = DataJudge(
+        client,
+        None,
+        schema,
+        SimpleNamespace(llm=SimpleNamespace(judge_temperature=0)),
+        None,
+    )
+    assert data_judge.judge("fixture", []) == {}
+    assert payloads[0]["reasoning"] == {"effort": "none"}
+    assert payloads[0]["temperature"] == 0
+
+    # External judge has its own client: omitted effort and temperature mean
+    # provider defaults, rather than a falsely claimed explicit none setting.
+    external = consumer.OpenAIResponsesClient(
+        "test-only-key",
+        "gpt-6-luna",
+        max_request_bytes=65536,
+        max_response_bytes=1048576,
+    )
+    judge = JudgeService(
+        external, JudgeConfig(reasoning_effort=None, temperature=None, max_tokens=64)
+    )
+    judge.judge("fixture", [])
+    assert "reasoning" not in payloads[1] and "temperature" not in payloads[1]

@@ -88,3 +88,11 @@ enforce an invoice ceiling: review provider hard-credit limits or dated prices
 and the exact request budget separately before authorizing live use. CPU tests
 use explicit scripted clients and prove plumbing, not model quality or live
 provider behavior.
+
+The optional `provider.thinking_effort` setting uses the existing shared-client
+values (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`). Omission preserves
+existing client defaults. For a Luna smoke that sends a temperature, set this
+provider option to `none`. External evaluation judges use their separate
+`evaluation.judge.config`: set both `reasoning_effort` and `temperature` to null
+to omit those parameters and use provider defaults; this does not request
+explicit reasoning effort `none` for that judge.

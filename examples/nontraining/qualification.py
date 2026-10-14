@@ -123,10 +123,22 @@ def validate_config(document):
     if not root.is_absolute() or not config["project_ref"]:
         raise ValueError("absolute state_root and project_ref required")
     provider = config["provider"]
-    if set(provider) != {"backend", "credential", "account_ref", "namespace_ref"}:
+    if set(provider) - {
+        "backend",
+        "credential",
+        "account_ref",
+        "namespace_ref",
+        "thinking_effort",
+    } or not {"backend", "credential", "account_ref", "namespace_ref"} <= set(provider):
         raise ValueError("provider accepts references only")
     if provider["backend"] not in {"openrouter", "openai_responses"}:
         raise ValueError("unsupported paid backend")
+    if "thinking_effort" in provider and (
+        type(provider["thinking_effort"]) is not str
+        or provider["thinking_effort"]
+        not in {"none", "minimal", "low", "medium", "high", "xhigh"}
+    ):
+        raise ValueError("invalid provider thinking_effort")
     SecretRef.from_dict(provider["credential"])
     SpendScopeV1(
         provider["backend"], provider["account_ref"], provider["namespace_ref"]
@@ -323,6 +335,9 @@ class DataClients:
             raise ValueError("named credential unavailable")
         b = self.config["bounds"]
         kind = OpenRouterClient if backend == "openrouter" else OpenAIResponsesClient
+        options = {}
+        if "thinking_effort" in self.config["provider"]:
+            options["thinking_effort"] = self.config["provider"]["thinking_effort"]
         client = kind(
             key,
             model,
@@ -330,6 +345,7 @@ class DataClients:
             max_request_bytes=b["max_request_bytes"],
             max_response_bytes=b["max_response_bytes"],
             deadline=self.deadline,
+            **options,
         )
         return _BudgetClient(client, self)
 
