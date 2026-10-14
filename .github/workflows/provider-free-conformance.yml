@@ -33,6 +33,7 @@ on:
       - "examples/training_qualification/**"
       - "tests/examples/test_docker_training_qualification.py"
       - "tests/examples/test_hf_training_qualification.py"
+      - "tests/examples/test_hf_material_preparation.py"
       - "shared/llm/base.py"
       - "shared/llm/providers/openrouter.py"
       - "shared/llm/providers/openai_responses.py"
@@ -1282,6 +1283,7 @@ jobs:
               shutil.copy2(installed / "schemas" / name, schema_root / name)
           for name in (
               "examples/test_hf_training_qualification.py",
+              "examples/test_hf_material_preparation.py",
               "execution/providers/test_hf_jobs_public_family.py",
               "execution/providers/test_hf_jobs_public_lifecycle.py",
               "execution/providers/test_hf_jobs_retained_reader.py",
@@ -1313,8 +1315,18 @@ jobs:
           # separately; both consumer modules exercise the installed wheel.
           consumer = root / "examples" / "training_qualification"
           consumer.mkdir(parents=True)
-          for name in ("launch.py", "hf_host.py"):
+          for name in ("launch.py", "hf_host.py", "prepare_hf.py"):
               shutil.copy2(checkout / "examples" / "training_qualification" / name, consumer / name)
+          shutil.copytree(checkout / "examples/training_qualification/hf_raw_text_fixture", consumer / "hf_raw_text_fixture")
+          modal_chat = root / "examples/modal_chat"
+          modal_chat.mkdir(parents=True)
+          for name in ("authority.py", "remote.py"):
+              shutil.copy2(checkout / "examples/modal_chat" / name, modal_chat / name)
+          image_profile = root / "host-inputs/qwen-sft-image-profile.yaml"
+          image_profile.parent.mkdir(parents=True)
+          shutil.copy2(checkout / "Trainers/image_profiles/qwen35_4b_packaged_sft_3360351c/profile.yaml", image_profile)
+          os.environ["SYNAPTIC_TEST_HF_PREPARATION_EXAMPLE"] = str(consumer / "prepare_hf.py")
+          os.environ["SYNAPTIC_TEST_HF_IMAGE_PROFILE"] = str(image_profile)
           import pytest
           sys.path.insert(0, str(root))
           os.chdir(root)
@@ -1325,6 +1337,7 @@ jobs:
               str(root / "tests/execution/providers/test_hf_jobs_process_readback.py"),
               str(root / "tests/execution/providers/test_hf_jobs_cold_cancellation.py"),
               str(root / "tests/examples/test_hf_training_qualification.py"),
+              str(root / "tests/examples/test_hf_material_preparation.py"),
               str(root / "tests/training/test_hf_model_publication.py"),
               str(root / "tests/training/test_grpo_model_publication.py")]))
           PYCODE

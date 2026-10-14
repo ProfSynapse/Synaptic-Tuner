@@ -93,8 +93,55 @@ remain unpromoted. Pure preview is not SDK/image/account qualification. Warm sta
 requires genuine original compiled material, selected runtime profile, verified
 prepared bytes, exact provider scope/bucket/hardware/secret references and a pinned
 host SDK. Source-free known-job reads use the existing retained HF reader, original
-keys and store, without restoring a source lease or submission authority. Cold
-cancel/reconcile remain unavailable. Provider labels and scopes are retained
-configuration declarations, not fresh remote attestation. No fresh-process,
-SIGKILL, active-worker recovery or live proof is claimed by this example's CPU
-controls. See the HF template/adapter for its exact finite inputs.
+keys and store, without restoring a source lease or submission authority. Explicit
+`allow_cancel_reconcile: true` must be selected before the original plan;
+configured cold cancellation/reconciliation then uses the original known-job
+binding and current host permission. Defaults remain false and the separate
+read-only opener still refuses these effects. SDK acknowledgment is distinct
+from observed terminal state; lost replies stay uncertain without another cancel
+or training submission.
+
+Accepted CPU controls include an actual SIGKILL producer and first fresh SQLite
+opener after original input/source deletion, with scripted provider state, native
+verification and original authority retained. They do not establish live provider
+behavior or active-worker continuation. Provider labels/scopes remain retained
+configuration declarations, not fresh remote attestation. See the HF template
+and [support matrix](../../docs/plans/api-v1-support-matrix.md) for exact limits.
+
+## Preparing genuine HF consumer material
+
+`prepare_hf.py` closes the host setup gap using the existing ingestion,
+preparation, source authentication, compiler and HF preview APIs. Start with
+`prepare-hf.config.example.json` and the separately declared raw-text fixture;
+replace every host-owned path, bucket, scope, quote and named key reference with
+actual reviewed inputs. Templates containing placeholders are not ready inputs.
+
+```sh
+python examples/training_qualification/prepare_hf.py declare /private/prepare.json
+python examples/training_qualification/prepare_hf.py prepare /private/prepare.json
+python examples/training_qualification/launch.py plan /private/output/consumer.json
+```
+
+`declare` is credential-free and exclusively writes the canonical runtime
+member. It binds the selected profile/inventory/image, declared interpreter,
+HF roots, configured reset environment and named requirements. The member is
+retained in `CoordinatorResolvedMaterial.execution_context`; its SHA256 supplies
+`ExecutionSourceV1.deployment_member_sha256`. This is a declared host
+runtime configuration, not a staged member or observed provider deployment.
+The remote worker still independently enforces its existing source, runtime,
+inventory, roots and dispatch contracts.
+
+`prepare` authenticates a genuine clean host manifest and engine Gitlink using
+existing bounded public Git reads and a separately named local source-signing
+key. That key must differ from both HF provider token references. Resolve it only
+for an authorized preparation; never substitute `HF_TOKEN` or place key values
+in config. The checked-in remote verifier bounds each Git read to 30 seconds and
+source evidence freshness to 600 seconds. This command does not create Jobs,
+buckets, mounts, models or provider resources.
+
+Output is create-only. Exact prepared bytes, source lock, declaration, request
+and parsed/rederived material are retained before actual `hf_host.preview`.
+Only successful consumer-config validation and preview publish `consumer.json`;
+closed failures leave retained partial evidence without an advertised ready
+configuration. Full public preflight remains deferred until genuine warm host
+composition. Existing capabilities and cold lifecycle restrictions are unchanged.

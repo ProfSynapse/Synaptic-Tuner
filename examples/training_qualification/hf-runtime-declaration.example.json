@@ -1,0 +1,43 @@
+{
+  "schema_version": "hf-runtime-declaration/v1",
+  "runtime_profile": {
+    "name": "qwen35-sft-v1",
+    "sha256": "sha256:5c8b36fe76d18926e1eb75531dd79433041a95db4f857d195f96d239ed3b3334"
+  },
+  "inventory_sha256": "ecf4d0a27e5455b946237bf97790cba308765c2e5cf538e560e0de4c372f88e3",
+  "image": "unsloth/unsloth@sha256:1644d635bc7c5b57ed64cabbab1ae00647dfb583c2135fdfb6a461aeeba52739",
+  "interpreter": {
+    "implementation": "cpython",
+    "version": "3.12.3",
+    "executable": "/opt/unsloth-venv/bin/python3",
+    "executable_digest": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f"
+  },
+  "roots": {
+    "engine": "/workspace/private/engine",
+    "project": "/workspace/private/project",
+    "artifacts": "/workspace/private/run/artifacts",
+    "state": "/workspace/private/run/state",
+    "tracking": "/workspace/private/run/tracking",
+    "cache": "/workspace/private/run/cache",
+    "tmp": "/workspace/private/run/tmp"
+  },
+  "writable_capability_root": "/workspace/private/run",
+  "environment": {
+    "PYTHONNOUSERSITE": "1",
+    "PYTHONSAFEPATH": "1",
+    "PYTHONPATH": "/workspace/private/engine",
+    "SYNAPTIC_ENGINE_ROOT": "/workspace/private/engine",
+    "SYNAPTIC_PROJECT_ROOT": "/workspace/private/project",
+    "SYNAPTIC_ARTIFACT_ROOT": "/workspace/private/run/artifacts",
+    "SYNAPTIC_STATE_ROOT": "/workspace/private/run/state",
+    "SYNAPTIC_TRACKING_ROOT": "/workspace/private/run/tracking",
+    "SYNAPTIC_CACHE_ROOT": "/workspace/private/run/cache",
+    "SYNAPTIC_TMP_ROOT": "/workspace/private/run/tmp",
+    "HF_HOME": "/workspace/private/run/cache/huggingface",
+    "TRANSFORMERS_CACHE": "/workspace/private/run/cache/transformers",
+    "WANDB_DISABLED": "true",
+    "PATH": "/opt/unsloth-venv/bin:/usr/bin:/bin"
+  },
+  "secret_requirements_digest": "REPLACE_WITH_ACTUAL_CANONICAL_SECRET_REFS_SHA256",
+  "provider_runtime_requirements_digest": "REPLACE_WITH_ACTUAL_CANONICAL_SELECTED_RUNTIME_SHA256"
+}

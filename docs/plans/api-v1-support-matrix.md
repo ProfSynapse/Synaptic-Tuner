@@ -6,10 +6,11 @@ updated: 2026-10-14
 
 # API v1 support and qualification matrix
 
-This is the current support view of the locally accepted preparation stack
-through merged PR #237 plus installed-accepted HF publication #238 and launcher
-closure #239 on 2026-10-14, not a stable release certification. Main is
-`e915e105` through #237; #238–239 exact CI/merge remains pending. Configured cold
+This is the current support view of the accepted preparation stack through
+merged PR #241 on 2026-10-14, not a stable release certification. Main is
+`0a66bb11`; HF publication #238, launcher closure #239, cold HF cancellation
+#240 and native GRPO publication #241 each passed all 18 checks on their accepted
+heads, with merged trees equal to those heads. Configured cold
 HF cancellation passed 133 installed HF controls and 163 paired installed Modal
 controls on fresh-wheel source `5c8542f2`; these are overlapping lane totals,
 not additional unique-test counts. Native GRPO publication is installed accepted with synthetic CPU model files;
@@ -49,7 +50,7 @@ Status vocabulary:
 | SynthChat: usage/progress/cancel | Installed accounting, stored observations and cooperative cancellation | Paid unknown usage latches refusal across sibling run clients; measured known retries/local legacy callers retain their behavior. Cancellation prevents later work and requests owned worker termination; it does not stop an in-flight LLM/provider-internal retry. Cold reads preserve original claims/spend without replay or resumable rows. |
 | Text-conversation training preparation | Installed normalizer, independent verifier and immutable source extension | Declarative mapping/target/group splits preserve ordered text messages without invented ingestion ancestry. All 49 installed cases pass. SFT compilation/loading/masking/native verification also pass 47 installed CPU cases. Two installed joined cases now carry real configured Data generation/improvement and environment assertions through immutable preparation and public resolve/plan after raw input deletion. A separate unqualified candidate declares the new format; historical releases still reject it. The normal Modal recipe/copy path now selects it explicitly, covered by 113 installed host cases including scripted public start. Installed hosts now use explicit engine source selection, covered by 122 installed host cases with real local Git and scripted builds. A separately admitted source checkout, image capture and live training qualification remain required. |
 | Dataset validation | Implemented/provider-free `DataAPI.validate` and legacy validators | Real configured catalog/default assets must load in installed consumers; missing defaults cannot silently become empty schemas. Validation does not attest semantic provenance by itself. |
-| Evaluation: plan/preflight/start/status/results | Implemented/provider-free optional `EvaluationAPI` reference composition | Requires explicit backend registry, scenario resolver, grants/spend and host stores. Local HTTP body limits default to 1 MiB each, host-configurable through 64 MiB; exact UTF-8 transport and retained report checks pass installed. Metered/unmetered paid adapters exist; neither a registry entry nor CPU transport tests qualify a live backend. |
+| Evaluation: plan/preflight/start/status/results | Implemented/provider-free optional `EvaluationAPI` reference composition | Requires explicit backend registry, scenario resolver and host stores; grants/spend apply to paid participants. Local HTTP body limits default to 1 MiB each, host-configurable through 64 MiB; exact UTF-8 transport and retained report checks pass installed. Metered/unmetered paid adapters exist; neither a registry entry nor CPU transport tests qualify a live backend. |
 | Evaluation: judge/usage | Installed named metered paid judge and same-scope response/judge accounting | Local response plus paid judge counts only attributable judge usage; paid response/judge share a meter only for the same account/currency. Missing/wrong-shape/raised usage remains indeterminate and subsequent paid calls stop. Optional finite HTTP transport is implemented; genuine paid backend/account qualification remains open. |
 | Evaluation: reports/comparison | Installed public retained-report comparison and SQLite readback | Signed run/role bindings and consumed input/scoring/generation controls determine comparability. Missing/external judge/environment provenance remains unverified; comparison does not settle unknown spend. The 337 installed lane includes actual public comparison/renderer/consumer joins. This is configuration provenance and mechanical score comparison, not remote model or quality attestation. |
 | Evaluation: progress/cancel/restart | Stored lifecycle/progress/cancel state and cold result/report reads | Retained reports read/compare without reopening backends. Interrupted active work remains truthful and non-replayable; no mid-case continuation or forced in-flight HTTP termination is claimed. Advertised real backend cancellation/recovery still needs qualification. |
@@ -115,8 +116,10 @@ is not a Git build checkout; cold known-run reads do not replan current recipes
 or rebuild an image. The omitted source-build helper/schema/tool assets are now
 included in the reviewed archive. An actual pinned offline build passes within
 39 source controls, with 163 installed Modal controls on a fresh sdist-built wheel.
-The correction still needs CI/merge and a fresh normal local preparation attempt;
-it is not augmented image or GPU qualification. Exact launcher and provider image/child pins stay separate
+The archive correction is merged. Actual fresh local attempts C (`439608b6`) and
+D (`4b77bd1f`) passed normal planning and source-wheel preparation without
+provider effects; this is not augmented image or GPU qualification. Exact
+launcher and provider image/child pins stay separate
 from the library's broad Python metadata. Linux/POSIX descriptor/lock/guardian
 operations and no local GPU are explicit boundaries, not Windows/macOS runtime
 qualification. Final supported platform/asset/release artifacts remain a gate.
@@ -159,3 +162,10 @@ preparation service, then passed normal `--plan` and `--prepare-local` with a re
 source wheel and nine bootstrap wheels. It resolved the former archive/dependency
 setup defects without model downloads or provider effects. It does not qualify
 the augmented image, GPU/model route or a later final source.
+
+Attempt D repeated local preparation on exact `4b77bd1f`, then ran the bounded
+normal CPU qualification in the selected Modal scope. It stopped with
+`CAPTURE_OUTPUT / INSPECTOR_REJECTED` and no qualification receipt. The consumed
+claim remains retained. The diagnostic identifies a boundary, not the underlying
+cause or confirmed cleanup. No GPU training or model preparation was performed;
+the augmented image remains unqualified.

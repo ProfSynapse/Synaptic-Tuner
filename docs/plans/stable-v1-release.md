@@ -31,8 +31,12 @@ The Python API is a library contract, not a deployed HTTP/MCP service.
 ## Current release status — 2026-10-14
 
 The source distribution is still **1.1.0 / Beta**, not a stable release. At this
-checkpoint, main is `e915e105` through merged [#237](https://github.com/ProfSynapse/Synaptic-Tuner/pull/237). [#238](https://github.com/ProfSynapse/Synaptic-Tuner/pull/238) HF publication and [#239](https://github.com/ProfSynapse/Synaptic-Tuner/pull/239) launcher closure have locally accepted installed evidence and their exact CI/merge remains pending;
-local acceptance is not a main-merge or publication claim. No stable version,
+checkpoint, main is `0a66bb11` through merged [#241](https://github.com/ProfSynapse/Synaptic-Tuner/pull/241).
+HF publication [#238](https://github.com/ProfSynapse/Synaptic-Tuner/pull/238),
+launcher closure [#239](https://github.com/ProfSynapse/Synaptic-Tuner/pull/239),
+cold HF cancellation [#240](https://github.com/ProfSynapse/Synaptic-Tuner/pull/240)
+and native GRPO publication #241 each passed all 18 checks on their accepted
+heads; each merged tree matches its reviewed head. No stable version,
 tag or package publication has been selected. The dated log below retains exact
 source/wheel hashes, failures and evidence limits; older unavailable/baseline
 summaries are historical rather than current backend verdicts. Counts below are
@@ -64,11 +68,24 @@ reconciliation passed **133 installed HF controls** and **163 paired installed
 Modal controls** on fresh-wheel source `5c8542f2`; these are overlapping lane
 totals. Initial descriptor opt-in and current permission are required, defaults
 remain off, and lost acknowledgments never authorize replay. The native GRPO publication join is installed accepted with synthetic CPU model
-files, without fabricating a TrainingAPI success. The accepted local stack still requires exact CI/merge
-and final supported-composition review. Live qualification remains SFT on all
+files, without fabricating a TrainingAPI success. These implementations are now
+merged; final supported-composition review remains open. Live qualification remains SFT on all
 three providers, GRPO on one, genuine paid nontraining workflows and the admitted
 publication destination. Then complete the existing final contract/platform/
 distribution review and choose a stable release.
+The fresh CPU qualification attempt D on exact `4b77bd1f` stopped with
+`CAPTURE_OUTPUT / INSPECTOR_REJECTED` and no qualification receipt. Its consumed
+claim and local records remain retained. That code identifies the failed
+inspection boundary, not its underlying cause or confirmed cleanup; no GPU
+training or model preparation was performed. Diagnose this exact attempt before
+reviewing any fresh attempt.
+A separate isolated CPU experiment reproduced a build defect: the captured base
+already contains Hyperframe 6.1.0, and pip skips its same-version local wheel
+under the current install flags, leaving the required wheel provenance absent.
+Adding `--force-reinstall` produced the exact local-wheel URI/hash and nine
+byte-identical installed members. This supports the installer correction; it
+does not retrospectively establish attempt D's cause. The correction and bounded
+inspector diagnostics still require implementation review and CI.
 No new grant, lifecycle DTO, store or scenario CRUD framework is required merely
 to close this plan. Supported host composition and installed/source prerequisites
 are detailed in the [operation matrix](api-v1-support-matrix.md) and

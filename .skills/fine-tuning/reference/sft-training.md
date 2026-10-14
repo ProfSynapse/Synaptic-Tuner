@@ -417,3 +417,31 @@ recovery or remote Docker path mapping. HF cold reads use the existing retained
 reader and original named keys without restoring input authority. Default
 capability refusals remain in force. CPU scripted-provider tests do not qualify
 an image, GPU training, physical termination, provider billing or live parity.
+
+### Genuine host-owned HF material preparation
+
+Use `examples/training_qualification/prepare_hf.py` with the declared config
+and `hf_raw_text_fixture` when preparing the ordinary HF SFT consumer. The
+fixture ingests eight complete synthetic Question/Answer bodies and publishes
+`syntunia-sft-row/v1` through the existing service, with six training and two
+validation rows. This supported raw-text lane applies full-token loss; it does
+not relabel messages/v2 data or apply completion-only loss.
+
+`python examples/training_qualification/prepare_hf.py declare <config.json>`
+exclusively writes a credential-free runtime declaration from the selected
+profile/image/interpreter, exact HF roots, configured environment and named
+requirements. Its canonical bytes are retained in material execution_context;
+the ExecutionSource deployment-member digest means this declared configuration
+for HF, not an observed deployment or staged remote member.
+
+`python examples/training_qualification/prepare_hf.py prepare <config.json>`
+uses genuine clean host/Gitlink inspection, bounded public Git verification and
+an explicitly named local source-authentication key distinct from both HF token
+references. Each Git read is bounded to 30 seconds, source evidence freshness
+to 600 seconds, and prepared bytes to 2 MiB. Supply real bucket, quote, scope,
+source and named-key inputs; unfilled example values refuse. Preview does not
+verify bucket existence or current pricing. Only actual parsed/rederived
+material and successful consumer validation/HF preview publish consumer.json.
+Full public preflight remains deferred to warm composition. No Job, bucket,
+model download, image/GPU qualification or capability promotion occurs here.
+See the checked-in example README for commands and exact fixture coverage.
