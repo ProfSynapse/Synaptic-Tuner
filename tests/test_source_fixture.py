@@ -10,7 +10,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "synaptic-tuner"
-PIN = "d4940634d0b278358fd9b851605f84986d3da57d"
+PIN = "1da0a80891bd9c63f5635a1133275907a2f5f366"
 ORIGIN = "https://github.com/ProfSynapse/Synaptic-Tuner.git"
 
 if ENGINE.resolve(strict=True) != ENGINE:
@@ -60,7 +60,7 @@ class ConsumerSourceTests(unittest.TestCase):
         self.assertEqual(source.engine_source.commit, PIN)
         self.assertEqual(source.engine_source.gitlink_commit, PIN)
         self.assertEqual(source.engine_source.submodule_path, "synaptic-tuner")
-        self.assertEqual(source.engine_source.branch, "release/derived-bootstrap-integration")
+        self.assertEqual(source.engine_source.branch, "release/stable-candidate-integration")
         self.assertFalse(source.project_source.dirty)
         self.assertFalse(source.engine_source.dirty)
         self.assertFalse(source.project_source.pushed)
