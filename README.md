@@ -6,7 +6,7 @@ gitlink selects exact `4b77bd1f8e8a0abd664907a575166bfa41f11a7d`.
 
 `configuration/grpo.yaml` selects the checked-in unqualified SmolLM135 candidate,
 three steps/four generations and deterministic blue regex reward. `data/rows.jsonl`
-and its independently verified four-row publication are synthetic fixtures;
+and its independently verified four-row `.tracking/datasets` publication are synthetic fixtures;
 `configuration/preparation.json` records exact original bytes/semantic identity.
 All paths are host-relative. No provider IDs, old resources, credentials or
 qualification receipts are retained here.
