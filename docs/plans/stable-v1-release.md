@@ -868,3 +868,18 @@ source propagation and local consistency, not an actual provider image build,
 pushed-source admission or model/hardware qualification. Installed training still
 requires a separately admitted engine source checkout; the wheel is not a Git
 source repository. GRPO execution and provider parity qualification remain open.
+
+### Fresh-process Modal cancellation controls
+
+Two installed CPU cases now restore the full host in separate interpreters using
+its original retained keys, workflow, catalogs and attempt journal, after the
+original submit authorization has expired. Cancellation acknowledgment stays
+`cancel_requested`; a lost reply stays `reconcile_required`. A second restored
+host preserves the same consumed claim and issues no new cancel, stage or submit.
+The original submit commitment is unchanged, and training input access is denied.
+
+These test-only capability settings and scripted SDK replies exercise existing
+machinery. Production capability flags remain disabled, and acknowledgment does
+not establish physical termination. The two cases passed against the accepted
+PR212 installed wheel; this change adds tests and permanent installed CI coverage
+without changing production code.
