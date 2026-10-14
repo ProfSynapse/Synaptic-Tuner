@@ -72,6 +72,21 @@ This proves saved plan/context readback only, not a restored provider host,
 training resume or a working model/image. Existing normal execute/qualify gates
 remain closed until the full provider composition is accepted.
 
+The existing internal CPU self-check selects SFT or GRPO only from the exact
+validated release contracts. It verifies the corresponding fixed worker closure,
+selected trainer source in the pinned wheel, and the isolated child's source
+compile. The existing CPU protocol, sealed fixture and signed receipt stay the
+same; unknown or mixed method contracts reject. Legacy SFT CPU schema remains
+accepted. No caller method override selects a different closure.
+
+Source controls use private test-owned captures of the same fixed member lists
+and explicit package/image/device-namespace observations. The parent and real
+isolated child retain actual environment, sealed-FD, private-root, selected import
+guard and trainer-source checks. These controls do not prove container isolation,
+GPU image compatibility or training. They do not enable ordinary GRPO runner
+qualification/start: joining the normal runner to an actual CPU receipt and cold
+public-host recovery remains separate work.
+
 Use the existing generic preparation service with explicit host-owned roots:
 
 ```python

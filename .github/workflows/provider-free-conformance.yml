@@ -919,7 +919,9 @@ jobs:
                        "tuner.runtime.packaged_grpo_verification", "tuner.runtime.packaged_sft_child",
                        "tuner.execution.providers.modal.packaged_dispatch",
                        "tuner.execution.providers.modal.packaged_worker",
-                       "tuner.execution.providers.modal.packaged_reader"):
+                       "tuner.execution.providers.modal.packaged_reader",
+                       "tuner.runtime.packaged_training_worker",
+                       "tuner.execution.providers.modal.runtime_release_qualification"):
               location = Path(importlib.util.find_spec(name).origin).resolve()
               assert location.is_relative_to(prefix) and not location.is_relative_to(checkout), location
           from importlib.resources import files
@@ -974,6 +976,11 @@ jobs:
               "execution/providers/test_modal_source_resolution.py",
               "execution/test_mutation_broker.py",
               "training/test_modal_post_training_compilation.py",
+              "runtime/cpu_qualification_image.py",
+              "runtime/test_packaged_cpu_methods.py",
+              "runtime/test_packaged_training_worker.py",
+              "execution/providers/test_modal_grpo_cpu_qualification.py",
+              "execution/providers/test_modal_runtime_release_qualification.py",
           )
           for relative in helpers:
               target = root / "tests" / relative
@@ -999,7 +1006,10 @@ jobs:
               str(root / "tests/runtime/test_packaged_grpo_child.py"),
               str(root / "tests/runtime/test_packaged_grpo_native.py"),
               str(root / "tests/trainers/grpo/test_packaged_artifacts.py"),
-              str(root / "tests/execution/providers/test_modal_packaged_grpo_routing.py")]))
+              str(root / "tests/execution/providers/test_modal_packaged_grpo_routing.py"),
+              str(root / "tests/runtime/test_packaged_cpu_methods.py"),
+              str(root / "tests/runtime/test_packaged_training_worker.py"),
+              str(root / "tests/execution/providers/test_modal_grpo_cpu_qualification.py")]))
           PYCODE
 
       - name: Exercise installed public evaluation comparison and report readers
