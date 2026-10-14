@@ -572,8 +572,10 @@ def test_candidate_generation_has_no_authority_effects(tmp_path, monkeypatch, ca
     from tuner.handlers.modal_job_config_handler import ModalJobConfigHandler
 
     plan, context, events, _ = qualification_setup(tmp_path, monkeypatch)
+    # This control starts with an admitted fixture plan; recipe dispatch is
+    # covered separately. Patch the current planning port, not its SFT delegate.
     monkeypatch.setattr(
-        "tuner.training.modal_recipe.plan_modal_sft_recipe", lambda *_a, **_k: plan
+        "tuner.training.modal_recipe.plan_modal_recipe", lambda *_a, **_k: plan
     )
     private = tmp_path / "private"
     private.mkdir(mode=0o700)
