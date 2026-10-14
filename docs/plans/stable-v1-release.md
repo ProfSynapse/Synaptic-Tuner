@@ -44,10 +44,17 @@ source/wheel hashes, failures and evidence limits; older unavailable/baseline
 summaries are historical rather than current backend verdicts. Counts below are
 overlapping installed lane totals, not a cumulative unique-test count.
 
+The candidate stack [#244](https://github.com/ProfSynapse/Synaptic-Tuner/pull/244)
+through [#247](https://github.com/ProfSynapse/Synaptic-Tuner/pull/247) is separate
+from merged main: CI and merge remain pending at this checkpoint. It adds the
+configured Modal lifecycle, finite CPU-parent diagnostics, orphaned-cancel
+observation and same-model nontraining comparison. Independent source review and
+local installed acceptance do not substitute for exact-head CI or live qualification.
+
 | Supported preparation/composition | Current accepted evidence | Remaining release work |
 | --- | --- | --- |
 | Durable host records/history | Caller-owned SQLite implements existing record/stream ports and atomic Data/Evaluation/Pipeline/training-workflow updates; retained plans, claims and original keys support bounded cold reads. | Final supported-host/recovery qualification; a database does not restore credentials, source leases or active processes. |
-| Data/environment/evaluation consumer | **337 installed controls** exercise public generate/improve/validate, actual local fixture workers, measured scripted response/judge calls, immutable exports, reports/comparison and SQLite readback. Paid-call uncertainty stops later paid dispatches; bounded HTTP acquisition is implemented. | Genuine bounded paid backend/judge/account acceptance, representative scenario/source coverage and advertised cancellation behavior. CPU scripted calls are not live model/account qualification. |
+| Data/environment/evaluation consumer | **345 installed controls** exercise public generate/improve/validate, actual local fixture workers, measured scripted response/judge calls, immutable exports, reports/comparison and SQLite readback. Paid-call uncertainty stops later paid dispatches; bounded HTTP acquisition is implemented. | Genuine bounded paid backend/judge/account acceptance, representative scenario/source coverage and advertised cancellation behavior. CPU scripted calls are not live model/account qualification. |
 | Ordinary SFT consumers | Shared checkout consumer with installed production passed **Docker 61 / HF 80** controls, including public start, known reads, native five-role verification/download and uncertain-submit non-replay. Modal also has the normal retained-run/public lifecycle and historical exact-source live evidence. | Final-source **Docker/Modal/HF** live SFT parity, real cancellation/reconciliation and known-run recovery with original inputs/keys. Historical Modal success does not qualify the final stack. |
 | Modal GRPO | Public compiler/preparation, fixed isolated child, native verification, normal runner and retained known-run reads are implemented. The actual captured SmolLM candidate passed **256 installed controls** and retains the observed **396-distribution base**. | Qualify the actual augmented image/CPU closure, pinned model/tokenizer and one bounded **Modal GPU GRPO** run with real update/grouped reward evidence; constant/unchanged observations remain inconclusive. Other GRPO providers remain deferred. |
 | Artifact publication | Caller-owned durable store/spool/create-only destination passed **377 installed controls + one existing skip**; native RunsAPI join passed **73 installed Docker/publication controls** with five-role streams and cold marker lookup. Optional HF SFT publication passed **115 installed controls**, including owned snapshot lookup after process death. The native GRPO renderer/publication join passed **145 combined installed HF controls**, **256 GRPO controls** and **39 source-closure controls** (overlapping lane totals) on wheel source `371d4b05`. | Live repository/account/destination qualification remains open; expected-parent submission and verified owned immutable snapshot do not establish RPC causality or an introducing commit after a lost reply. The GRPO join uses actual native verification over synthetic CPU model files; genuine GPU training and live publication qualification remain open. |
@@ -98,15 +105,36 @@ then an unclassified installed-child qualification operation failed. No CPU
 qualification receipt, native child code or specific failing operation was
 retained; the underlying cause remains unknown. Preserve its consumed claims and
 known call. There was no model download or GPU training. More precise finite-stage
-diagnostics, followed by a separately bound fresh attempt, remain necessary.
+diagnostics are implemented in candidate #245; a separately bound fresh attempt
+is still necessary. This does not retrospectively establish E's cause.
 
 The Modal lifecycle candidate joins recipe opt-in and current caller permission
 to the existing public cancellation/reconciliation operations. Acknowledgment is
 distinct from an independent provider terminal observation. If an acknowledged
-cancel loses its Foundation receipt before persistence, the current composition
-retains the consumed effect and refuses replay; trusted quiescence recovery for
-that gap is unavailable. Do not claim arbitrary crash recovery or live cancellation
-qualification from the local process tests.
+cancel loses its Foundation receipt before persistence, candidate #246 retains
+the consumed effect and permits known-run reads through the original authenticated
+`FOUND` submit. Pending preserves `CANCEL_INTENT_RECORDED`; independent terminal
+observations preserve the unadvanced cancel intent without inventing a receipt,
+acknowledgment or bound cancellation. Native success can verify and stream the
+five artifacts. Cancel/reconcile for that orphaned intent remain refused even
+after terminal observation; physical quiescence is not established. Do not claim
+arbitrary crash recovery or live cancellation qualification from the local tests.
+
+Candidate #246 at `9ea8a004` passed **178 installed coordinator/Docker controls**
+and **426 installed native custody controls**, with one portable SFT control
+deselected in the real-seal Python 3.14 lane. Source, wheel and installed production
+bytes matched on wheel
+`2b390c59073600d9396fd395ea734906bcfa3e26a8ef2a6dffdb6011b8a72a7a`.
+Candidate #247's source `c52be233` passed **345 installed evaluation/nontraining
+controls** in 57.00 seconds on wheel
+`d9e14291368baaa2c2011ed41c0b544b98b4ac2e52409eddb9624e783756b0d9`,
+with source/wheel/installed production equality. Its retained public evaluation
+plans bind configuration-ordered run refs, including two runs of the same model;
+legacy distinct-model attempts remain readable. The model alias is not an
+immutable checkpoint, and external judging remains unverified/incomparable.
+These are overlapping provider-free installed totals; CI, merging and live
+qualification remain separate.
+
 No new grant, lifecycle DTO, store or scenario CRUD framework is required merely
 to close this plan. Supported host composition and installed/source prerequisites
 are detailed in the [operation matrix](api-v1-support-matrix.md) and
@@ -691,8 +719,8 @@ exit nor bucket progress substitutes for durable final artifact publication.
 2. **Modal closure:** apply the same ladder to the final candidate, preserving
    exact launcher/runtime locks, per-call log proof and one-shot claims. Close
    cancellation/reconciliation and restart gaps without weakening admission.
-3. **HF Jobs API v1 parity:** implement the provider-neutral adapter using the
-   existing SDK/storage mechanisms, then run the same ladder. Preserve protected
+3. **HF Jobs API v1 parity:** qualify the existing installed provider-neutral
+   adapter and host consumer with the same ladder. Preserve protected
    anchor/secret/source semantics; do not merely wrap legacy CLI stdout as proof.
 
 Exit: one shared conformance matrix has exact provider-specific terminal evidence
