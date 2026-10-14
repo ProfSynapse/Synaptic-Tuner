@@ -1108,3 +1108,29 @@ Python 3.12. Four production modules and three lock resources are byte-exact
 in the installed wheel. All seven maintenance checks are current; runtime
 inventories and non-hash pins are unchanged. Explicit SDK/image/ML fixtures
 mean this is host conformance, not live provider cancellation qualification.
+
+### HF Jobs cancellation and retained-receipt reconciliation machinery
+
+The ordinary HF public host now supports the existing cancellation command and
+reconciliation ports internally. The original authenticated submission, exact
+known job, current Foundation record, original retained assessment and request
+material must agree before provider access. A durable receipt after the pinned
+SDK acknowledges the one-shot request is the sole source of cancellation
+`FOUND`. Lost, late or unstored acknowledgments retain consumed uncertainty;
+terminal provider status cannot manufacture acknowledgment or authorize replay.
+Known stage/submit/cancel receipts may be looked up; unknown submissions are
+never discovered or adopted. A completion race preserves natural success and
+the real native verifier plus all five public artifact streams.
+
+Default cancel/reconcile capability flags remain disabled. Current cancellation
+authorization is an explicit exact-boolean host option; existing start expiry
+is preserved. These SQLite reopening controls retain the original preparation
+object: source-free cold reconstruction and live qualification remain separate.
+
+Independent source and CI/skill review passed. Root passed all 52 affected
+source controls with Hub 1.33.0 (56.42 seconds). Fresh sdist-built wheel
+`966568f4128eef2347deb97e74e1fd1d438118ff5b0159191a4ecac487a9cb38`
+passed the base consumer and the complete installed pinned-SDK HF lane: 52
+controls in 57.21 seconds. All three changed production modules match reviewed
+bytes in the wheel and installed package. All seven maintenance checks remain
+current without inventory or pin changes. No live provider effects occurred.
