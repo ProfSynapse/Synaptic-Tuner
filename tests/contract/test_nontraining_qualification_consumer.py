@@ -346,12 +346,27 @@ def test_between_stage_mutation_is_not_newly_admitted(configured, monkeypatch):
     assert result["data"][0]["state"] == "succeeded" and len(result["data"]) == 1
 
 
-@pytest.mark.parametrize("max_calls", [32, 14])
+@pytest.mark.parametrize("max_calls", [32, 14, 16])
 def test_cli_plan_execute_and_json_readback_actual_adapters(
     configured, monkeypatch, capsys, tmp_path, max_calls
 ):
     config, _, _ = configured
     config["bounds"]["max_calls"] = max_calls
+    luna = max_calls == 16
+    if luna:
+        config["provider"]["backend"] = "openai_responses"
+        config["bounds"]["duration_seconds"] = 300
+        for request in config["data"].values():
+            if type(request) is dict and "request_id" in request:
+                request["backend"] = "openai_responses"
+                request["model"] = "gpt-6-luna"
+        for request in config["evaluation"]["requests"]:
+            request["backend"] = "openai_responses"
+            request["case_limit"] = 1
+            request["model"] = {
+                "model_ref": "gpt-6-luna",
+                "model_revision": "gpt-6-luna",
+            }
     rubric = tmp_path / "judge-rubrics"
     rubric.mkdir()
     (rubric / "quality.yaml").write_text(
@@ -375,6 +390,11 @@ def test_cli_plan_execute_and_json_readback_actual_adapters(
         "rubric_refs": ["quality"],
         "config": {"max_tokens": 64, "temperature": 0, "reasoning_effort": None},
     }
+    if luna:
+        config["evaluation"]["judge"]["model"] = {
+            "model_ref": "gpt-6-luna",
+            "model_revision": "gpt-6-luna",
+        }
     raw = (rubric / "quality.yaml").read_bytes()
     config["inputs"].append(
         {
@@ -401,7 +421,7 @@ def test_cli_plan_execute_and_json_readback_actual_adapters(
     all_calls, opens = [], []
 
     class RemoteFixture:
-        provider_name = "openrouter"
+        provider_name = config["provider"]["backend"]
 
         def __init__(self, model):
             self.model_name = model
@@ -422,11 +442,17 @@ def test_cli_plan_execute_and_json_readback_actual_adapters(
     def create(key, model, **kwargs):
         assert key == "synthetic-key" and kwargs["max_response_bytes"] == 1048576
         opens.append(model)
-        return data_clients.pop(0) if model == "data-model" else RemoteFixture(model)
+        if luna:
+            assert model == "gpt-6-luna"
+        return data_clients.pop(0) if data_clients else RemoteFixture(model)
 
     monkeypatch.setenv("EXAMPLE_KEY", "synthetic-key")
     monkeypatch.setattr(consumer, "OpenRouterClient", create)
     monkeypatch.setattr("shared.llm.providers.openrouter.OpenRouterClient", create)
+    monkeypatch.setattr(consumer, "OpenAIResponsesClient", create)
+    monkeypatch.setattr(
+        "shared.llm.providers.openai_responses.OpenAIResponsesClient", create
+    )
     original_take = consumer.DataClients.take_call
     ticks = []
 
@@ -442,7 +468,15 @@ def test_cli_plan_execute_and_json_readback_actual_adapters(
     assert planned["ready"] and not opens and not all_calls
     assert consumer.main(["execute", str(config_path)]) == 0
     executed = json.loads(capsys.readouterr().out)
-    if max_calls == 32:
+    if luna:
+        assert len(executed["spend"]) == 4 and all(
+            e["state"] == "found" for e in executed["spend"]
+        )
+        assert len(all_calls) == 4 and len(ticks) == 15
+        assert all(name == "gpt-6-luna" for name in opens)
+        assert executed["comparison_scope"] == "same_model_runs"
+        assert executed["comparison"]["candidates"][0]["comparable"] is False
+    elif max_calls == 32:
         assert len(executed["spend"]) == 4 and all(
             e["state"] == "found" for e in executed["spend"]
         )
@@ -460,6 +494,10 @@ def test_cli_plan_execute_and_json_readback_actual_adapters(
     monkeypatch.setattr(consumer.NamedSecrets, "resolve", forbidden)
     monkeypatch.setattr(consumer, "OpenRouterClient", forbidden)
     monkeypatch.setattr("shared.llm.providers.openrouter.OpenRouterClient", forbidden)
+    monkeypatch.setattr(consumer, "OpenAIResponsesClient", forbidden)
+    monkeypatch.setattr(
+        "shared.llm.providers.openai_responses.OpenAIResponsesClient", forbidden
+    )
     assert consumer.main(["readback", config["state_root"]]) == 0
     retained = json.loads(capsys.readouterr().out)
     assert (
@@ -560,3 +598,113 @@ def test_generated_public_artifact_tamper_stops_before_improvement(
     with pytest.raises(ValueError, match="generated artifact commitment mismatch"):
         consumer.execute(config, secrets=secrets, backends={"openrouter": backend})
     assert len(created) == 1 and not backend.opened
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_same_model_runs_use_exact_retained_plan_identity(
+    configured, monkeypatch, reverse
+):
+    from synaptic_tuner.api.v1.evaluation_facade import EvaluationPlan
+    from synaptic_tuner.api.v1.reference.evaluation import evaluation_run_ref
+
+    config, ports, _ = configured
+    for raw in config["evaluation"]["requests"]:
+        raw["model"] = {"model_ref": "gpt-6-luna", "model_revision": "gpt-6-luna"}
+        raw["case_limit"] = 1
+    if reverse:
+        config["evaluation"]["requests"].reverse()
+    secrets, _, _, backend = install_clients(monkeypatch)
+    result = consumer.execute(config, secrets=secrets, backends={"openrouter": backend})
+    assert result["comparison_scope"] == "same_model_runs"
+    assert len(result["results"]) == 2
+    assert result["results"][0]["model"] == result["results"][1]["model"]
+    root = Path(config["state_root"])
+    expected = []
+    for index, raw in enumerate(config["evaluation"]["requests"]):
+        plan = EvaluationPlan.from_dict(
+            json.loads((root / f"evaluation-{index}-plan.json").read_bytes())
+        )
+        assert plan.request.to_dict() == raw
+        expected.append(evaluation_run_ref(plan).to_dict())
+    assert [value["run"] for value in result["results"]] == expected
+    assert result["comparison"]["reference_run"] == expected[0]
+    assert result["comparison"]["candidate_run"] == expected[1]
+    for directory in (
+        ports.config_dir,
+        ports.scenarios_dir,
+        ports.rubrics_dir,
+        Path(config["evaluation"]["config_root"]),
+    ):
+        shutil.rmtree(directory)
+
+    def forbidden(*_a, **_k):
+        pytest.fail("cold same-model read reopened model or credentials")
+
+    monkeypatch.setattr(consumer.NamedSecrets, "resolve", forbidden)
+    monkeypatch.setattr(consumer.DataClients, "create", forbidden)
+    backend.open = backend.requirement = forbidden
+    cold = consumer.readback(root)
+    cold["comparison"].pop("generated_at")
+    result["comparison"].pop("generated_at")
+    assert cold == result
+
+
+@pytest.mark.parametrize("mutation", ["swap", "remove", "cases"])
+def test_same_model_snapshot_substitution_refuses_readback(
+    configured, monkeypatch, mutation
+):
+    config, _, _ = configured
+    for raw in config["evaluation"]["requests"]:
+        raw["model"] = {"model_ref": "gpt-6-luna", "model_revision": "gpt-6-luna"}
+        raw["case_limit"] = 1
+    secrets, _, _, backend = install_clients(monkeypatch)
+    consumer.execute(config, secrets=secrets, backends={"openrouter": backend})
+    root = Path(config["state_root"])
+    a, b = (root / f"evaluation-{i}-plan.json" for i in range(2))
+    if mutation == "swap":
+        first, second = a.read_bytes(), b.read_bytes()
+        a.write_bytes(second)
+        b.write_bytes(first)
+    elif mutation == "remove":
+        a.unlink()
+        b.unlink()
+    else:
+        value = json.loads(a.read_bytes())
+        value["cases_total"] += 1
+        a.write_text(json.dumps(value))
+    with pytest.raises(ValueError):
+        consumer.readback(root)
+
+
+def test_legacy_distinct_model_readback_remains_supported(configured, monkeypatch):
+    config, _, _ = configured
+    secrets, _, _, backend = install_clients(monkeypatch)
+    result = consumer.execute(config, secrets=secrets, backends={"openrouter": backend})
+    root = Path(config["state_root"])
+    for i in range(2):
+        (root / f"evaluation-{i}-plan.json").unlink()
+    cold = consumer.readback(root)
+    cold["comparison"].pop("generated_at")
+    result["comparison"].pop("generated_at")
+    assert cold == result
+
+
+def test_evaluation_run_ref_is_pure_and_rejects_invalid_plan(configured, monkeypatch):
+    from synaptic_tuner.api.v1.evaluation_facade import (
+        EvaluationPlan,
+        EvaluationRequest,
+    )
+    from synaptic_tuner.api.v1.reference.evaluation import evaluation_run_ref
+
+    config, _, _ = configured
+    request = EvaluationRequest.from_dict(config["evaluation"]["requests"][0])
+    plan = EvaluationPlan("synaptic-evaluation-plan/v1", request, 1, "a" * 64)
+    same = EvaluationPlan.from_dict(plan.to_dict())
+    assert evaluation_run_ref(plan) == evaluation_run_ref(same)
+    changed = replace(plan, request=replace(request, request_id="another-evaluation"))
+    assert evaluation_run_ref(plan) != evaluation_run_ref(changed)
+    with pytest.raises(TypeError):
+        evaluation_run_ref(plan.to_dict())
+    object.__setattr__(plan, "scenario_digest", "invalid")
+    with pytest.raises(ValueError):
+        evaluation_run_ref(plan)

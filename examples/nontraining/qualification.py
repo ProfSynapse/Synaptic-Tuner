@@ -30,6 +30,7 @@ from synaptic_tuner.api.v1.data_facade import (
 from synaptic_tuner.api.v1.evaluation_facade import (
     EvaluationAPI,
     EvaluationRequest,
+    EvaluationPlan,
     EvaluationListRequest,
     EvaluationResultRequest,
     EvaluationRunState,
@@ -50,6 +51,7 @@ from synaptic_tuner.api.v1.reference.evaluation import (
     MeteredPaidBackendV1,
     MeteredPaidJudgeV1,
     compose_reference_evaluation,
+    evaluation_run_ref,
 )
 from synaptic_tuner.api.v1.reference.spend import (
     SpendScopeV1,
@@ -192,8 +194,6 @@ def validate_config(document):
     requests = [generation, improvement, *evaluations]
     if len(evaluations) != 2 or len({r.request_id for r in requests}) != 4:
         raise ValueError("four distinct stable request IDs required")
-    if len({(r.model.model_ref, r.model.model_revision) for r in evaluations}) != 2:
-        raise ValueError("model comparison requires two distinct model refs")
     for request in requests:
         if (
             request.project_ref != config["project_ref"]
@@ -601,13 +601,17 @@ def execute(config, *, clients=None, backends=None, judge=None, secrets=None):
         )
         if checked.findings or checked.rows_valid != 1:
             raise ValueError("improved dataset invalid")
-        for raw in config["evaluation"]["requests"]:
+        for index, raw in enumerate(config["evaluation"]["requests"]):
             _check_inputs(config)
             value = evaluation.plan(EvaluationRequest.from_dict(raw))
             if not evaluation.preflight(value).ready:
                 raise ValueError("evaluation preflight refused")
             _check_inputs(config)
+            expected_run = evaluation_run_ref(value)
+            _write(root / f"evaluation-{index}-plan.json", value.to_dict())
             run = evaluation.start(value).run
+            if run != expected_run:
+                raise ValueError("evaluation start binding mismatch")
             if evaluation.show(run).state is not EvaluationRunState.SUCCEEDED:
                 break
     return readback(root)
@@ -632,13 +636,46 @@ def readback(root):
             for item in eval_rows
             if item.state is EvaluationRunState.SUCCEEDED
         ]
+        requests = [
+            EvaluationRequest.from_dict(raw) for raw in config["evaluation"]["requests"]
+        ]
+        same_model = requests[0].model == requests[1].model
+        paths = [root / f"evaluation-{index}-plan.json" for index in range(2)]
         ordered = []
-        for raw in config["evaluation"]["requests"]:
-            expected = EvaluationRequest.from_dict(raw).model
-            matches = [result for result in results if result.model == expected]
-            if len(matches) > 1:
-                raise ValueError("ambiguous retained model comparison")
-            ordered.extend(matches)
+        if any(path.exists() for path in paths):
+            expected_runs = set()
+            by_run = {result.run: result for result in results}
+            for path, request in zip(paths, requests):
+                if not path.exists():
+                    continue
+                retained = EvaluationPlan.from_dict(json.loads(_read(path)))
+                if retained.request != request:
+                    raise ValueError("retained evaluation plan mismatch")
+                run = evaluation_run_ref(retained)
+                expected_runs.add(run)
+                result = by_run.get(run)
+                if result is not None:
+                    if (
+                        result.model != request.model
+                        or result.backend != request.backend
+                        or result.cases_total != retained.cases_total
+                    ):
+                        raise ValueError("evaluation result binding mismatch")
+                    ordered.append(result)
+            if any(outcome.run not in expected_runs for outcome in eval_rows):
+                raise ValueError("evaluation run has no retained plan binding")
+        elif same_model:
+            if eval_rows:
+                raise ValueError("same-model runs require retained evaluation plans")
+        else:
+            # Legacy distinct-model attempts had no retained evaluation plans.
+            for request in requests:
+                matches = [
+                    result for result in results if result.model == request.model
+                ]
+                if len(matches) > 1:
+                    raise ValueError("ambiguous retained model comparison")
+                ordered.extend(matches)
         results = ordered
         comparison = (
             evaluation.compare(
@@ -699,6 +736,7 @@ def readback(root):
             "evaluation": [item.to_dict() for item in eval_rows],
             "results": [item.to_dict() for item in results],
             "comparison": comparison,
+            "comparison_scope": "same_model_runs" if same_model else "different_models",
         }
 
 

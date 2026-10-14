@@ -738,6 +738,14 @@ def _run_id(plan: EvaluationPlan) -> str:
     return "ev-" + domain_digest(EVALUATION_RUN_DOMAIN, plan.plan_fingerprint.encode("ascii"))[:32]
 
 
+def evaluation_run_ref(plan: EvaluationPlan) -> EvaluationRunRef:
+    """Derive the reference composition's run identity without opening a backend."""
+    if type(plan) is not EvaluationPlan:
+        raise TypeError("plan must be exact EvaluationPlan")
+    retained = EvaluationPlan.from_dict(plan.to_dict())
+    return EvaluationRunRef(_run_id(retained), retained.request.project_ref)
+
+
 def _head_key(run: EvaluationRunRef) -> str:
     return f"run/{_project_digest(run.project_ref)}/{_run_key(run.run_id)}"
 
@@ -1428,7 +1436,7 @@ class ReferenceEvaluationOperationsV1:
         )
 
     def start(self, plan: EvaluationPlan) -> EvaluationStart:
-        run = EvaluationRunRef(_run_id(plan), plan.request.project_ref)
+        run = evaluation_run_ref(plan)
         if self._head(run) is not None:
             return EvaluationStart(run, True)
         backend = self._backend(plan.request.backend)
@@ -1836,4 +1844,5 @@ __all__ = [
     "ReferenceEvaluationPortsV1",
     "UnmeteredPaidBackendV1",
     "compose_reference_evaluation",
+    "evaluation_run_ref",
 ]
