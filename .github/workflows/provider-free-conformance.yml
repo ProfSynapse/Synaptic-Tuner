@@ -1326,6 +1326,8 @@ jobs:
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
+              if name == "bootstrap":
+                  assert callable(module.failure_projection)
           for name in ("tuner.training.coordinator_material", "tuner.runtime.dispatch", "synaptic_tuner.api.v1.reference.sqlite_store",
                        "synaptic_tuner.api.v1.reference.hf_publication",
                        "synaptic_tuner.api.v1.reference.local_publication",
