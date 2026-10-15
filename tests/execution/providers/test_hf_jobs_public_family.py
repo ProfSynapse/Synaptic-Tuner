@@ -472,9 +472,7 @@ def test_actual_bootstrap_worker_with_owned_files_and_injected_ml_effects(materi
     program = transport.job_request(command)["command"][-1]
     # Parse only the admitted standard-base64 payload; bootstrap.run and the
     # actual worker execute below, not a mocked success return.
-    import shlex
     import re
-    program = shlex.split(program)[0]
     encoded = re.search(r"b64decode\('([A-Za-z0-9+/=]+)'\)", program).group(1)
     import base64
     payload = base64.b64decode(encoded, validate=True)
@@ -933,7 +931,6 @@ def test_normal_hf_diagnostic_vocabulary_is_independent_and_native_exact():
 ])
 def test_actual_generated_wrapper_has_closed_failure_output(material, capsys, phase, native, expected):
     import ast
-    import shlex
     from tuner.execution.providers.hf_jobs_provider_v1 import bootstrap
     prep = material.preparation
     run = TrainingRunRef(prep.rich_plan.execution_source.run_id, prep.resolved.project_ref)
@@ -941,15 +938,8 @@ def test_actual_generated_wrapper_has_closed_failure_output(material, capsys, ph
     command = build_stage_command(sealed, "fixture-nonce", prep.payload(sealed, EffectKind.STAGE), prep.executor)
     transport = HFJobsTransport(preparation=prep, sdk=sdk, api=material.provider,
         records=InMemoryDurableRecordStoreV1(), secrets=Secrets(), scratch_root=material.scratch)
-    quoted = transport.job_request(command)["command"][-1]
-    tokens = shlex.split(quoted)
-    assert len(tokens) == 1
-    program = tokens[0]
+    program = transport.job_request(command)["command"][-1]
     ast.parse(program)
-    # The admitted command intentionally retains its shell-quoted program. This
-    # checks both representations; it does not establish provider entrypoint semantics.
-    with pytest.raises(SyntaxError):
-        ast.parse(quoted)
     suffix = "try:\n run" + program.rsplit("\ntry:\n run", 1)[1]
     def fail(_payload):
         if phase is None:
@@ -988,3 +978,47 @@ def test_bootstrap_and_worker_input_failures_are_closed():
     with pytest.raises(bootstrap.HFJobFailure) as caught:
         source_worker.execute({"private": "fixture text"})
     assert bootstrap.failure_projection(caught.value) == ("WORKER_INPUT", 82)
+
+
+@pytest.mark.parametrize("entry", ["direct", "exec-argv", "explicit-shell-string"])
+def test_actual_job_request_executes_raw_program_without_quote_layer(entry):
+    """Real isolated Python, no mounts/SDK calls: malformed input refuses before I/O.
+
+    The middle case models the captured image entrypoint's exact exec "$@"
+    semantics. The final case intentionally constructs a shell command with
+    shlex.join; it is not a claim that HF applies that transformation.
+    """
+    import ast
+    import shlex
+    import subprocess
+    import sys
+    from tuner.execution.providers.hf_jobs_provider_v1 import bootstrap, transport
+    material = {"selection": {"inventory_sha256": "a" * 64, "timeout_seconds": 1,
+        "bucket_id": "fixture-owner/bucket", "source_prefix": "source/fixture",
+        "run_prefix": "runs/fixture", "image": "fixture@sha256:" + "b" * 64,
+        "flavor": "cpu-basic", "scope": {"namespace_ref": "fixture-owner"}},
+        "members": [], "input": {}}
+    workload = {"configuration": {"document": {"model": {}}},
+                "execution_source": {"runtime": {"interpreter": {"executable": sys.executable}}}}
+    request = transport._job_request(sdk=sdk, material=material,
+        projection={"workload_fingerprint": "c" * 64, "dispatch": {}},
+        workload=workload, bootstrap=Path(bootstrap.__file__).read_bytes(),
+        command=SimpleNamespace(digest="d" * 64))
+    argv = request["command"]
+    ast.parse(argv[-1])
+    original = list(argv)
+    if entry == "exec-argv":
+        argv = ["/bin/sh", "-c", 'exec "$@"', "fixture-entrypoint", *argv]
+    elif entry == "explicit-shell-string":
+        argv = ["/bin/sh", "-c", shlex.join(argv)]
+    result = subprocess.run(argv, env={}, capture_output=True, timeout=5, check=False)
+    assert result.returncode == 80
+    assert result.stderr == b""
+    assert json.loads(result.stdout) == {"schema_version": "synaptic-hf-job-failure/v1",
+        "phase": "BOOTSTRAP_ADMISSION", "exit_code": 80}
+    # The old extra shell quote is not valid Python when argv is passed intact.
+    bad = [*original[:-1], shlex.quote(original[-1])]
+    with pytest.raises(SyntaxError):
+        ast.parse(bad[-1])
+    rejected = subprocess.run(bad, env={}, capture_output=True, timeout=5, check=False)
+    assert rejected.returncode == 1 and rejected.stdout == b""

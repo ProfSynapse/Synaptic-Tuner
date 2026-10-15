@@ -8,7 +8,6 @@ import re
 from pathlib import Path
 from queue import Queue, Empty
 from contextlib import contextmanager
-import shlex
 import stat
 import sys
 import tempfile
@@ -106,7 +105,7 @@ def _job_request(*, sdk, material, projection, workload, bootstrap, command):
     ]
     return {
         "image": selection["image"],
-        "command": [executable, "-I", "-c", shlex.quote(program)],
+        "command": [executable, "-I", "-c", program],
         "env": {},
         "flavor": selection["flavor"],
         "timeout": selection["timeout_seconds"],
