@@ -25,4 +25,4 @@ configuration alone are not effect authority.
 
 Fresh final source fixture; normal local plan/preparation only. No CPU image, GPU/model/update/reward qualification receipt is claimed. Earlier G and d494 work remain preserved.
 
-This fresh local host selects the diagnostic candidate for review. It has not been pushed or granted new effects. Earlier consumed runs and private state remain preserved.
+This fresh local host selects the diagnostic candidate for review. Publishing this host does not itself grant execution authority. Earlier consumed runs and private state remain preserved.
