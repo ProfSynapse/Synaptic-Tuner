@@ -47,6 +47,6 @@ approved public base pull is external retained evidence, not a claim by this rep
 
 Git retains the historical prepared publication bytes, not private filesystem modes. The fixture test verifies an exact private copy; execution must create a fresh private publication through the supported preparation workflow.
 
-This fresh local host selects the diagnostic candidate for review. It has not been pushed or granted new effects. Earlier consumed runs and private state remain preserved.
+This fresh local host selects the diagnostic candidate for review. Publishing this host does not itself grant execution authority. Earlier consumed runs and private state remain preserved.
 
 Docker SFT explicitly reuses the independently verified image B `6ba481fd...`, runtime release `b186cc00...`, and original c8fd wheel provenance under unchanged fixed SFT closures. The image does not contain the diagnostic candidate wheel. Existing completion model cache and run/cache mapping are retained; only fresh signed material outputs will be created after final admission.
