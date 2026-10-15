@@ -121,12 +121,20 @@ def test_missing_git_and_dirty_selected_source_reject(tmp_path, monkeypatch):
         build.plan_modal_build_material(Path('fixture'), source_root=root)
 
 
-def test_restricted_metrics_source_scope_is_not_extended(tmp_path):
+def test_restricted_metrics_observes_explicit_clean_source_and_rejects_dirty(tmp_path):
     from tuner.training.modal_metrics_qualification import current_clean_commit, MetricsQualificationUnavailable
-    root, _ = source(tmp_path)
-    assert build.current_clean_source_commit(root)
+    root, head = source(tmp_path)
+    assert not Path(build.__file__).resolve().is_relative_to(root)
+    assert current_clean_commit(root) == head
+    (root/'tuner/runtime/modal_build_inspector.py').write_bytes(b'changed')
     with pytest.raises(MetricsQualificationUnavailable):
         current_clean_commit(root)
+    missing = tmp_path/'missing'
+    with pytest.raises(MetricsQualificationUnavailable):
+        current_clean_commit(missing)
+    missing.mkdir()
+    with pytest.raises(MetricsQualificationUnavailable):
+        current_clean_commit(missing)
 
 
 def test_changed_wheel_does_not_claim_or_access_sdk(tmp_path, monkeypatch):
