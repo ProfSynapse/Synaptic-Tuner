@@ -125,6 +125,34 @@ def _order_wrapper_arguments(args: Dict[str, Any], wrapper_spec: Dict[str, Any])
     return {name: args[name] for name in declared + extras}
 
 
+def _omit_optional_wrapper_nulls(args: Dict[str, Any], spec: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Remove structured-output placeholders only for explicit non-null optional fields."""
+    if spec is None or spec.get("arguments_encoding") != "object":
+        return args
+    properties = spec.get("properties") or {}
+    required = spec.get("required_fields") or []
+    result = dict(args)
+    for name, value in args.items():
+        schema = properties.get(name)
+        if value is not None or name in required or not isinstance(schema, dict):
+            continue
+        # Complex schemas may admit null through branches or references. Preserve
+        # their value and leave interpretation to the existing schema validator.
+        if set(schema) - {"type", "description", "title", "default", "examples", "minLength", "maxLength", "pattern", "minimum", "maximum", "enum", "const"}:
+            continue
+        kind = schema.get("type")
+        excludes_null = (
+            isinstance(kind, str) and kind in {"string", "number", "integer", "boolean", "array", "object"}
+        ) or (
+            isinstance(kind, list) and bool(kind)
+            and all(item in {"string", "number", "integer", "boolean", "array", "object"} for item in kind if isinstance(item, str))
+            and all(isinstance(item, str) for item in kind)
+        )
+        if excludes_null:
+            result.pop(name)
+    return result
+
+
 def stringify_assistant_message(response: Any) -> str:
     """Convert an assistant response dict to a plain text summary."""
     if isinstance(response, str):
@@ -202,8 +230,7 @@ def parse_assistant_response(content: str, scenario: Dict, *, wrapper_specs=None
                     normalized_tc["function"]["name"] = normalized_name
                     if isinstance(normalized_args, dict):
                         if isinstance(args, dict):
-                            # Object-encoded arguments: null marks an omitted optional field.
-                            normalized_args = {k: v for k, v in normalized_args.items() if v is not None}
+                            normalized_args = _omit_optional_wrapper_nulls(normalized_args, wrapper_spec)
                         if wrapper_spec is not None:
                             normalized_args = _order_wrapper_arguments(normalized_args, wrapper_spec)
                         normalized_tc["function"]["arguments"] = json.dumps(normalized_args)

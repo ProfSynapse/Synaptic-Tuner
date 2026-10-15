@@ -86,6 +86,7 @@ def build_wrapper_specs(formats: Mapping[str, Any]) -> List[Dict[str, Any]]:
             {
                 "wrapper_name": wrapper_name,
                 "required_fields": required_fields,
+                "arguments_encoding": str(fmt.get("arguments_encoding") or "string").strip().lower(),
                 "field_names": field_names,
                 "string_fields": string_fields,
                 "command_escapes": _command_escapes(wrapper_name, fmt.get("command_escapes")),
