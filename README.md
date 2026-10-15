@@ -1,7 +1,7 @@
 # Public Docker SFT qualification host
 
 This dedicated host branch is not an engine PR. Its real engine Gitlink is
-91c4bbb2272e91b92f3b7c8169dfe725e0fa4e22, with the declared
+ac5581a8ee442ec7692bb152c3c5e0c299838ab2, with the declared
 `release/stable-diagnostics-integration` branch hint (PR256). Local Git
 inspection proves the actual checkout/gitlink and clean source; it does not
 prove this host has been pushed. Root reviews/pushes the host and verifies exact
@@ -50,3 +50,5 @@ Git retains the historical prepared publication bytes, not private filesystem mo
 This fresh local host selects the diagnostic candidate for review. Publishing this host does not itself grant execution authority. Earlier consumed runs and private state remain preserved.
 
 Docker SFT explicitly reuses the independently verified image B `6ba481fd...`, runtime release `b186cc00...`, and original c8fd wheel provenance under unchanged fixed SFT closures. The image does not contain the diagnostic candidate wheel. Existing completion model cache and run/cache mapping are retained; only fresh signed material outputs will be created after final admission.
+
+The ac5581a8 source update changes only two test fixtures after the prior 91c4 candidate. Packaged member equality is reviewed separately; the existing final 982a host wheel, image B and independently verified completion/cancellation model caches remain explicitly preserved. Fresh source material must bind this actual pushed host and engine commit; prior source proofs are not relabeled.
