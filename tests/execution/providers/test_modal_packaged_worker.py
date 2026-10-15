@@ -22,6 +22,7 @@ from tuner.execution.providers.modal.packaged_worker import (
     ModalPackagedWorker,
     ModalPackagedWorkerRoots,
     PACKAGED_WORKER_FAILURE_STAGES,
+    GRPO_CHILD_FAILURE_STAGES,
     packaged_worker_failure,
     _PackagedPhaseTrace,
     PACKAGED_PHASES,
@@ -540,13 +541,18 @@ def test_failure_stage_contract_is_closed_and_rejects_dynamic_values() -> None:
         "SFT_UNKNOWN", "COMPLETION", "ARTIFACT_COMMIT", "CONTROL_COMMIT",
     }) | frozenset("SFT_PREPARATION_MODEL_PERSISTENT_PUBLICATION_" + code
                    for code in PUBLICATION_DIAGNOSTICS) | frozenset(
-                       "SFT_" + stage for stage in CHILD_FAILURE_STAGES)
+                       "SFT_" + stage for stage in CHILD_FAILURE_STAGES) | frozenset(
+                       "GRPO_" + stage for stage in GRPO_CHILD_FAILURE_STAGES)
     assert {stage.removeprefix("MODEL_PERSISTENT_PUBLICATION_")
             for stage in PREPARATION_FAILURE_STAGES
             if stage.startswith("MODEL_PERSISTENT_PUBLICATION_")} == PUBLICATION_DIAGNOSTICS
     for stage in PACKAGED_WORKER_FAILURE_STAGES:
         _assert_failure(packaged_worker_failure(stage), stage)
     _assert_failure(packaged_worker_failure("secret/path"), "SFT_UNKNOWN")
+    _assert_failure(packaged_worker_failure("GRPO_TRAINER_CHILD_EXEC_TORCH_OOM_SECRET"),
+                    "SFT_UNKNOWN")
+    _assert_failure(packaged_worker_failure("GRPO_TRAINER_CHILD_EXEC_OTHER_TRAIN_CALL_EXTRA"),
+                    "SFT_UNKNOWN")
     _assert_failure(packaged_worker_failure("ENTRYPOINT_MOUNT_CONTROL_DIR_EXTRA"), "SFT_UNKNOWN")
 
 

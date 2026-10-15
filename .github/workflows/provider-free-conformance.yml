@@ -81,6 +81,7 @@ on:
       - "tests/cloud/test_vllm_setup.py"
       - "tests/cloud/test_cloud_hf_job_vllm.py"
       - "tests/contract/test_modal_optional_dependency.py"
+      - "tests/contract/test_modal_launcher_security.py"
       - "tests/contract/test_modal_runtime_lock*.py"
       - "tests/contract/test_modal_bootstrap_closure.py"
       - "tests/contract/test_offline_sft_worker_closure.py"
@@ -1101,6 +1102,7 @@ jobs:
               "runtime/test_packaged_grpo_child.py",
               "runtime/test_packaged_grpo_compilation.py",
               "runtime/test_packaged_grpo_native.py",
+              "runtime/test_grpo_closed_diagnostics.py",
               "runtime/grpo_child_fixture.py",
               "contract/test_grpo_training_input_v1.py",
               "trainers/grpo/test_packaged_artifacts.py",
@@ -1132,13 +1134,20 @@ jobs:
               "training/test_uncertain_cancel_modal_observation.py",
               "training/test_modal_cold_cancellation_process.py",
               "training/test_modal_orphaned_cancel_observation.py",
+              "training/test_modal_host_reader.py",
+              "training/test_inspect_modal_packaged_call.py",
+              "execution/coordinator_v1/test_state_machine.py",
           )
           for relative in helpers:
               target = root / "tests" / relative
               target.parent.mkdir(parents=True, exist_ok=True)
               shutil.copy2(checkout / "tests" / relative, target)
-          for package in ("tests", "tests/dataset_prep", "tests/training", "tests/runtime", "tests/trainers", "tests/trainers/sft", "tests/trainers/grpo", "tests/contract", "tests/execution", "tests/execution/providers"):
+          for package in ("tests", "tests/dataset_prep", "tests/training", "tests/runtime", "tests/trainers", "tests/trainers/sft", "tests/trainers/grpo", "tests/contract", "tests/execution", "tests/execution/providers", "tests/execution/coordinator_v1"):
               (root / package / "__init__.py").touch()
+          # The diagnostic CLI is checkout-owned; engine modules stay installed.
+          (root / "scripts").mkdir()
+          shutil.copy2(checkout / "scripts/inspect_modal_packaged_call.py",
+                       root / "scripts/inspect_modal_packaged_call.py")
           installed = Path(importlib.util.find_spec("tuner").origin).resolve().parent.parent
           (root / "schemas").mkdir()
           for name in ("synaptic-packaged-sft-terminal-v1.schema.json",
@@ -1161,6 +1170,7 @@ jobs:
               str(root / "tests/runtime/test_packaged_grpo_compilation.py"),
               str(root / "tests/runtime/test_packaged_grpo_child.py"),
               str(root / "tests/runtime/test_packaged_grpo_native.py"),
+              str(root / "tests/runtime/test_grpo_closed_diagnostics.py"),
               str(root / "tests/trainers/grpo/test_packaged_artifacts.py"),
               str(root / "tests/execution/providers/test_modal_packaged_grpo_routing.py"),
               str(root / "tests/runtime/test_packaged_cpu_methods.py"),
@@ -1566,13 +1576,14 @@ jobs:
           assert version("modal") == "1.5.4"
           PY
 
-      - name: Build actual selected source wheel and verify public assets
+      - name: Verify locked launcher operators and actual source-wheel assets
         env:
           SYNAPTIC_TEST_MODAL_SOURCE_WHEEL_PYTHON: ${{ runner.temp }}/modal-source-controller/bin/python
         run: |
           "${{ steps.modal-diagnostic-python.outputs.python-path }}" -B -m pytest \
             --confcutdir=tests/execution/providers -q -p no:cacheprovider \
-            tests/execution/providers/test_modal_source_wheel_build.py
+            tests/execution/providers/test_modal_source_wheel_build.py \
+            tests/contract/test_modal_launcher_security.py
 
   conformance-gate:
     name: CPython 3.12 / pytest 8

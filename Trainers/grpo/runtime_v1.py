@@ -177,10 +177,14 @@ def build_grpo_config(config: dict, checkpoints_dir: Path, *, config_class, bf16
 
 
 def train_grpo_core(*, model, tokenizer, reward_fn, formatted_dataset,
-                    training_args, callbacks, trainer_class, resume=None):
+                    training_args, callbacks, trainer_class, resume=None, _runtime_milestone=None):
+    if _runtime_milestone is not None:
+        _runtime_milestone("TRAINER_SETUP")
     trainer = create_grpo_trainer(trainer_class=trainer_class, model=model, processing_class=tokenizer,
                             reward_funcs=reward_fn, args=training_args,
                             train_dataset=formatted_dataset, callbacks=callbacks)
+    if _runtime_milestone is not None:
+        _runtime_milestone("TRAIN_CALL")
     result = train_grpo_trainer(trainer, resume=resume)
     return trainer, result
 
@@ -418,13 +422,19 @@ def _stamp_packaged_adapter(final_model, model_ref):
 def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
              model_snapshot, model_identity, output_root, workload,
              metric_sink=None, _dependency_factory=None, _packaged_artifacts=False,
-             qualification_evidence=None, _child_deadline=None):
+             qualification_evidence=None, _child_deadline=None, _runtime_milestone=None):
     """Run the existing GRPO core with explicit immutable admitted inputs.
 
     This entry does not authenticate a public plan or attest model member
     inventory. The packaged caller must do both before invoking it.
     It never claims parameter updates or reward dispersion from step count.
     """
+    if _runtime_milestone is not None and not callable(_runtime_milestone):
+        raise ValueError("invalid private runtime milestone callback")
+    def mark(value):
+        if _runtime_milestone is not None:
+            _runtime_milestone(value)
+    mark("INPUT_ADMISSION")
     config, rows, documents, schema = admit_grpo_inputs(
         config=config, dataset_bytes=dataset_bytes, reward_documents=reward_documents,
         reward_schema=reward_schema, model_identity=model_identity, workload=workload)
@@ -437,6 +447,7 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
         if not _packaged_artifacts:
             raise ValueError("qualification measurements require packaged custody")
         measurements = _QualificationMeasurements(qualification_evidence, _child_deadline)
+    mark("REWARDS")
     from Trainers.grpo.src.rewards import build_combined_reward_function
     reward_fn, reward_plan = build_combined_reward_function(
         config['rewards'], Path('.'), documents=documents, schema_config=schema, raw_only=True)
@@ -451,17 +462,22 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
     # Owned output root creation/custody is the packaged caller's responsibility.
     if not isinstance(output_root, Path) or not output_root.is_absolute() or not output_root.is_dir():
         raise ValueError("explicit output root required")
+    mark("DEPENDENCIES")
     deps = (_dependency_factory or _dependencies)()
+    mark("CONFIG")
     args = build_grpo_config(config, output_root / 'checkpoints',
                            config_class=deps['config_class'], bf16_supported=deps['bf16_supported'])
     helper = deps['model_loader']
+    mark("MODEL_LIBRARY_LOAD")
     model, tokenizer, is_vl = helper.load_model_and_tokenizer(
         str(model_snapshot), max_seq_length=config['model']['max_seq_length'],
         dtype=config['model'].get('dtype'), load_in_4bit=config['model'].get('load_in_4bit', True),
         offline=True)
     if is_vl:
         raise ValueError("retained GRPO requires text model")
+    mark("LORA_ATTACH")
     model = helper.apply_lora_adapters(model=model, is_vision_model=False, **config['lora'])
+    mark("DATA_PREP")
     from Trainers.grpo.src.data_loader import dataset_from_rows, format_dataset_for_grpo
     dataset = dataset_from_rows(rows, dataset_class=deps['dataset_class'])
     dataset = format_dataset_for_grpo(dataset, tokenizer,
@@ -488,11 +504,15 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
             callback_class = TrainerCallback
         class Evidence(callback_class):
             def on_train_begin(self, args, state, control, model=None, **kwargs):
+                mark("MEASUREMENT_BEGIN")
                 measurements.begin(model, args)
+                mark("TRAIN_CALL")
                 return control
 
             def on_train_end(self, args, state, control, model=None, **kwargs):
+                mark("MEASUREMENT_END")
                 measurements.end(model)
+                mark("TRAIN_CALL")
                 return control
 
             def on_log(self, args, state, control, logs=None, **kwargs):
@@ -501,8 +521,11 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
         callbacks.append(Evidence())
     trainer, result = train_grpo_core(model=model, tokenizer=tokenizer, reward_fn=reward_fn,
         formatted_dataset=dataset, training_args=args, callbacks=callbacks,
-        trainer_class=deps['trainer_class'])
+        trainer_class=deps['trainer_class'],
+        **({"_runtime_milestone": mark} if _runtime_milestone is not None else {}))
+    mark("MEASUREMENT_RECORD")
     evidence = measurements.record(workload) if measurements is not None else None
+    mark("SAVE")
     final = output_root / 'final_model'
     token = output_root / 'tokenizer'
     final.mkdir(exist_ok=False)
@@ -514,6 +537,7 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
         # Save explicitly; do not depend on trainer processing_class side effects.
         tokenizer.save_pretrained(str(final))
         _stamp_packaged_adapter(final, model_identity["model_id"])
+    mark("POST_SAVE")
     metrics = {'global_step': trainer.state.global_step,
                'log_history': trainer.state.log_history,
                'train_metrics': getattr(result, 'metrics', {})}

@@ -2,7 +2,7 @@
 status: release-preparation
 scope: OSS API v1 stable workflow release
 baseline: 321a085f
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # Stable v1 release gate
@@ -28,7 +28,49 @@ pipeline compositions retain truthful backend status; no facade or CLI alone
 establishes a stable installed operational contract.
 The Python API is a library contract, not a deployed HTTP/MCP service.
 
-## Current release status — 2026-10-14
+## Current release status — 2026-10-15
+
+Main is `64683fce1005a24ad57a3d0f2ee3e54ee8c68dc3`, through merged
+[#255](https://github.com/ProfSynapse/Synaptic-Tuner/pull/255). Its tree matches
+the reviewed candidate `1da0a80891bd9c63f5635a1133275907a2f5f366`.
+No stable tag or package publication has occurred. Work resumed after the
+owner's pause; the acceptance criteria below are unchanged.
+
+- **Modal SFT:** candidate `1da0a808` completed two steps. Run
+  `modal-5163ad69c1b2e373d576b09d` subsequently passed public native verification,
+  all five artifact downloads and fresh-process retained readback. The initial
+  caller observation was indeterminate; recovery used the same known call,
+  without another submission. This does not qualify active cancellation or a
+  later source candidate.
+- **Modal GRPO:** candidate `1da0a808` failed at the trainer boundary. The exact
+  failed call's retained diagnostics do not establish its underlying cause.
+  Closed exception categories and execution milestones are under review for a
+  fresh attempt; the consumed attempt remains preserved and cannot be replayed.
+- **HF SFT:** both approved L40S jobs remained queued and were cancelled at the
+  owner's explicit pause request. Both provider states were confirmed cancelled.
+  Neither trained, and this cleanup does not qualify public active cancellation.
+  Replacement jobs require a new reviewed bounded plan and spending approval.
+- **Docker SFT:** the Windows RTX 3090 host is reachable. The candidate's image
+  passed its CPU runtime check. Pinned anonymous model preparation is admitted;
+  no GPU training or lifecycle qualification has completed.
+- **Nontraining:** the bounded Luna smoke and final-candidate cold readback are
+  retained. They establish their stated generation/evaluation behavior, not a
+  model-quality ranking. No additional model calls are planned for these fixes.
+- **Local artifact publication:** host `5473f600` with installed engine
+  `1da0a808` published the verified SFT run's five native artifacts and verified
+  their exact hashes. A fresh-process lookup returned the same publication;
+  destination/spool files and logical publication records remained unchanged.
+  Existing named Modal scope reads still occur during reader composition. This
+  establishes the caller-owned local destination, not HF repository publication
+  or execution of a later engine candidate.
+
+The next candidate combines the reviewed GRPO diagnostic change and a narrowly
+scoped launcher dependency patch. Its source closures, installed distribution,
+CI and affected live workflows must be checked before release. Historical
+evidence remains bound to its actual source; it is not relabeled as execution
+of the new candidate. The dated entries below preserve earlier checkpoints.
+
+## Earlier release status — 2026-10-14
 
 Version **1.1.0** is the intended stable package version. Its classifier records
 that intended channel, not completed acceptance. The first stable GitHub release

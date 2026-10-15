@@ -358,7 +358,7 @@
     },
     "dependency_lock": {
       "path": "requirements/modal-launcher-v1.lock",
-      "sha256": "5fec612b5e3c3a5a20a684860873d16c22020c37dc3a476ce0d8f0df6169063c"
+      "sha256": "1abcd016e539025ba6a5cb6c9009c13ea4c24269d195db475a56979e7d035586"
     },
     "deployment_wrapper": {
       "path": "tuner/execution/providers/modal/coordinator_deployment.py",

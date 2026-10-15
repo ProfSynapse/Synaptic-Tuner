@@ -128,6 +128,22 @@ _WORKER_FAILURE_STAGES = (
     "TORCH_IMPORT", "UNSLOTH_IMPORT", "TRAINER_IMPORT",
 ))
 
+# Closed wire vocabulary; no trainer import on an SFT/read-only path.
+GRPO_CHILD_FAILURE_STAGES = frozenset(
+    "TRAINER_CHILD_" + phase + "_" + category
+    for phase in ("TRANSPORT", "RELEASE", "INPUT", "IMPORT", "EXEC", "POSTCHECK")
+    for category in ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER")
+) | frozenset("TRAINER_CHILD_EXEC_" + category for category in
+              ("RUNTIME", "TYPE", "ATTRIBUTE", "KEY", "MEMORY", "TORCH_OOM", "TIMEOUT")) | frozenset(
+    "TRAINER_CHILD_EXEC_" + category + "_" + phase
+    for phase in ("INPUT_ADMISSION", "REWARDS", "DEPENDENCIES", "CONFIG", "MODEL_LIBRARY_LOAD",
+                  "LORA_ATTACH", "DATA_PREP", "TRAINER_SETUP", "TRAIN_CALL",
+                  "MEASUREMENT_BEGIN", "MEASUREMENT_END", "MEASUREMENT_RECORD", "SAVE", "POST_SAVE")
+    for category in ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER", "RUNTIME", "TYPE",
+                     "ATTRIBUTE", "KEY", "MEMORY", "TORCH_OOM", "TIMEOUT")
+)
+
+_WORKER_FAILURE_STAGES = _WORKER_FAILURE_STAGES + tuple("GRPO_" + value for value in sorted(GRPO_CHILD_FAILURE_STAGES))
 
 class DiagnosticUnavailable(RuntimeError):
     """A closed local failure; underlying exception text must not escape."""

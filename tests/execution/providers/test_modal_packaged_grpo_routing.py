@@ -224,7 +224,7 @@ def test_native_failure_never_signs_or_commits_completion(
     binding, _, _, roots, dispatch, auth = _case(tmp_path)
     change = "result=child.main()\n"
     if mutation == "exit":
-        change += "result=123\n"
+        change += "result=255\n"
     else:
         name = "training_lineage" if mutation == "lineage" else "training_metrics"
         key = "actual_steps" if mutation == "lineage" else "global_step"
@@ -409,3 +409,38 @@ def test_unsupported_trainer_override_rejects_without_child(
     )
     assert result["failure_stage"] == "GRPO_ADMISSION"
     assert not commands and not signer.calls
+
+
+def test_real_child_failure_survives_worker_reader_and_diagnostic(tmp_path, monkeypatch):
+    from tests.runtime.test_packaged_grpo_child import _BOOTSTRAP
+    from tests.training.test_modal_host_reader import _reader
+    from tests.training.test_inspect_modal_packaged_call import diagnostic, _Proto, _Result, _GenericResult
+    from tuner.training.modal_host_reader import ModalPackagedReadUnavailable
+    from tuner.execution.foundation_v2.canonical import canonical_bytes
+    from types import SimpleNamespace
+    binding, _, _, roots, dispatch, auth = _case(tmp_path)
+    injected = "\nimport unsloth\ndef reject(**kwargs): raise RuntimeError('PRIVATE_MODEL_FAILURE')\nunsloth.FastLanguageModel.from_pretrained=reject\n"
+    commands = _ports(monkeypatch, _BOOTSTRAP.replace(
+        'grpo_child_fixture.install(source)', 'grpo_child_fixture.install(source)' + injected))
+    commits = []
+    signer = Signer()
+    worker = ModalPackagedWorker(expected_facts=binding.provider_facts,
+        dispatch_verifier=auth,
+        trainer_executor=InstalledPackagedSFTTrainerExecutor(model_preparer=_prepare),
+        evidence_signer=signer, roots=roots)
+    result = worker(dispatch, provider_job_ref="fc-grpo",
+                    commit_control=lambda: commits.append("control"),
+                    commit_artifacts=lambda: commits.append("artifacts"))
+    stage = "GRPO_TRAINER_CHILD_EXEC_RUNTIME_MODEL_LIBRARY_LOAD"
+    assert result['failure_stage'] == stage
+    assert len(commands) == 1 and not signer.calls and not commits
+    assert 'PRIVATE_MODEL_FAILURE' not in str(result)
+    reader, request, _ = _reader('failed')
+    reader._facade.result = result
+    with pytest.raises(ModalPackagedReadUnavailable) as caught:
+        reader.observe(request)
+    assert caught.value.args == ('modal_packaged_call_failed_' + stage,)
+    output = SimpleNamespace(data_format=_Proto.DATA_FORMAT_PICKLE,
+        result=_Result(_GenericResult.GENERIC_STATUS_SUCCESS, canonical_bytes(result)))
+    monkeypatch.setattr(diagnostic, '_pinned_python', lambda: True)
+    assert diagnostic._classify_fixed_failure(output, _Proto, canonical_bytes) == 'WORKER_' + stage

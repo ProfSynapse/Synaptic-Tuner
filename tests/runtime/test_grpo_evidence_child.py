@@ -79,7 +79,7 @@ def test_enabled_policy_bound_rejects_child_without_native_completion(tmp_path, 
     try:
         with pytest.raises(runtime.PackagedGRPOExecutionError) as caught:
             runtime.execute_admitted_packaged_grpo(admitted, model_preparer=_prepare)
-        assert caught.value.stage == "TRAINER"
+        assert caught.value.stage == "TRAINER_CHILD_EXEC_VALUE_MEASUREMENT_BEGIN"
         assert len(commands) == 1
         assert not (admitted.paths.state / "packaged-terminal.json").exists()
         assert not list(admitted.paths.artifacts.iterdir())

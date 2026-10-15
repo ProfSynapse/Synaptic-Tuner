@@ -31,6 +31,7 @@ class ModalPackagedReadUnavailable(RuntimeError):
 
 _ARTIFACT_READ_STEP_SECONDS = 60
 _ARTIFACT_READ_TOTAL_SECONDS = 300
+
 _FIXED_WORKER_FAILURE = {
     "schema_version": "synaptic-modal-packaged-worker-result/v1",
     "effect_id": "unavailable",
@@ -96,6 +97,22 @@ _FIXED_WORKER_FAILURE_STAGES = frozenset({
     "TORCH_IMPORT", "UNSLOTH_IMPORT", "TRAINER_IMPORT",
 ))
 
+# Closed wire vocabulary; no trainer import on an SFT/read-only path.
+GRPO_CHILD_FAILURE_STAGES = frozenset(
+    "TRAINER_CHILD_" + phase + "_" + category
+    for phase in ("TRANSPORT", "RELEASE", "INPUT", "IMPORT", "EXEC", "POSTCHECK")
+    for category in ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER")
+) | frozenset("TRAINER_CHILD_EXEC_" + category for category in
+              ("RUNTIME", "TYPE", "ATTRIBUTE", "KEY", "MEMORY", "TORCH_OOM", "TIMEOUT")) | frozenset(
+    "TRAINER_CHILD_EXEC_" + category + "_" + phase
+    for phase in ("INPUT_ADMISSION", "REWARDS", "DEPENDENCIES", "CONFIG", "MODEL_LIBRARY_LOAD",
+                  "LORA_ATTACH", "DATA_PREP", "TRAINER_SETUP", "TRAIN_CALL",
+                  "MEASUREMENT_BEGIN", "MEASUREMENT_END", "MEASUREMENT_RECORD", "SAVE", "POST_SAVE")
+    for category in ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER", "RUNTIME", "TYPE",
+                     "ATTRIBUTE", "KEY", "MEMORY", "TORCH_OOM", "TIMEOUT")
+)
+
+_FIXED_WORKER_FAILURE_STAGES = _FIXED_WORKER_FAILURE_STAGES | frozenset("GRPO_" + value for value in GRPO_CHILD_FAILURE_STAGES)
 
 class ModalPackagedCoordinatorReaderV1:
     """Authenticate current Foundation evidence before any Modal read.

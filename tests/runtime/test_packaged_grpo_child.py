@@ -24,15 +24,15 @@ assert Path(child.__file__).absolute().parents[2] == source
 grp_args=sys.argv[3:]
 grpo_child_fixture.install(source)
 sys.argv=['tuner.runtime.packaged_grpo_child',*grp_args]
-classified=child._classified_failure
-def diagnose(phase,error):
+classified=child._classified_grpo_failure
+def diagnose(phase,error,milestone=None):
     locations=[]; trace=error.__traceback__
     while trace is not None:
         locations.append([Path(trace.tb_frame.f_code.co_filename).name,trace.tb_lineno])
         trace=trace.tb_next
     print(json.dumps({'phase':phase,'class':type(error).__name__,'locations':locations}),file=sys.stderr)
-    return classified(phase,error)
-child._classified_failure=diagnose
+    return classified(phase,error,milestone)
+child._classified_grpo_failure=diagnose
 result=child.main()
 payload=json.loads(Path(grp_args[1]).read_bytes())
 from tuner.runtime.packaged_sft_child import _OWNED_PREFIXES
@@ -129,7 +129,8 @@ def test_actual_selected_whole_wheel_guard_and_declared_source_filter(mutation):
     assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
 
 
-def test_child_close_failure_attempts_other_descriptors_resources_and_guard(tmp_path, monkeypatch):
+@pytest.mark.parametrize("trainer_fails", [False, True])
+def test_child_close_failure_attempts_other_descriptors_resources_and_guard(tmp_path, monkeypatch, trainer_fails):
     injected = '''
 import os
 payload_for_fault=json.loads(Path(grp_args[1]).read_bytes())
@@ -157,12 +158,17 @@ assert not any(type(item).__name__ == '_OwnedImportGuard' for item in sys.meta_p
 Path(payload_for_fault['paths']['tracking'],'cleanup-control.json').write_text(json.dumps({'closed':True,'resources':len(resource_paths)}))
 '''
     bootstrap = _BOOTSTRAP.replace("result=child.main()", injected)
+    if trainer_fails:
+        bootstrap = bootstrap.replace("grpo_child_fixture.install(source)",
+            "grpo_child_fixture.install(source)\nimport unsloth\n"
+            "def fail_model(**kwargs): raise ValueError('PRIVATE_TRAINER_FAILURE')\n"
+            "unsloth.FastLanguageModel.from_pretrained=fail_model")
     admitted, _ = material(tmp_path)
     commands = _ports(monkeypatch, bootstrap)
     try:
         with pytest.raises(runtime.PackagedGRPOExecutionError) as caught:
             runtime.execute_admitted_packaged_grpo(admitted, model_preparer=_prepare)
-        assert caught.value.stage == "TRAINER"
+        assert caught.value.stage == "TRAINER_CHILD_POSTCHECK_OTHER"
         assert len(commands) == 1
         assert json.loads((admitted.paths.tracking / "cleanup-control.json").read_bytes())["closed"]
         assert not (admitted.paths.state / "packaged-terminal.json").exists()

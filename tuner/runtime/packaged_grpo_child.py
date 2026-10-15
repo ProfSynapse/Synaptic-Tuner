@@ -10,8 +10,8 @@ import time
 from types import SimpleNamespace
 
 from tuner.runtime import packaged_sft_execution as shared
-from tuner.runtime.packaged_sft_child import _classified_failure, _installed_import_guard, _metric_sink_for_fd
-from tuner.runtime.packaged_grpo_execution import _CHILD_SCHEMA, _admit_contracts, _admit_dataset, _invocation_spec, _model
+from tuner.runtime.packaged_sft_child import _installed_import_guard, _metric_sink_for_fd
+from tuner.runtime.packaged_grpo_execution import _CHILD_SCHEMA, _admit_contracts, _admit_dataset, _invocation_spec, _model, _classified_grpo_failure, GRPO_RUNTIME_MILESTONES
 from tuner.runtime.releases import PackagedExecutionBindingV1, ProviderRuntimeBindingV1, parse_packaged_runtime_release
 from tuner.training.contracts import ArtifactPolicy
 
@@ -53,7 +53,10 @@ def _metric_sink(descriptor, maximum, total_steps):
     return emit
 
 
-def _run(argv, phase):
+def _run(argv, phase, runtime_milestone=None):
+    def mark(value):
+        if runtime_milestone is not None:
+            runtime_milestone[0] = value if type(value) is str and value in GRPO_RUNTIME_MILESTONES else None
     args = tuple(sys.argv[1:] if argv is None else argv)
     if (not sys.flags.isolated or len(args) != 4 or args[0] != "--transport"
             or args[2] != "--digest"):
@@ -124,7 +127,7 @@ def _run(argv, phase):
         run_grpo(config=core["config"], dataset_bytes=content,
             reward_documents=core["reward_documents"], reward_schema=core["reward_schema"],
             model_snapshot=retained.snapshot, model_identity=core["model"], output_root=output.path,
-            workload=core, metric_sink=sink, _packaged_artifacts=True,
+            workload=core, metric_sink=sink, _packaged_artifacts=True, _runtime_milestone=mark,
             **({"qualification_evidence": compiled.document["limits"]["qualification_evidence"],
                 "_child_deadline": deadline}
                if "qualification_evidence" in compiled.document["limits"] else {}))
@@ -155,11 +158,12 @@ def _run(argv, phase):
 
 def main():
     phase = ["TRANSPORT"]
+    milestone = [None]
     try:
-        return _run(None, phase)
+        return _run(None, phase, milestone)
     except BaseException as error:
         print("PACKAGED_GRPO_CHILD_REJECTED", file=sys.stderr)
-        return _classified_failure(phase[0], error).exit_code
+        return _classified_grpo_failure(phase[0], error, milestone[0]).exit_code
 
 
 if __name__ == "__main__":
