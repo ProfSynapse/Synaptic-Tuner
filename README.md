@@ -1,7 +1,7 @@
 # HF SFT qualification host fixture
 
 This dedicated host branch is not an engine PR. Its engine Gitlink is exactly
-91c4bbb2272e91b92f3b7c8169dfe725e0fa4e22, with the actual pushed
+ac5581a8ee442ec7692bb152c3c5e0c299838ab2, with the actual pushed
 `release/stable-diagnostics-integration` branch hint. Verify its actual public
 branch HEAD before authenticating a new source proof. Do not substitute `main`
 for this exact selected source.
