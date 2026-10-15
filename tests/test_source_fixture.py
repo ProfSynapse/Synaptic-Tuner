@@ -60,7 +60,7 @@ class ConsumerSourceTests(unittest.TestCase):
         self.assertEqual(source.engine_source.commit, PIN)
         self.assertEqual(source.engine_source.gitlink_commit, PIN)
         self.assertEqual(source.engine_source.submodule_path, "synaptic-tuner")
-        self.assertEqual(source.engine_source.branch, "release/stable-candidate-integration")
+        self.assertEqual(source.engine_source.branch, "release/stable-diagnostics-integration")
         self.assertFalse(source.project_source.dirty)
         self.assertFalse(source.engine_source.dirty)
         self.assertFalse(source.project_source.pushed)
