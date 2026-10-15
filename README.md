@@ -1,8 +1,8 @@
 # HF SFT qualification host fixture
 
 This dedicated host branch is not an engine PR. Its engine Gitlink is exactly
-ac5581a8ee442ec7692bb152c3c5e0c299838ab2, with the actual pushed
-`release/stable-diagnostics-integration` branch hint. Verify its actual public
+038a62984a4745574d1eaf739a77272a62bb6deb, with the actual pushed
+`release/stable-qualification-fixes` branch hint. Verify its actual public
 branch HEAD before authenticating a new source proof. Do not substitute `main`
 for this exact selected source.
 The host itself must be reviewed/pushed and its exact branch verified before
@@ -51,14 +51,20 @@ bucket CLI refused before provider access due to optional transformers import;
 no dependencies/runtime workaround was added. Official pinned hf buckets list
 was used instead, with named credentials through explicit dotenv CLI.
 
-No Job, bucket creation/upload, model download, image build or paid training was
-performed. Existing capability defaults and lost-reply/no-replay rules remain.
+This host fixture does not itself execute jobs, upload buckets, download models
+or authorize training. Earlier consumed attempts are retained separately and do
+not qualify this source. Existing capability defaults and no-replay rules remain.
 
 This candidate rebind preserves the original 7df0a0bf host history and exact
-eight authored rows. The current engine includes the reviewed source-preparation union, bootstrap
-provenance correction, Linux builder isolation and intended stable metadata.
+eight authored rows. The current engine includes shared prepared-SFT validation, finite ordinary-HF
+failure exits and raw command-argument transport, plus the installed metrics
+source-planning correction. Explicit bf16/fp16 keys are absent: this fixture uses
+the trainer's existing adaptive precision behavior, rather than claiming an
+explicit portable precision control. Raw packing remains false.
 The selected package version remains 1.1.0; final qualification is still pending. Verify its
 actual pushed branch and this host ref before source authentication. CI and live
 qualification are separate; this fixture alone grants no effects. Owner selected private professorsynapse/toolset-training-artifacts, but no job/upload/model download is authorized by this host. Fresh local source/authority/reader keys and caller config remain private, outside tracked files.
 
-The fresh 2026-10-15 proposal retains separate completion and cancellation attempts. Both descriptors opt into cancellation before plan for bounded queued cleanup: after a 15-minute queue cutoff, either queued job may receive one cancellation command, with at most one per known job total. A queued cleanup is not active-cancellation qualification. Publishing this host does not itself grant spending or execution authority. Earlier consumed attempts remain preserved.
+The fresh 2026-10-15 replacement proposal is sequential: complete and natively
+verify the three-step job before submitting the separate 32-step cancellation
+job. Stop the remaining unused scope if completion fails or is indeterminate. Both descriptors opt into cancellation before plan for bounded queued cleanup: after a 15-minute queue cutoff, either queued job may receive one cancellation command, with at most one per known job total. A queued cleanup is not active-cancellation qualification. Publishing this host does not itself grant spending or execution authority. Earlier consumed attempts remain preserved.
