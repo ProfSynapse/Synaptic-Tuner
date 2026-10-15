@@ -1,6 +1,6 @@
 # Final Modal SFT qualification host
 
-The genuine engine gitlink selects `af1cb98912cfbb446101526d41285ac39e54b034`
+The genuine engine gitlink selects `864a9bccbc8bd866c56c021c131f12959f8a8649`
 on `release/stable-qualification-fixes`. This branch is a consuming host fixture;
 it must not be merged into the engine's main branch.
 
