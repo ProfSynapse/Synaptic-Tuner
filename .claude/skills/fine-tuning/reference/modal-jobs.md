@@ -1435,6 +1435,12 @@ model qualification. Source/runtime
 and live qualification gates still apply; version agreement is not proof of a
 successful deployment. See [Modal's serialized-function guidance](https://modal.com/docs/guide/jupyter-notebooks#known-issues).
 
+The launcher pins `multidict==6.9.1` for the reviewed CPython 3.11 Linux wheel.
+The existing locked-controller CI checks its bounded items-view regression.
+This changes neither captured runtime inventories nor their older multidict
+versions. See the repository's `docs/review/modal-launcher-dependency-security.md`
+for the launcher evidence, offline-path limits and separate pytest advisory.
+
 ## Read-only training rate observation
 
 Use the named SDK profile explicitly when observing current training rates:

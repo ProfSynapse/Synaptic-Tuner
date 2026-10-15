@@ -81,6 +81,7 @@ on:
       - "tests/cloud/test_vllm_setup.py"
       - "tests/cloud/test_cloud_hf_job_vllm.py"
       - "tests/contract/test_modal_optional_dependency.py"
+      - "tests/contract/test_modal_launcher_security.py"
       - "tests/contract/test_modal_runtime_lock*.py"
       - "tests/contract/test_modal_bootstrap_closure.py"
       - "tests/contract/test_offline_sft_worker_closure.py"
@@ -1566,13 +1567,14 @@ jobs:
           assert version("modal") == "1.5.4"
           PY
 
-      - name: Build actual selected source wheel and verify public assets
+      - name: Verify locked launcher operators and actual source-wheel assets
         env:
           SYNAPTIC_TEST_MODAL_SOURCE_WHEEL_PYTHON: ${{ runner.temp }}/modal-source-controller/bin/python
         run: |
           "${{ steps.modal-diagnostic-python.outputs.python-path }}" -B -m pytest \
             --confcutdir=tests/execution/providers -q -p no:cacheprovider \
-            tests/execution/providers/test_modal_source_wheel_build.py
+            tests/execution/providers/test_modal_source_wheel_build.py \
+            tests/contract/test_modal_launcher_security.py
 
   conformance-gate:
     name: CPython 3.12 / pytest 8
