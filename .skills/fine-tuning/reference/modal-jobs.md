@@ -1922,3 +1922,9 @@ fresh public observation and require actual pending before a separately requeste
 existing public cancel. No logs promotion, new grants, provider calls or automatic
 cancellation are supplied by this supervisor. Natural races/unknowns remain
 inconclusive; acknowledgment alone is not observed termination.
+
+Installed metrics launchers observe the explicitly selected clean engine checkout.
+Normal build/profile/source-policy checks still apply, and local Git observation
+does not replace the separate pushed-source authority required for execution.
+Inspect the planning JSON and actual canonical admission file/revalidation; an
+exit status alone does not establish successful candidate creation.

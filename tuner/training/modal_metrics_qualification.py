@@ -9,7 +9,6 @@ from pathlib import Path
 import re
 import json
 import stat
-import subprocess
 
 from synaptic_tuner.api.v1._contract import canonical_bytes as observation_bytes
 from synaptic_tuner.api.v1.observations import ObservationKind
@@ -58,30 +57,11 @@ class MetricsQualificationUnavailable(RuntimeError):
 
 
 def current_clean_commit(root: Path) -> str:
+    """Observe the explicit normal build source, never installed-package location."""
     try:
-        if root.resolve(strict=True) != Path(__file__).resolve().parents[2]:
-            raise ValueError
-        head = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
-            capture_output=True,
-            timeout=30,
-            check=False,
-        )
-        status = subprocess.run(
-            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
-            capture_output=True,
-            timeout=30,
-            check=False,
-        )
-        commit = head.stdout.decode("ascii").strip()
-        if (
-            head.returncode
-            or status.returncode
-            or status.stdout
-            or re.fullmatch("[0-9a-f]{40}", commit) is None
-        ):
-            raise ValueError
-        return commit
+        from tuner.execution.providers.modal.runtime_build import current_clean_source_commit
+
+        return current_clean_source_commit(root)
     except Exception:
         raise MetricsQualificationUnavailable() from None
 

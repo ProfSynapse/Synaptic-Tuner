@@ -28,6 +28,7 @@ on:
       - "tests/training/test_modal_recipe.py"
       - "tests/training/test_modal_cold_cancellation.py"
       - "tests/training/test_modal_lifecycle_supervisor.py"
+      - "tests/training/test_modal_metrics_qualification.py"
       - "examples/training_qualification/modal_lifecycle.py"
       - "tests/training/test_modal_cold_cancellation_process.py"
       - "tests/runtime/test_packaged_cpu_parent_diagnostics.py"
@@ -565,6 +566,7 @@ jobs:
           import shutil
           import sys
           import synaptic_tuner.api.v1.observations as observations
+          import tuner.training.modal_metrics_qualification as metrics_qualification
           import tuner.training.modal_run_retention as retention
           import tuner.training.modal_standalone_runner as runner
           import tuner.training.modal_retained_reader as retained_reader
@@ -584,7 +586,7 @@ jobs:
           import tuner.execution.providers.modal.facade as modal_facade
 
           checkout = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
-          for module in (observations, retention, runner, sqlite_store, retained_reader, runs_handler, recipe, prepared_copy, grpo_preparation, runtime_build, local_preparation, host_requests, runtime_profiles, build_inspector, host_runtime, job_handler, host_reader, modal_facade):
+          for module in (observations, metrics_qualification, retention, runner, sqlite_store, retained_reader, runs_handler, recipe, prepared_copy, grpo_preparation, runtime_build, local_preparation, host_requests, runtime_profiles, build_inspector, host_runtime, job_handler, host_reader, modal_facade):
               location = Path(module.__file__).resolve()
               assert not location.is_relative_to(checkout), location
               assert location.is_relative_to(Path(sys.prefix)), location
@@ -610,6 +612,8 @@ jobs:
               "training/test_modal_terminal_status_reader.py",
               "training/test_modal_cold_cancellation.py",
               "training/test_modal_lifecycle_supervisor.py",
+              "training/test_modal_metrics_qualification.py",
+              "training/test_run_progress_consumer.py",
               "execution/coordinator_v1/test_state_machine.py",
               "execution/providers/test_modal_packaged_binding.py",
               "execution/providers/test_modal_packaged_dispatch.py",
@@ -681,6 +685,7 @@ jobs:
               str(root / "tests/training/test_modal_terminal_status_reader.py"),
               str(root / "tests/training/test_modal_cold_cancellation.py"),
               str(root / "tests/training/test_modal_lifecycle_supervisor.py"),
+              str(root / "tests/training/test_modal_metrics_qualification.py"),
               str(root / "tests/training/test_modal_method_preparation.py"),
               str(root / "tests/training/test_modal_source_handoff.py"),
               str(root / "tests/training/test_modal_grpo_recipe.py"),

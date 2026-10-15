@@ -4,6 +4,8 @@ from dataclasses import replace
 import hashlib
 import json
 from types import SimpleNamespace
+from pathlib import Path
+import subprocess
 import os
 
 import pytest
@@ -114,7 +116,7 @@ def test_untrusted_admission_leaves_reject_without_blocking(root, kind):
         load_admission(path, "a" * 64)
 
 
-def test_actual_engine_root_must_match_package_source(root):
+def test_non_git_source_root_is_closed(root):
     with pytest.raises(MetricsQualificationUnavailable):
         current_clean_commit(root)
 
@@ -652,3 +654,166 @@ def test_later_canonical_conflict_invalidates_proof(root):
     ledger.compare_retained(consumer)
     assert consumer.status == "progress_sequence_conflict"
     assert ledger.finish(verified=True)["delivery_verdict"] == "evidence_invalid"
+
+
+def git_source(parent, name):
+    source = parent / name
+    source.mkdir()
+    (source / "tracked.txt").write_text(name)
+    for args in (
+        ["init", "-q"],
+        ["add", "tracked.txt"],
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "source fixture",
+        ],
+    ):
+        subprocess.run(
+            ["git", "-C", str(source), *args],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+    head = (
+        subprocess.run(
+            ["git", "-C", str(source), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        .stdout.decode()
+        .strip()
+    )
+    return source, head
+
+
+def test_explicit_separate_clean_git_source_is_accepted(root):
+    import tuner.training.modal_metrics_qualification as metrics
+
+    source, head = git_source(root, "source")
+    assert source.resolve() != Path(metrics.__file__).resolve().parents[2]
+    assert current_clean_commit(source) == head
+    (source / "tracked.txt").write_text("tracked change")
+    with pytest.raises(MetricsQualificationUnavailable) as caught:
+        current_clean_commit(source)
+    assert str(caught.value) == "modal_metrics_qualification_unavailable"
+    assert caught.value.__suppress_context__
+
+
+def test_real_git_admission_revalidation_rejects_other_source_and_tracked_changes(
+    tmp_path, monkeypatch
+):
+    from tests.training.test_modal_standalone_runner import _setup
+    from tuner.training.modal_metrics_qualification import candidate_admission
+
+    plan, context, events = _setup(
+        tmp_path / "project", monkeypatch, capture=True, metrics_qualification=True
+    )
+    actual = current_clean_commit(context.engine_root)
+    raw = candidate_admission(
+        plan,
+        engine_commit=actual,
+        attempt_ref="real-source",
+        modal_profile="fixture",
+        modal_environment="main",
+        account_ref="workspace",
+        workspace_ref="workspace",
+    )
+    bound = MetricsQualificationAdmission(raw, hashlib.sha256(raw).hexdigest())
+    bound.validate_plan(
+        plan, context=context, modal_profile="fixture", modal_environment="main"
+    )
+    other, _ = git_source(tmp_path, "different-source")
+    with pytest.raises(MetricsQualificationUnavailable):
+        bound.validate_plan(
+            plan,
+            context=replace(context, engine_root=other),
+            modal_profile="fixture",
+            modal_environment="main",
+        )
+    inspector = context.engine_root / "tuner/runtime/modal_build_inspector.py"
+    inspector.write_bytes(inspector.read_bytes() + b"\n# tracked mutation\n")
+    with pytest.raises(MetricsQualificationUnavailable):
+        bound.validate_plan(
+            plan, context=context, modal_profile="fixture", modal_environment="main"
+        )
+    assert events == []
+
+
+def test_normal_cli_creates_and_revalidates_metrics_candidate_from_explicit_git_source(
+    tmp_path, monkeypatch, capsys
+):
+    from argparse import Namespace
+    import yaml
+    from tests.training.test_modal_standalone_runner import _setup
+    from tuner.cli.router import route_command
+    from tuner.training.modal_recipe import plan_modal_sft_recipe
+    import tuner.training.modal_metrics_qualification as metrics
+
+    plan, context, events = _setup(
+        tmp_path / "project", monkeypatch, capture=True, metrics_qualification=True
+    )
+    assert context.engine_root.resolve() != Path(metrics.__file__).resolve().parents[2]
+    recipe = yaml.safe_load(
+        Path("Trainers/recipes/qwen35_4b_32k_modal_prompt_completion.yaml").read_text()
+    )
+    recipe["dataset"]["local_file"] = plan.recipe.dataset_locator
+    recipe["dataset"]["expected_digest"] = plan.recipe.dataset_digest
+    recipe["dataset"]["expected_split_counts"] = {
+        "train": plan.recipe.train_rows,
+        "validation": plan.recipe.validation_rows,
+    }
+    recipe["job"]["timeout_seconds"] = 900
+    recipe["observation_capture"] = {
+        "schema_version": "synaptic-training-observation-capture/v1",
+        "every_n_steps": 1,
+        "max_records": 10,
+    }
+    path = context.engine_root / "metrics-recipe.yaml"
+    path.write_text(yaml.safe_dump(recipe))
+    output = tmp_path / "private-admission"
+    output.mkdir(mode=0o700)
+    target = output / "admission.json"
+    args = Namespace(
+        command="train",
+        job_config=str(path),
+        plan=True,
+        json=True,
+        modal_profile="fixture",
+        modal_environment="main",
+        metrics_qualification_attempt="installed-source-metrics",
+        qualification_account="workspace",
+        qualification_workspace="workspace",
+        qualification_output=str(target),
+    )
+    assert route_command(args, context=context) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["success"] is True
+    issued = result["data"]["metrics_qualification_candidate"]
+    bound = load_admission(target, issued["sha256"])
+    actual_plan = plan_modal_sft_recipe(
+        path,
+        project_root=context.project_root,
+        profiles_root=context.engine_root / "Trainers/runtime_profiles",
+        source_root=context.engine_root,
+    )
+    bound.validate_plan(
+        actual_plan, context=context, modal_profile="fixture", modal_environment="main"
+    )
+    assert bound.document["engine_commit"] == current_clean_commit(context.engine_root)
+    assert target.stat().st_mode & 0o777 == 0o600
+    changed = {**bound.document, "engine_commit": "0" * 40}
+    mismatch = admission(changed)
+    with pytest.raises(MetricsQualificationUnavailable):
+        mismatch.validate_plan(
+            actual_plan,
+            context=context,
+            modal_profile="fixture",
+            modal_environment="main",
+        )
+    assert events == []
