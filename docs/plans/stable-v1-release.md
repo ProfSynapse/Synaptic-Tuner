@@ -56,6 +56,13 @@ owner's pause; the acceptance criteria below are unchanged.
 - **Nontraining:** the bounded Luna smoke and final-candidate cold readback are
   retained. They establish their stated generation/evaluation behavior, not a
   model-quality ranking. No additional model calls are planned for these fixes.
+- **Local artifact publication:** host `5473f600` with installed engine
+  `1da0a808` published the verified SFT run's five native artifacts and verified
+  their exact hashes. A fresh-process lookup returned the same publication;
+  destination/spool files and logical publication records remained unchanged.
+  Existing named Modal scope reads still occur during reader composition. This
+  establishes the caller-owned local destination, not HF repository publication
+  or execution of a later engine candidate.
 
 The next candidate combines the reviewed GRPO diagnostic change and a narrowly
 scoped launcher dependency patch. Its source closures, installed distribution,
