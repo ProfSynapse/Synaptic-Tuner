@@ -1216,22 +1216,16 @@ class TrainerRunner(Protocol):
     def run(self, invocation: TrainerInvocation) -> TrainerEvidence: ...
 
 
-def build_trainer_invocation(
-    workload: object,
-    roots: RuntimeRoots,
-    environment: Mapping[str, str],
-) -> TrainerInvocation:
-    document = workload.document
-    config = document["configuration"]["document"]
-    model = config["model"]
-    dataset = config["dataset"]
-    sft = config["sft"]
-    if not all(isinstance(value, Mapping) for value in (model, dataset, sft)):
+def validate_sft_runtime_controls(
+    sft: Mapping[str, object], dataset: Mapping[str, object], *, require_complete: bool = True,
+) -> None:
+    """Validate controls supported by the portable SFT trainer without I/O."""
+    if not all(isinstance(value, Mapping) for value in (dataset, sft)):
         raise RuntimeV1Error("resolved SFT configuration is malformed")
     unknown = set(sft) - _SFT_KEYS
     if unknown:
         raise RuntimeV1Error("resolved SFT configuration contains unsupported keys")
-    missing = _REQUIRED_SFT_KEYS - set(sft)
+    missing = _REQUIRED_SFT_KEYS - set(sft) if require_complete else set()
     if missing:
         raise RuntimeV1Error("resolved SFT configuration is not fully specified")
     present_prepared_keys = _MESSAGE_SFT_KEYS & set(sft)
@@ -1239,22 +1233,25 @@ def build_trainer_invocation(
     dataset_claims_messages = dataset.get("format") in {"syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"}
     if dataset_claims_raw:
         if (
-            present_prepared_keys != _PREPARED_SFT_KEYS
+            not _PREPARED_SFT_KEYS <= present_prepared_keys
             or sft.get("dataset_format") != "raw_text"
         ):
             raise RuntimeV1Error(
                 "runtime v1 raw-text configuration must bind every raw dataset field"
             )
-        if dataset.get("format") != "syntunia-sft-row/v1":
-            raise RuntimeV1Error(
-                "runtime v1 raw-text dataset must declare syntunia-sft-row/v1"
-            )
+        # Raw text does not render messages or use the message-only loss guard.
+        # Legacy four-field controls keep their original wire representation;
+        # optional fields must explicitly match the trainer's actual behavior.
+        for key, expected in (("packing", False), ("prompt_render", "full_conversation"),
+                              ("require_memory_efficient_loss", False)):
+            if key in sft and (type(sft[key]) is not type(expected) or sft[key] != expected):
+                raise RuntimeV1Error("runtime v1 raw-text optional controls are unsupported")
         for key in ("completion_only_loss", "assistant_only_loss", "use_preassigned_splits"):
-            if not isinstance(sft[key], bool):
+            if type(sft[key]) is not bool:
                 raise RuntimeV1Error(f"{key} must be a boolean")
         if sft["completion_only_loss"] or sft["assistant_only_loss"]:
             raise RuntimeV1Error("runtime v1 raw-text training requires full-sequence loss")
-        if not sft["use_preassigned_splits"] or sft["split_dataset"]:
+        if not sft["use_preassigned_splits"] or sft.get("split_dataset") is not False:
             raise RuntimeV1Error(
                 "runtime v1 raw-text training requires only preassigned splits"
             )
@@ -1270,7 +1267,7 @@ def build_trainer_invocation(
             "packing",
             "require_memory_efficient_loss",
         ):
-            if not isinstance(sft[key], bool):
+            if type(sft[key]) is not bool:
                 raise RuntimeV1Error(f"{key} must be a boolean")
         if (
             sft.get("dataset_format") != "messages"
@@ -1278,7 +1275,7 @@ def build_trainer_invocation(
             or not sft["completion_only_loss"]
             or sft["assistant_only_loss"]
             or not sft["use_preassigned_splits"]
-            or sft["split_dataset"]
+            or sft.get("split_dataset") is not False
             or sft["packing"]
             or not sft["require_memory_efficient_loss"]
         ):
@@ -1293,6 +1290,21 @@ def build_trainer_invocation(
         )
     if "chat_template_kwargs" in sft:
         _validated_chat_template_kwargs(sft)
+
+
+def build_trainer_invocation(
+    workload: object,
+    roots: RuntimeRoots,
+    environment: Mapping[str, str],
+) -> TrainerInvocation:
+    document = workload.document
+    config = document["configuration"]["document"]
+    model = config["model"]
+    dataset = config["dataset"]
+    sft = config["sft"]
+    if not isinstance(model, Mapping):
+        raise RuntimeV1Error("resolved SFT configuration is malformed")
+    validate_sft_runtime_controls(sft, dataset)
     model_revision = model.get("revision")
     if model.get("tokenizer_revision") != model_revision:
         raise RuntimeV1Error("runtime v1 requires one exact model/tokenizer snapshot")

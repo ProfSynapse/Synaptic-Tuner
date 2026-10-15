@@ -413,3 +413,32 @@ def test_slice_e_must_resolve_and_validate_provider_binding_before_dispatch(tmp_
     # identity must fail the required adapter check before its dispatch call.
     with pytest.raises(ValueError, match="cross-binding"):
         unresolved.validate_bindings(release, selected)
+
+
+@pytest.mark.parametrize("override", [{"packing": True}, {"prompt_render": "prompt_completion"},
+                                      {"require_memory_efficient_loss": True}])
+def test_public_raw_controls_refuse_unhonored_options(override):
+    _, components = packaged_fixture()
+    value = components.resolved_config.to_dict()
+    value["dataset"]["format"] = "syntunia-sft-row/v1"
+    value["sft"].update(dataset_format="raw_text", completion_only_loss=False,
+                        assistant_only_loss=False, packing=False,
+                        prompt_render="full_conversation", require_memory_efficient_loss=False)
+    value["sft"].update(override)
+    with pytest.raises(ValueError, match="prepared SFT controls"):
+        compile_packaged_sft_workload(resolved_config=CanonicalDocument.from_mapping(value))
+
+
+def test_public_typed_raw_seven_controls_roundtrip_and_compile():
+    public, components = packaged_fixture()
+    value = public.to_dict()
+    value["hyperparameters"].update(dataset_format="raw_text", completion_only_loss=False,
+        assistant_only_loss=False, packing=False, prompt_render="full_conversation",
+        require_memory_efficient_loss=False)
+    typed = TrainingInputV1.from_dict(value)
+    assert typed.to_dict() == value
+    config = components.resolved_config.to_dict()
+    config["dataset"]["format"] = "syntunia-sft-row/v1"
+    config["sft"] = typed.to_dict()["hyperparameters"]
+    compiled = compile_packaged_sft_workload(resolved_config=CanonicalDocument.from_mapping(config))
+    assert compiled.document["configuration"]["document"]["sft"] == config["sft"]

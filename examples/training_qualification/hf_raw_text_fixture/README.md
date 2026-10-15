@@ -28,3 +28,8 @@ and the 2,821-byte original JSONL has SHA256
 The configuration selects a compatible named Qwen SFT profile and three bounded
 steps. This fixture and compiler proof do not qualify HF hardware, the image,
 model quality, or an actual parameter update.
+
+The SFT fixture uses the existing trainer's automatic precision selection. It does
+not request BF16 or FP16 through the public SFT configuration: those keys are not
+supported SFT controls. The pinned trainer selects its existing capability-based
+precision defaults. Packing is explicitly disabled.

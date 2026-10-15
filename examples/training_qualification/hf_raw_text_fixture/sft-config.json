@@ -41,8 +41,6 @@
     "completion_only_loss": false,
     "assistant_only_loss": false,
     "use_preassigned_splits": true,
-    "packing": false,
-    "bf16": true,
-    "fp16": false
+    "packing": false
   }
 }

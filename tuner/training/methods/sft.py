@@ -172,6 +172,15 @@ def compile_sft_workload(
     method_config = config.get("sft")
     if not isinstance(method_config, Mapping):
         raise TypeError("sft must be a mapping")
+    if dataset.get("format") in _PREPARED_DATASET_FORMATS:
+        # The legacy custom-format compiler remains extensible. Authoritative
+        # prepared formats must use controls the actual portable trainer honors.
+        from Trainers.sft.runtime_v1 import RuntimeV1Error, validate_sft_runtime_controls
+
+        try:
+            validate_sft_runtime_controls(method_config, dataset, require_complete=False)
+        except RuntimeV1Error:
+            raise ValueError("prepared SFT controls are unsupported by the runtime") from None
     if dataset.get("format") == "synaptic-conversation-sft-row/v1":
         required = {"dataset_format": "messages", "completion_only_loss": True,
                     "assistant_only_loss": False, "use_preassigned_splits": True,
