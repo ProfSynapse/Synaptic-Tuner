@@ -5,6 +5,8 @@ import subprocess
 import sys
 import unittest
 import json
+import shutil
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "synaptic-tuner"
@@ -68,7 +70,15 @@ class ConsumerSourceTests(unittest.TestCase):
         from tuner.dataset_prep import snapshot_prepared_dataset_v1
         digest = "7aa26aba079ac1210466c5c2cdf747f00c764b5bc4ed366e2f67af7ffa0d3770"
         publication = ROOT / "data/hf-sft-v1/prepared" / ("dataset-" + digest)
-        verified, raw = snapshot_prepared_dataset_v1(publication)
+        # Git retains original bytes, not private publication permission modes.
+        # Admit an exact test-owned copy without changing historical evidence.
+        with tempfile.TemporaryDirectory() as temporary:
+            private_publication = Path(temporary) / publication.name
+            shutil.copytree(publication, private_publication)
+            for member in private_publication.rglob("*"):
+                member.chmod(0o700 if member.is_dir() else 0o600)
+            private_publication.chmod(0o700)
+            verified, raw = snapshot_prepared_dataset_v1(private_publication)
         self.assertEqual(verified.semantic_identity.dataset_digest, digest)
         self.assertEqual(len(raw), 2821)
         rows = [json.loads(line) for line in raw.decode().splitlines()]
