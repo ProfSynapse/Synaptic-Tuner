@@ -388,11 +388,25 @@ def test_provider_verifies_bound_raw_text_semantics() -> None:
     assert _verify_current(workload, inventory, reader, values).status is VerificationStatus.VERIFIED
 
 
+def test_compiler_rejects_raw_dataset_schema_without_bound_controls() -> None:
+    with pytest.raises(ValueError, match="prepared SFT controls are unsupported"):
+        _runtime_workload(raw_dataset_without_controls=True)
+
+
 def test_provider_rejects_raw_dataset_schema_without_bound_controls() -> None:
-    workload, inventory, reader, values = _fixture(
-        raw_dataset_without_controls=True
-    )
-    assert _verify_current(workload, inventory, reader, values).status is VerificationStatus.INVALID
+    workload, inventory, reader, values = _fixture(raw_text=True)
+    # Begin with genuinely compiled raw controls, then model an untrusted
+    # provider artifact that omits them. Compilation must not manufacture this
+    # malformed workload simply to reach verification.
+    wrapper = json.loads(values["training_lineage.json"])
+    evidence = wrapper["execution_evidence"]
+    for field in ("dataset_format", "completion_only_loss", "assistant_only_loss", "use_preassigned_splits"):
+        evidence["sft"].pop(field)
+    wrapper["execution_evidence_sha256"] = hashlib.sha256(_canonical(evidence)).hexdigest()
+    values["training_lineage.json"] = _canonical(wrapper)
+    report = _verify_current(workload, inventory, reader, values)
+    assert report.status is VerificationStatus.INVALID
+    assert {item.code: item.passed for item in report.semantic_checks}["lineage_binds_workload"] is False
 
 
 @pytest.mark.parametrize(
