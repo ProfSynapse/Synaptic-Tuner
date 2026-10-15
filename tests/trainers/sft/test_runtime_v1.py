@@ -628,14 +628,15 @@ def test_runtime_32k_messages_bind_no_packing_completion_loss_and_guard(tmp_path
 def test_runtime_authoritative_messages_fail_closed_with_stable_error(
     tmp_path, overrides
 ):
-    workload, environment, engine_file, _, _ = _fixture(
-        tmp_path, message_sft_overrides=overrides
-    )
-    _, roots = runtime_v1.decode_and_validate_workload(
-        workload.canonical_bytes, environment, engine_file=engine_file
-    )
+    with pytest.raises(ValueError, match="prepared SFT controls"):
+        _fixture(tmp_path / "compiler-refusal", message_sft_overrides=overrides)
+    workload, environment, engine_file, _, _ = _fixture(tmp_path / "runtime-refusal", message_sft_overrides={})
+    _, roots = runtime_v1.decode_and_validate_workload(workload.canonical_bytes, environment, engine_file=engine_file)
+    document = deepcopy(workload.document)
+    document["configuration"]["document"]["sft"].update(overrides)
     with pytest.raises(RuntimeV1Error, match="authoritative messages require"):
-        runtime_v1.build_trainer_invocation(workload, roots, environment)
+        runtime_v1.build_trainer_invocation(SimpleNamespace(document=document), roots, environment)
+
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="sealed memfd requires Linux")
@@ -928,25 +929,29 @@ def test_worker_rejects_contradictory_runtime_raw_text_controls(
     ],
 )
 def test_runtime_rejects_incoherent_raw_text_configuration(tmp_path, overrides, message):
-    workload, environment, engine_file, _, _ = _fixture(
-        tmp_path, raw_sft_overrides=overrides
-    )
-    _, roots = runtime_v1.decode_and_validate_workload(
-        workload.canonical_bytes, environment, engine_file=engine_file
-    )
+    with pytest.raises(ValueError, match="prepared SFT controls"):
+        _fixture(tmp_path / "compiler-refusal", raw_sft_overrides=overrides)
+    workload, environment, engine_file, _, _ = _fixture(tmp_path / "runtime-refusal", raw_sft_overrides={})
+    _, roots = runtime_v1.decode_and_validate_workload(workload.canonical_bytes, environment, engine_file=engine_file)
+    document = deepcopy(workload.document)
+    document["configuration"]["document"]["sft"].update(overrides)
     with pytest.raises(RuntimeV1Error, match=message):
-        runtime_v1.build_trainer_invocation(workload, roots, environment)
+        runtime_v1.build_trainer_invocation(SimpleNamespace(document=document), roots, environment)
+
 
 
 def test_runtime_rejects_raw_dataset_schema_without_bound_controls(tmp_path):
-    workload, environment, engine_file, _, _ = _fixture(
-        tmp_path, raw_dataset_without_controls=True
-    )
-    _, roots = runtime_v1.decode_and_validate_workload(
-        workload.canonical_bytes, environment, engine_file=engine_file
-    )
+    with pytest.raises(ValueError, match="prepared SFT controls"):
+        _fixture(tmp_path / "compiler-refusal", raw_dataset_without_controls=True)
+    workload, environment, engine_file, _, _ = _fixture(tmp_path / "runtime-refusal", raw_sft_overrides={})
+    _, roots = runtime_v1.decode_and_validate_workload(workload.canonical_bytes, environment, engine_file=engine_file)
+    document = deepcopy(workload.document)
+    sft = document["configuration"]["document"]["sft"]
+    for key in runtime_v1._MESSAGE_SFT_KEYS:
+        sft.pop(key, None)
     with pytest.raises(RuntimeV1Error, match="bind every raw dataset field"):
-        runtime_v1.build_trainer_invocation(workload, roots, environment)
+        runtime_v1.build_trainer_invocation(SimpleNamespace(document=document), roots, environment)
+
 
 
 def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
@@ -2171,3 +2176,55 @@ def test_noncanonical_and_duplicate_json_are_rejected(tmp_path: Path) -> None:
             runner=FakeRunner(),
             engine_file=engine_file,
         )
+
+
+@pytest.mark.parametrize("controls", [{}, {"packing": False},
+    {"packing": False, "prompt_render": "full_conversation", "require_memory_efficient_loss": False}])
+def test_raw_compiler_to_invocation_preserves_supported_optional_controls(tmp_path, controls):
+    workload, environment, engine_file, _, _ = _fixture(tmp_path, raw_sft_overrides=controls)
+    _, roots = runtime_v1.decode_and_validate_workload(workload.canonical_bytes, environment,
+                                                       engine_file=engine_file)
+    invocation = runtime_v1.build_trainer_invocation(workload, roots, environment)
+    try:
+        assert "--no-completion-only-loss" in invocation.argv
+        assert "--no-assistant-only-loss" in invocation.argv
+        assert "--use-preassigned-splits" in invocation.argv
+        assert "--bf16" not in invocation.argv and "--fp16" not in invocation.argv
+        assert "packing" not in invocation.expected_projection["training"]
+        assert workload.document["configuration"]["document"]["sft"].get("packing") is controls.get("packing")
+        offline_sft_worker._validate_trainer_arguments(list(invocation.argv[invocation.argv.index("--") + 1:]))
+    finally:
+        runtime_v1._close_retained_fds(invocation.retained_fds)
+
+
+def test_invocation_malformed_model_stays_closed(tmp_path):
+    workload, environment, _, roots, _ = _fixture(tmp_path)
+    document = deepcopy(workload.document)
+    document["configuration"]["document"]["model"] = None
+    with pytest.raises(RuntimeV1Error, match="configuration is malformed"):
+        runtime_v1.build_trainer_invocation(SimpleNamespace(document=document),
+            None, environment)
+
+
+def test_public_typed_raw_controls_reach_actual_legacy_invocation(tmp_path):
+    from synaptic_tuner.api.v1.training_input import SFTTrainingHyperparametersV1
+    from tests.training.test_training_compiler import _training_input
+
+    public = _training_input().to_dict()["hyperparameters"]
+    public.update(dataset_format="raw_text", completion_only_loss=False,
+        assistant_only_loss=False, use_preassigned_splits=True, packing=False,
+        prompt_render="full_conversation", require_memory_efficient_loss=False)
+    controls = SFTTrainingHyperparametersV1.from_dict(public).to_dict()
+    controls.pop("schema_version")
+    duration = controls.pop("duration")
+    controls["max_steps"] = duration["max_steps"]
+    workload, environment, engine_file, _, _ = _fixture(tmp_path, raw_sft_overrides=controls)
+    _, roots = runtime_v1.decode_and_validate_workload(workload.canonical_bytes, environment,
+                                                       engine_file=engine_file)
+    invocation = runtime_v1.build_trainer_invocation(workload, roots, environment)
+    try:
+        assert "--no-completion-only-loss" in invocation.argv
+        assert invocation.expected_projection["training"]["use_preassigned_splits"] is True
+        offline_sft_worker._validate_trainer_arguments(list(invocation.argv[invocation.argv.index("--") + 1:]))
+    finally:
+        runtime_v1._close_retained_fds(invocation.retained_fds)

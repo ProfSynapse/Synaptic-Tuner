@@ -8,7 +8,6 @@ import re
 from pathlib import Path
 from queue import Queue, Empty
 from contextlib import contextmanager
-import shlex
 import stat
 import sys
 import tempfile
@@ -85,7 +84,7 @@ def _job_request(*, sdk, material, projection, workload, bootstrap, command):
         bootstrap.decode("utf-8")
         + "\ntry:\n run(__import__('base64').b64decode('"
         + base64.b64encode(payload).decode()
-        + "'))\nexcept BaseException:\n print('HF_JOB_FAILED')\n sys.exit(1)\n"
+        + "'))\nexcept BaseException as error:\n phase, code = failure_projection(error)\n print(json.dumps({'schema_version':'synaptic-hf-job-failure/v1','phase':phase,'exit_code':code},sort_keys=True,separators=(',',':')))\n sys.exit(code)\n"
     )
     executable = workload["execution_source"]["runtime"]["interpreter"]["executable"]
     volumes = [
@@ -106,7 +105,7 @@ def _job_request(*, sdk, material, projection, workload, bootstrap, command):
     ]
     return {
         "image": selection["image"],
-        "command": [executable, "-I", "-c", shlex.quote(program)],
+        "command": [executable, "-I", "-c", program],
         "env": {},
         "flavor": selection["flavor"],
         "timeout": selection["timeout_seconds"],

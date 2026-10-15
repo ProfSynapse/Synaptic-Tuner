@@ -377,7 +377,9 @@ def test_actual_sqlite_cold_read_does_not_stage_submit_or_bind(material, tmp_pat
         call for call in calls if call[0] in {"upload", "submit"}]
 
 
-@pytest.mark.parametrize("attack", [None, "parent", "engine", "input", "inventory"])
+@pytest.mark.parametrize("attack", [None, "parent", "engine", "input", "inventory",
+    "runtime", "model", "model_subclass", "model_mutated", "dispatch", "artifact", *range(20, 26), *range(30, 40),
+    True, -9, 1, 120])
 def test_actual_bootstrap_worker_with_owned_files_and_injected_ml_effects(material, tmp_path, monkeypatch, attack):
     """Map fixed mount paths to private test dirs; retain actual FD/hash I/O."""
     from tuner.execution.providers.hf_jobs_provider_v1 import bootstrap, source_worker
@@ -415,12 +417,24 @@ def test_actual_bootstrap_worker_with_owned_files_and_injected_ml_effects(materi
     def runtime(inventory, source):
         assert inventory == json.loads(prep.selection.inventory_bytes)
         assert source == prep.rich_plan.execution_source.to_dict()
+        if attack == "runtime":
+            raise RuntimeError("private fixture text must never escape")
         inspected.append(True)
     monkeypatch.setattr(source_worker, "_runtime", runtime)
     def model(**arguments):
         assert arguments["token"] is False
         assert arguments["model_ref"] == prep.rich_plan.resolved_config.to_dict()["model"]["ref"]
         assert arguments["destination_root"] == workspace / "private/run/cache"
+        if attack == "model":
+            raise RuntimeError("private fixture text must never escape")
+        if attack == "model_subclass":
+            class Hostile(source_worker.HFJobFailure):
+                pass
+            raise Hostile("DISPATCH", 22)
+        if attack == "model_mutated":
+            error = source_worker.HFJobFailure("DISPATCH", 22)
+            error.exit_code = 120
+            raise error
         models.append(True)
     monkeypatch.setattr(model_snapshot, "prepare_model_snapshot", model)
     values = _native_values(prep)
@@ -433,6 +447,12 @@ def test_actual_bootstrap_worker_with_owned_files_and_injected_ml_effects(materi
         assert 0 < timeout <= prep.selection.timeout_seconds and check is False
         assert stdout is stderr
         assert read(workspace / "private", "run/state/prepared-inputs/" + prep.input_identity.content_digest + "/private-dataset.jsonl", len(material.raw)) == material.raw
+        if attack == "dispatch":
+            raise TimeoutError("private fixture text must never escape")
+        if type(attack) in {int, bool}:
+            return SimpleNamespace(returncode=attack)
+        if attack == "artifact":
+            return SimpleNamespace(returncode=0)
         members = []
         for role, (name, raw) in sorted(values.items()):
             write(workspace / "private", "run/artifacts/" + name, raw)
@@ -452,13 +472,11 @@ def test_actual_bootstrap_worker_with_owned_files_and_injected_ml_effects(materi
     program = transport.job_request(command)["command"][-1]
     # Parse only the admitted standard-base64 payload; bootstrap.run and the
     # actual worker execute below, not a mocked success return.
-    import shlex
     import re
-    program = shlex.split(program)[0]
     encoded = re.search(r"b64decode\('([A-Za-z0-9+/=]+)'\)", program).group(1)
     import base64
     payload = base64.b64decode(encoded, validate=True)
-    if attack is not None:
+    if attack in {"parent", "engine", "input", "inventory"}:
         targets = {"parent": mount_source / "parent/tuner/execution/contracts.py",
             "engine": mount_source / "engine/Trainers/sft/runtime_v1.py",
             "input": mount_output / input_name,
@@ -471,13 +489,25 @@ def test_actual_bootstrap_worker_with_owned_files_and_injected_ml_effects(materi
         if attack is None:
             assert bootstrap.run(payload) == 0
         else:
-            with pytest.raises(ValueError):
+            with pytest.raises(bootstrap.HFJobFailure) as caught:
                 bootstrap.run(payload)
+            expected = {"parent": 81, "engine": 83, "input": 85,
+                        "inventory": 83, "runtime": 84, "model": 86,
+                        "dispatch": 87, "artifact": 88, "model_subclass": 89, "model_mutated": 89}
+            code = (attack if type(attack) is int and attack in {
+                20, 21, 22, 23, 24, 25, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39
+            } else expected.get(attack, 87))
+            assert caught.value.exit_code == code
+            assert "private fixture text" not in str(caught.value)
+            assert caught.value.__suppress_context__ is True
     finally:
         __import__("sys").path[:] = previous_path
         __import__("sys").dont_write_bytecode = previous_bytecode
+    if attack in {"parent", "engine", "input", "inventory", "runtime", "model", "model_subclass", "model_mutated"}:
+        assert dispatched == []
+    if attack in {"parent", "engine", "input", "inventory", "runtime"}:
+        assert models == []
     if attack is not None:
-        assert models == dispatched == []
         assert not (mount_output / "completion.json").exists()
         return
     assert inspected == models == dispatched == [True]
@@ -867,3 +897,128 @@ def test_verified_spool_attempts_parent_close_after_leaf_close_fault(material, m
         with transport._spool(item, 1, "fixture-token", time.monotonic() + 10):
             monkeypatch.setattr(module.os, "close", close)
     assert len(closes) == 2
+
+
+def test_normal_hf_diagnostic_vocabulary_is_independent_and_native_exact():
+    from tuner.execution.providers.hf_jobs_provider_v1.bootstrap import (
+        HFJobFailure, HF_JOB_PHASE_EXITS, HF_NATIVE_STAGE_EXITS,
+    )
+    from Trainers.sft.runtime_v1 import _RUNTIME_STAGE_EXITS
+    assert HF_JOB_PHASE_EXITS == {
+        "BOOTSTRAP_ADMISSION": 80, "PARENT_MATERIALIZATION": 81,
+        "WORKER_INPUT": 82, "SOURCE_MATERIALIZATION": 83,
+        "RUNTIME_INVENTORY": 84, "PREPARED_INPUT": 85,
+        "MODEL_PREPARATION": 86, "DISPATCH": 87,
+        "ARTIFACT_PUBLICATION": 88, "UNCLASSIFIED": 89,
+    }
+    native = {20, 21, 22, 23, 24, 25, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39}
+    assert HF_NATIVE_STAGE_EXITS == native == set(_RUNTIME_STAGE_EXITS.values())
+    for invalid in (True, False, -9, 0, 1, 26, 120, "22", 22.0):
+        with pytest.raises(ValueError):
+            HFJobFailure("DISPATCH", invalid)
+    for invalid in (True, None, "private exception text", "DISPATCH_suffix"):
+        with pytest.raises(ValueError):
+            HFJobFailure(invalid)
+    with pytest.raises(ValueError):
+        HFJobFailure("MODEL_PREPARATION", 22)
+
+
+@pytest.mark.parametrize("phase,native,expected", [
+    ("BOOTSTRAP_ADMISSION", None, 80), ("DISPATCH", 22, 22),
+    ("ARTIFACT_PUBLICATION", None, 88), (None, None, 89),
+    ("subclass", None, 89), ("mutated_phase", None, 89),
+    ("mutated_code", None, 89), ("bool_code", None, 89),
+])
+def test_actual_generated_wrapper_has_closed_failure_output(material, capsys, phase, native, expected):
+    import ast
+    from tuner.execution.providers.hf_jobs_provider_v1 import bootstrap
+    prep = material.preparation
+    run = TrainingRunRef(prep.rich_plan.execution_source.run_id, prep.resolved.project_ref)
+    sealed = prep.prepare(prep.plan, run, prep.binding)
+    command = build_stage_command(sealed, "fixture-nonce", prep.payload(sealed, EffectKind.STAGE), prep.executor)
+    transport = HFJobsTransport(preparation=prep, sdk=sdk, api=material.provider,
+        records=InMemoryDurableRecordStoreV1(), secrets=Secrets(), scratch_root=material.scratch)
+    program = transport.job_request(command)["command"][-1]
+    ast.parse(program)
+    suffix = "try:\n run" + program.rsplit("\ntry:\n run", 1)[1]
+    def fail(_payload):
+        if phase is None:
+            raise RuntimeError("private fixture text must never escape")
+        if phase == "subclass":
+            class Hostile(bootstrap.HFJobFailure):
+                pass
+            raise Hostile("DISPATCH", 22)
+        if phase in {"mutated_phase", "mutated_code", "bool_code"}:
+            error = bootstrap.HFJobFailure("DISPATCH", 22)
+            if phase == "mutated_phase":
+                error.phase = "private fixture text must never escape"
+            else:
+                error.exit_code = True if phase == "bool_code" else 120
+            raise error
+        raise bootstrap.HFJobFailure(phase, native)
+    namespace = {"run": fail, "HFJobFailure": bootstrap.HFJobFailure,
+                 "sys": __import__("sys"), "json": json,
+                 "failure_projection": bootstrap.failure_projection}
+    with pytest.raises(SystemExit) as caught:
+        exec(compile(suffix, "<admitted-hf-wrapper>", "exec"), namespace)
+    assert caught.value.code == expected
+    output = capsys.readouterr()
+    assert output.err == "" and "private fixture text" not in output.out
+    assert json.loads(output.out) == {"schema_version": "synaptic-hf-job-failure/v1",
+                                     "phase": "UNCLASSIFIED" if expected == 89 else phase,
+                                     "exit_code": expected}
+    assert len(output.out.encode()) <= 160
+
+
+def test_bootstrap_and_worker_input_failures_are_closed():
+    from tuner.execution.providers.hf_jobs_provider_v1 import bootstrap, source_worker
+    with pytest.raises(bootstrap.HFJobFailure) as caught:
+        bootstrap.run(b"not JSON private fixture text")
+    assert bootstrap.failure_projection(caught.value) == ("BOOTSTRAP_ADMISSION", 80)
+    with pytest.raises(bootstrap.HFJobFailure) as caught:
+        source_worker.execute({"private": "fixture text"})
+    assert bootstrap.failure_projection(caught.value) == ("WORKER_INPUT", 82)
+
+
+@pytest.mark.parametrize("entry", ["direct", "exec-argv", "explicit-shell-string"])
+def test_actual_job_request_executes_raw_program_without_quote_layer(entry):
+    """Real isolated Python, no mounts/SDK calls: malformed input refuses before I/O.
+
+    The middle case models the captured image entrypoint's exact exec "$@"
+    semantics. The final case intentionally constructs a shell command with
+    shlex.join; it is not a claim that HF applies that transformation.
+    """
+    import ast
+    import shlex
+    import subprocess
+    import sys
+    from tuner.execution.providers.hf_jobs_provider_v1 import bootstrap, transport
+    material = {"selection": {"inventory_sha256": "a" * 64, "timeout_seconds": 1,
+        "bucket_id": "fixture-owner/bucket", "source_prefix": "source/fixture",
+        "run_prefix": "runs/fixture", "image": "fixture@sha256:" + "b" * 64,
+        "flavor": "cpu-basic", "scope": {"namespace_ref": "fixture-owner"}},
+        "members": [], "input": {}}
+    workload = {"configuration": {"document": {"model": {}}},
+                "execution_source": {"runtime": {"interpreter": {"executable": sys.executable}}}}
+    request = transport._job_request(sdk=sdk, material=material,
+        projection={"workload_fingerprint": "c" * 64, "dispatch": {}},
+        workload=workload, bootstrap=Path(bootstrap.__file__).read_bytes(),
+        command=SimpleNamespace(digest="d" * 64))
+    argv = request["command"]
+    ast.parse(argv[-1])
+    original = list(argv)
+    if entry == "exec-argv":
+        argv = ["/bin/sh", "-c", 'exec "$@"', "fixture-entrypoint", *argv]
+    elif entry == "explicit-shell-string":
+        argv = ["/bin/sh", "-c", shlex.join(argv)]
+    result = subprocess.run(argv, env={}, capture_output=True, timeout=5, check=False)
+    assert result.returncode == 80
+    assert result.stderr == b""
+    assert json.loads(result.stdout) == {"schema_version": "synaptic-hf-job-failure/v1",
+        "phase": "BOOTSTRAP_ADMISSION", "exit_code": 80}
+    # The old extra shell quote is not valid Python when argv is passed intact.
+    bad = [*original[:-1], shlex.quote(original[-1])]
+    with pytest.raises(SyntaxError):
+        ast.parse(bad[-1])
+    rejected = subprocess.run(bad, env={}, capture_output=True, timeout=5, check=False)
+    assert rejected.returncode == 1 and rejected.stdout == b""

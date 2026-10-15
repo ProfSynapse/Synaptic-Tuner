@@ -129,6 +129,19 @@ def _validated_config(config: CanonicalDocument):
             raise ValueError("conversation SFT input exceeds the 2MiB executable limit")
         if hyperparameters.require_memory_efficient_loss is not True:
             raise ValueError("conversation SFT requires the memory-efficient loss guard")
+    if identity.format == "syntunia-sft-row/v1":
+        from Trainers.sft.runtime_v1 import RuntimeV1Error, validate_sft_runtime_controls
+
+        # Validate the same finite typed-to-runtime projection used at execution.
+        # The canonical typed configuration itself remains untouched.
+        runtime_sft = dict(value["sft"])
+        runtime_sft.pop("schema_version")
+        duration = runtime_sft.pop("duration")
+        runtime_sft.update({key: item for key, item in duration.items() if item is not None})
+        try:
+            validate_sft_runtime_controls(runtime_sft, identity.to_dict())
+        except RuntimeV1Error:
+            raise ValueError("prepared SFT controls are unsupported by the runtime") from None
     canonical_json_bytes(value)
     return value, identity
 

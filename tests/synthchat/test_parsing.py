@@ -62,7 +62,12 @@ class TestParseAssistantResponse:
                 "function": {"name": "useTools", "arguments": {"tool": "search content \"x\"", "strategy": None}},
             }],
         })
-        result = parse_assistant_response(payload, {})
+        from shared.validation.parsing.configured_formats import build_wrapper_specs
+        specs = build_wrapper_specs({"configured": {
+            "wrapper_name": "useTools", "arguments_encoding": "object",
+            "argument_fields": {"required": ["tool"], "properties": {
+                "tool": {"type": "string"}, "strategy": {"type": "string"}}}}})
+        result = parse_assistant_response(payload, {}, wrapper_specs=specs)
         arguments = result["tool_calls"][0]["function"]["arguments"]
         assert isinstance(arguments, str)
         assert json.loads(arguments) == {"tool": "search content \"x\""}
@@ -300,3 +305,48 @@ class TestNormalizeGeneratedEnvironment:
     def test_empty_environment_handled(self):
         result = normalize_generated_environment({})
         assert result["environment"] == {}
+
+
+def test_null_preservation_boundaries():
+    from shared.validation.parsing.configured_formats import build_wrapper_specs
+    properties = {
+        "required": {"type": "string"}, "optional": {"type": "string"},
+        "nullable": {"type": ["string", "null"]}, "complex": {"anyOf": [{"type": "null"}, {"type": "string"}]},
+        "untyped": {}, "ref": {"$ref": "#/$defs/value"},
+        "typed_complex": {"type": "string", "anyOf": [{"type": "null"}]},
+        "list_optional": {"type": ["string", "integer"]},
+    }
+    args = {name: None for name in properties}
+    args["unknown"] = None
+    for encoding in ("object", "string"):
+        specs = build_wrapper_specs({"custom": {"wrapper_name": "configuredAction", "arguments_encoding": encoding,
+            "argument_fields": {"required": ["required"], "properties": properties}}})
+        for name, wire in (("configuredAction", args), ("nativeAction", args), ("configuredAction", json.dumps(args))):
+            payload = json.dumps({"content": None, "tool_calls": [{"function": {"name": name, "arguments": wire}}]})
+            result = parse_assistant_response(payload, {}, wrapper_specs=specs)
+            actual = json.loads(result["tool_calls"][0]["function"]["arguments"])
+            expected = dict(args)
+            if encoding == "object" and name == "configuredAction" and isinstance(wire, dict):
+                expected.pop("optional")
+                expected.pop("list_optional")
+            assert actual == expected
+
+
+def test_native_null_without_any_wrapper_registry_is_preserved():
+    payload = json.dumps({"content": None, "tool_calls": [
+        {"function": {"name": "set_value", "arguments": {"value": None, "name": "x"}}}]})
+    result = parse_assistant_response(payload, {}, wrapper_specs=[])
+    assert json.loads(result["tool_calls"][0]["function"]["arguments"]) == {"value": None, "name": "x"}
+
+
+def test_shape_inferred_native_wrapper_does_not_omit_null():
+    from shared.validation.parsing.configured_formats import build_wrapper_specs
+    specs = build_wrapper_specs({"custom": {"wrapper_name": "configuredAction", "arguments_encoding": "object",
+        "argument_fields": {"required": ["required"], "properties": {
+            "required": {"type": "string"}, "optional": {"type": "string"}}}}})
+    payload = json.dumps({"content": None, "tool_calls": [
+        {"function": {"name": "nativeAction", "arguments": {"required": "value", "optional": None}}}]})
+    result = parse_assistant_response(payload, {}, wrapper_specs=specs)
+    # Legacy shape-based wrapper normalization remains unchanged, but it does
+    # not establish an object-encoding declaration for this native input.
+    assert json.loads(result["tool_calls"][0]["function"]["arguments"]) == {"required": "value", "optional": None}

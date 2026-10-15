@@ -216,3 +216,63 @@ umask. A fresh host-owned output and bounded host read are required to establish
 accessibility. It does not create a TrainingAPI receipt or qualify training/GPU
 behavior. The base image's root user alone does not prove output unreadability;
 no UID API or permission guard has been relaxed.
+
+### Owned Modal producer interruption (Linux caller example)
+
+`modal_lifecycle.py` supervises the existing normal `tuner train` CLI. It does
+not implement provider cancellation, grants, source authentication or a lifecycle
+store. Review the genuine pushed host, normal plan/preparation and finite live
+scope first. Configure absolute paths using `modal_lifecycle.example.json`, with
+fresh empty private `state`, `tmp` and supervisor-output directories at mode0700.
+The selected installed Python/launcher and explicit env file remain caller-owned;
+no shell or `env` executable is launched, ambient credential/SDK overrides are
+not forwarded. The existing train CLI resolves its explicitly selected env file.
+
+Run the installed interpreter against this checkout-owned example:
+
+```sh
+/ABSOLUTE/PINNED-LAUNCHER/bin/python -I /ABSOLUTE/EXAMPLES/modal_lifecycle.py --config /ABSOLUTE/PRIVATE/supervisor.json
+```
+
+This command starts one effectful normal training attempt. A fsynced exclusive
+intent is consumed before spawning. Never rerun after failure or uncertainty.
+The supervisor owns a direct-Python child in a separate session, retains its
+pidfd/start time and verifies the configured executable before any signal. Its
+error, EOF or deadline closes local handles without killing a running producer;
+losing the controlling TTY does not send that producer SIGHUP. Preserve the birth
+record and original attempt rather than guessing or adopting a PID.
+
+The control stream accepts one bounded JSON line at a time:
+
+```json
+{"operation":"status"}
+{"operation":"interrupt","run":{"run_id":"ACTUAL_RETAINED_RUN","project_ref":"standalone-training"}}
+```
+
+Only an explicit interrupt request can signal the held child. It requires the
+existing retained-input parser, matching configured recipe/request, engine and
+scope, unchanged private state identity, and a stable bounded private progress
+file for that exact run. Numeric metric records are distinguished before reading
+`step`; partial writes wait, invalid complete records refuse the whole snapshot,
+and nonmonotonic/exhausted/late-step records cannot reuse an earlier trigger.
+Select bounds from the admitted recipe: allow the metric count plus the existing
+capture-exhausted status record. No ordinary logs capability is promoted.
+
+This is **host-origin decoded progress custody**, not an independently signed
+file or pre-interruption Foundation/pending attestation. While the original
+producer holds its exclusive journal lock, another public reader cannot open it.
+After interruption and reaping, use the existing public `runs observe` with the
+original keys and state to authenticate the original submit/call/current binding.
+Only actual fresh pending permits a separately requested existing public
+`runs cancel`; acknowledgment is not terminal cancellation. The supervisor never
+calls cancel or an SDK. Natural completion, unknown state, lost custody or missing
+progress is inconclusive and never authorizes replay. Existing provider/component
+bounds still apply; the supervisor wait bound does not terminate remote work.
+
+Status output also uses nonblocking bounded writes: a nonreading pipe/TTY cannot
+hold the supervisor past its wait deadline (a final closed refusal has at most a
+one-second output tail). An attempted signal is consumed even on error. Only a
+returned owned signal followed by reaping the expected SIGKILL writes a completed
+interruption receipt; an external SIGKILL or uncertain signal is not normalized
+to successful interruption. Ordinary producer exit0 remains completion, not
+cancellation evidence.

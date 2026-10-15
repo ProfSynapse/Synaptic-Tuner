@@ -180,6 +180,15 @@ def compile_sft_workload(
         if any(type(method_config.get(key)) is not type(value) or method_config[key] != value
                for key, value in required.items()):
             raise ValueError("conversation SFT requires explicit final-target/preassigned controls")
+    if dataset.get("format") in _PREPARED_DATASET_FORMATS:
+        # The legacy custom-format compiler remains extensible. Authoritative
+        # prepared formats must use controls the actual portable trainer honors.
+        from Trainers.sft.runtime_v1 import RuntimeV1Error, validate_sft_runtime_controls
+
+        try:
+            validate_sft_runtime_controls(method_config, dataset, require_complete=False)
+        except RuntimeV1Error:
+            raise ValueError("prepared SFT controls are unsupported by the runtime") from None
     if "init_lora_weights" in method_config:
         _validate_init_lora_weights(method_config["init_lora_weights"])
     config_bytes = resolved_config.canonical_json.encode("utf-8")

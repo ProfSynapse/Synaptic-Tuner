@@ -230,3 +230,18 @@ def test_pilot_scenario_config_parses():
     assert {c["id"] for c in config.components} >= {"read-before-answering", "search-recovery"}
     rendered_system = yaml.safe_dump(scenario["system_context"])
     assert scenario["task_context"]["final_answer"] not in rendered_system
+
+
+def test_caught_exception_bodies_never_enter_prompts_or_trace():
+    import json
+    sentinel = "PRIVATE_PROVIDER_CREDENTIAL_RESPONSE_SENTINEL"
+    fix = _replacement(_text("safe replacement"))
+    respond, state, prompts = _harness(
+        _config(), [RuntimeError(sentinel)],
+        [RuntimeError(sentinel), {"decision": "REPLACE", "reason": "safe", "components_used": [], "replacement": fix}],
+    )
+    assert respond(_MESSAGES, 1).message["content"] == "safe replacement"
+    retained = json.dumps({"prompts": prompts, "trace": state.summary(1)})
+    assert sentinel not in retained
+    assert "STUDENT_RESPONSE_FAILURE" in retained
+    assert "REVIEW_CALL_FAILURE" in retained

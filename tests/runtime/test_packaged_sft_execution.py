@@ -1059,3 +1059,58 @@ def test_root_replacement_rejected_before_preparation(material):
     with pytest.raises(seam.PackagedSFTExecutionError, match="REVALIDATION"):
         seam.execute_admitted_packaged_sft(admitted, model_preparer=lambda *args: calls.append(args))
     assert not calls
+
+
+def test_typed_raw_controls_use_actual_packaged_projection_and_invocation(material):
+    from synaptic_tuner.api.v1.training_input import SFTTrainingHyperparametersV1
+
+    config = seam._document(material["workload_bytes"])["configuration"]["document"]
+    config["dataset"]["format"] = "syntunia-sft-row/v1"
+    config["sft"].update(dataset_format="raw_text", completion_only_loss=False,
+        assistant_only_loss=False, packing=False, prompt_render="full_conversation",
+        require_memory_efficient_loss=False)
+    assert SFTTrainingHyperparametersV1.from_dict(config["sft"]).to_dict() == config["sft"]
+    compiled = compile_packaged_sft_workload(resolved_config=CanonicalDocument.from_mapping(config))
+    release = _release(worker_entrypoint="tuner.runtime.packaged_training_worker:main",
+        worker_closure_digest=load_packaged_worker_closure().digest,
+        workload_schema=compiled.schema_version,
+        compatible_models=((config["model"]["ref"], config["model"]["revision"]),),
+        compatible_dataset_formats=("syntunia-sft-row/v1",))
+    material["runtime_release"] = release
+    material["provider_binding"] = _provider(release)
+    prior = material["execution_binding"]
+    material["execution_binding"] = PackagedExecutionBindingV1.build(
+        run_ref=prior.run_ref, runtime_release=material["runtime_release"],
+        provider_runtime_binding=material["provider_binding"],
+        prepared_input_ref=prior.prepared_input_ref,
+        prepared_input_revision=prior.prepared_input_revision,
+        prepared_input_content_digest=prior.prepared_input_content_digest,
+        prepared_input_size_bytes=prior.prepared_input_size_bytes,
+        prepared_input_format="syntunia-sft-row/v1", workload_digest=compiled.fingerprint,
+        configuration_digest=compiled.document["configuration"]["digest"],
+        artifact_policy_digest=prior.artifact_policy_digest)
+    material["workload_bytes"] = compiled.canonical_bytes
+    admitted = seam.admit_packaged_sft(**material)
+    try:
+        authenticated = seam._admit_contracts(admitted.release, admitted.provider_binding,
+            admitted.execution, admitted.workload_bytes, admitted.artifact_policy)
+        projected = seam._runtime_projection(authenticated)
+        dataset = PurePosixPath("/proc/self/fd/9")
+        argv, _, _, transport, run, final = seam._invocation_spec(
+            admitted, projected, PurePosixPath("/private/cache/model/snapshot"), dataset)
+        args = list(argv[argv.index("--") + 1:])
+        assert "--no-completion-only-loss" in args
+        assert "--no-assistant-only-loss" in args
+        assert "--use-preassigned-splits" in args
+        assert args[args.index("--aux-head-prompt-render") + 1] == "full_conversation"
+        assert "--require-memory-efficient-loss" not in args
+        assert "--bf16" not in args and "--fp16" not in args
+        assert seam._document(transport)["workload"] == compiled.document
+        projection = core._expected_trainer_projection(projected, dataset_path=Path(dataset),
+            run_dir=run, final_model_dir=final)
+        assert projection["dataset"]["format"] == "raw_text"
+        assert projection["training"]["completion_only_loss"] is False
+        assert projection["training"]["assistant_only_loss"] is False
+        assert projection["training"]["use_preassigned_splits"] is True
+    finally:
+        admitted.close()

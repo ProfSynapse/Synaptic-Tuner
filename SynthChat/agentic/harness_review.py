@@ -246,11 +246,11 @@ def build_harnessed_respond(
             proposal_validation = validate(proposal)
             proposal_valid = _validation_passed(proposal_validation)
             defects = [] if proposal_valid else _validation_issues(proposal_validation) or ["response failed validation"]
-        except Exception as exc:  # an unparseable student turn is a structural defect to replace
+        except Exception:  # an unparseable student turn is a structural defect to replace
             proposal_response = None
             proposal = {"role": "assistant", "content": ""}
             proposal_valid = False
-            defects = [f"the student produced no parseable response: {str(exc)[:300]}"]
+            defects = ["the student produced no parseable response: STUDENT_RESPONSE_FAILURE"]
         proposal_text = stringify(proposal)
         prior_assistant = "\n".join(
             stringify(m.get("content")) for m in messages if str(m.get("role", "")).strip() == "assistant"
@@ -294,8 +294,8 @@ def build_harnessed_respond(
             )
             try:
                 submission = review(prompt, system_prompt)
-            except Exception as exc:  # provider failures count as invalid submissions
-                feedback = f"review call failed: {exc}"
+            except Exception:  # provider failures count as invalid submissions
+                feedback = "review call failed: REVIEW_CALL_FAILURE"
                 attempts.append({"error": feedback})
                 continue
             decision, accepted, feedback = check_submission(submission, proposal_valid, structural=not proposal_valid)

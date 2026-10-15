@@ -171,6 +171,9 @@ def admit(values):
 
 def _mounted_config(payload):
     document = _config().to_dict()
+    # The authoritative prepared format uses built-in runtime controls, not
+    # the generic custom-format adapter from the shared compilation fixture.
+    document["sft"].pop("custom_row_adapter")
     prepared_digest = "a" * 64
     document["dataset"] = {
         "ref": f"prepared://sha256/{prepared_digest}",

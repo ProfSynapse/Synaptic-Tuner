@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 
@@ -152,6 +153,12 @@ def _config(*, model_revision: str = "b" * 40) -> CanonicalDocument:
 def _prepared_config() -> CanonicalDocument:
     value = _config().to_dict()
     digest = "f" * 64
+    value["sft"].pop("custom_row_adapter")
+    value["sft"].update({
+        "dataset_format": "raw_text", "completion_only_loss": False,
+        "assistant_only_loss": False, "use_preassigned_splits": True,
+        "split_dataset": False,
+    })
     value["dataset"] = {
         "ref": f"prepared://sha256/{digest}",
         "revision": digest,
@@ -458,3 +465,43 @@ def test_allowed_environment_agrees_between_the_python_list_and_the_schema_enum(
     assert set(python_list) == set(schema_enum)
     assert len(python_list) == len(set(python_list))
     assert len(schema_enum) == len(set(schema_enum))
+
+
+@pytest.mark.parametrize("precision", [{"bf16": True}, {"fp16": False},
+    {"bf16": False, "fp16": False}, {"bf16": True, "fp16": False},
+    {"bf16": False, "fp16": True}, {"bf16": True, "fp16": True}])
+def test_prepared_compiler_refuses_unimplemented_precision_before_source(precision):
+    value = _prepared_config().to_dict()
+    value["sft"].update(precision)
+    with pytest.raises(ValueError, match="prepared SFT controls"):
+        compile_sft_workload(resolved_config=CanonicalDocument.from_mapping(value),
+                             execution_source=_execution_source())
+
+
+@pytest.mark.parametrize("override", [{"packing": True}, {"packing": 0},
+    {"prompt_render": "prompt_completion"}, {"require_memory_efficient_loss": True},
+    {"completion_only_loss": True}, {"use_preassigned_splits": 1}])
+def test_prepared_raw_compiler_refuses_unhonored_controls(override):
+    value = _prepared_config().to_dict()
+    value["sft"].update(override)
+    with pytest.raises(ValueError, match="prepared SFT controls"):
+        compile_sft_workload(resolved_config=CanonicalDocument.from_mapping(value),
+                             execution_source=_execution_source())
+
+
+def test_custom_format_compiler_preserves_opaque_extension_bytes():
+    value = _config().to_dict()
+    value["sft"].update(bf16=True, fp16=False)
+    config = CanonicalDocument.from_mapping(value)
+    workload = compile_sft_workload(resolved_config=config, execution_source=_execution_source())
+    assert workload.document["configuration"]["document"] == value
+    assert workload.document["configuration"]["revision"] == hashlib.sha256(
+        config.canonical_json.encode()).hexdigest()
+
+
+def test_prepared_message_compiler_rejects_missing_split_without_keyerror():
+    value = _prepared_message_config().to_dict()
+    del value["sft"]["split_dataset"]
+    with pytest.raises(ValueError, match="prepared SFT controls"):
+        compile_sft_workload(resolved_config=CanonicalDocument.from_mapping(value),
+                             execution_source=_execution_source())

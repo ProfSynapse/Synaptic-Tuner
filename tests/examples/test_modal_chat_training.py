@@ -464,8 +464,17 @@ def test_full_training_composer_starts_real_public_graph_once(
     prepared_ref = (
         "prepared://sha256/" + prepared.semantic_identity.dataset_digest
     )
+    request_document = _document(prepared_ref)
+    # This fixture consumes authoritative prepared raw rows, so bind the
+    # public controls the portable runtime actually honors.
+    request_document["hyperparameters"].update({
+        "dataset_format": "raw_text", "completion_only_loss": False,
+        "assistant_only_loss": False, "use_preassigned_splits": True,
+        "packing": False, "prompt_render": "full_conversation",
+        "require_memory_efficient_loss": False,
+    })
     request_json = json.dumps(
-        _document(prepared_ref), sort_keys=True, separators=(",", ":")
+        request_document, sort_keys=True, separators=(",", ":")
     )
     purposes = frozenset(
         {
@@ -551,6 +560,9 @@ def test_full_training_composer_starts_real_public_graph_once(
             cursor_key=b"c" * 32,
             observed_at=clock.now_iso(),
         )
+        compiled_sft = json.loads(graph.material.workload_bytes)["configuration"]["document"]["sft"]
+        for field in ("dataset_format", "completion_only_loss", "assistant_only_loss", "use_preassigned_splits", "packing", "prompt_render", "require_memory_efficient_loss"):
+            assert compiled_sft[field] == request_document["hyperparameters"][field]
         request = graph.host.api.training.load(request_json)
         resolved = graph.host.api.training.resolve(request)
         plan = graph.host.api.training.plan(

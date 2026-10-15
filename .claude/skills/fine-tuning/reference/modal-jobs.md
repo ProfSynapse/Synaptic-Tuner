@@ -1902,3 +1902,29 @@ actual signed native GRPO completion, retained keys/context/assessment/catalogs,
 fresh pending/terminal readers and verified five-role downloads. Scripted SDK,
 image and ML boundaries remain explicit; this is host/readback conformance, not
 live provider cancellation or recovery qualification.
+
+### Reusable owned producer interruption
+
+Use the checked-in `examples/training_qualification/modal_lifecycle.py` Linux
+caller example for an explicitly admitted producer-interruption qualification,
+with its adjacent config template and README. It starts the existing normal
+train CLI once using the pinned installed Python directly, explicit environment
+selection, fresh private state/tmp, separate process session and retained pidfd.
+Exclusive fsynced intent precedes spawn; no automatic retry or implicit kill on
+supervisor error/TTY loss. Control uses bounded JSON lines and an explicit exact-run
+interrupt request. Mixed numeric/capture-status records, partial writes and
+late/exhausted triggers must validate before signaling.
+
+Private decoded progress is host-origin evidence, not standalone signature or
+pre-kill Foundation authentication. Existing producer journal exclusivity stays
+unchanged. After interruption, authenticate the original retained submit/call via
+fresh public observation and require actual pending before a separately requested
+existing public cancel. No logs promotion, new grants, provider calls or automatic
+cancellation are supplied by this supervisor. Natural races/unknowns remain
+inconclusive; acknowledgment alone is not observed termination.
+
+Installed metrics launchers observe the explicitly selected clean engine checkout.
+Normal build/profile/source-policy checks still apply, and local Git observation
+does not replace the separate pushed-source authority required for execution.
+Inspect the planning JSON and actual canonical admission file/revalidation; an
+exit status alone does not establish successful candidate creation.
