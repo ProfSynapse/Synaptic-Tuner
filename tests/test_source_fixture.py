@@ -10,7 +10,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "synaptic-tuner"
-PIN = "018aff48508afecc092d16f97d13b7f794079b7b"
+PIN = "91c4bbb2272e91b92f3b7c8169dfe725e0fa4e22"
 ORIGIN = "https://github.com/ProfSynapse/Synaptic-Tuner.git"
 
 if ENGINE.resolve(strict=True) != ENGINE:

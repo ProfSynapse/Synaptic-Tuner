@@ -1,7 +1,7 @@
 # Public Docker SFT qualification host
 
 This dedicated host branch is not an engine PR. Its real engine Gitlink is
-018aff48508afecc092d16f97d13b7f794079b7b, with the declared
+91c4bbb2272e91b92f3b7c8169dfe725e0fa4e22, with the declared
 `release/stable-diagnostics-integration` branch hint (PR256). Local Git
 inspection proves the actual checkout/gitlink and clean source; it does not
 prove this host has been pushed. Root reviews/pushes the host and verifies exact
