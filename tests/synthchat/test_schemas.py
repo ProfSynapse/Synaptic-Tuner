@@ -185,6 +185,32 @@ class TestBuildToolResponseSchema:
 
 # ---- build_tool_generation_prompt ----
 
+class TestArgumentsEncoding:
+    def test_string_encoding_is_the_configured_default(self):
+        schema = build_tool_response_schema(format_config=_configured_fmt(), allowed_tools=["searchManager_content"])
+        arguments = _wrapper_call_schema(schema)["properties"]["function"]["properties"]["arguments"]
+        assert arguments["type"] == "string"
+
+    def test_object_encoding_builds_strict_object_from_declared_fields(self):
+        schema = build_tool_response_schema(
+            format_config=_configured_fmt(arguments_encoding="object"),
+            allowed_tools=["searchManager_content"],
+            context_overrides={"sessionId": "session_1"},
+        )
+        arguments = _wrapper_call_schema(schema)["properties"]["function"]["properties"]["arguments"]
+        assert arguments["type"] == "object" and arguments["additionalProperties"] is False
+        assert set(arguments["required"]) == set(arguments["properties"])
+        assert arguments["properties"]["tool"]["type"] == "string"
+        assert arguments["properties"]["sessionId"] == {"type": "string", "const": "session_1"}
+        assert {"type": "null"} in arguments["properties"]["strategy"]["anyOf"]
+
+    def test_unknown_encoding_is_rejected(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="arguments_encoding"):
+            build_tool_response_schema(format_config=_configured_fmt(arguments_encoding="yaml"))
+
+
 class TestBuildToolGenerationPrompt:
     def test_includes_base_prompt(self):
         prompt = build_tool_generation_prompt(

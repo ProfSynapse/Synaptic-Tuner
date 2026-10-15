@@ -20,12 +20,12 @@ from shared.validation import FilterStats, RolloutFilterSet
 from shared.flywheel.judge import judge_metadata_from_row
 
 # Canonical projection-target names usable in a filter spec's ``applies_to``.
-PROJECTION_TARGETS = ("sft", "grpo", "kto_positive", "kto_negative")
+PROJECTION_TARGETS = ("sft", "grpo", "kto_positive", "kto_negative", "dpo")
 
 # Default target set for a filter that omits ``applies_to``. Quality filters
 # should apply to positive/GRPO/SFT projections but MUST NOT silently drop hard
 # negatives — a researcher must explicitly list ``kto_negative`` to filter them.
-DEFAULT_FILTER_TARGETS = ("sft", "grpo", "kto_positive")
+DEFAULT_FILTER_TARGETS = ("sft", "grpo", "kto_positive", "dpo")
 
 
 def _iter_records(paths: Iterable[Path]) -> Iterable[Tuple[Path, int, Dict[str, Any]]]:
@@ -213,32 +213,16 @@ def _trace_assistant_content(turn: Dict[str, Any]) -> Optional[str]:
     return text
 
 
-def _build_sft_row(
-    path: Path,
-    line_index: int,
-    row: Dict[str, Any],
-    filter_set: Optional[RolloutFilterSet] = None,
-    stats: Optional[FilterStats] = None,
-) -> Optional[Dict[str, Any]]:
-    """Project a successful rollout into a full multi-turn SFT row.
+def _trace_conversation(trace: List[Any]) -> Tuple[List[Dict[str, Any]], Dict[int, int], bool, bool]:
+    """Reconstruct the trainable transcript from ``conversation_trace``.
 
-    Reconstructs the entire conversation from ``conversation_trace`` in order,
-    preserving OpenAI-style assistant ``tool_calls`` and emitting tool-result
-    turns as ``tool``-role messages. Only quality positives are projected, and
-    the generic filter engine is applied at the ``sft`` target seam.
+    Returns ``(conversations, assistant_positions, has_user, has_assistant)`` where
+    ``assistant_positions`` maps each assistant turn_index to its position in
+    ``conversations``. Scaffolding turns are dropped; tool results become
+    ``tool``-role messages.
     """
-    metadata = row.get("metadata") or {}
-    if not _is_quality_positive(metadata):
-        return None
-
-    if not _passes_filters(row, "sft", filter_set, stats):
-        return None
-
-    trace = row.get("conversation_trace") or []
-    if not isinstance(trace, list):
-        return None
-
     conversations: List[Dict[str, Any]] = []
+    assistant_positions: Dict[int, int] = {}
     has_user = False
     has_assistant = False
 
@@ -262,6 +246,8 @@ def _build_sft_row(
             message: Dict[str, Any] = {"role": "assistant", "content": content}
             if tool_calls:
                 message["tool_calls"] = tool_calls
+            if isinstance(turn.get("turn_index"), int):
+                assistant_positions[turn["turn_index"]] = len(conversations)
             conversations.append(message)
             has_assistant = True
             continue
@@ -292,6 +278,105 @@ def _build_sft_row(
 
         # Unknown role/kind — drop conservatively (no silent inclusion).
 
+    return conversations, assistant_positions, has_user, has_assistant
+
+
+def _review_message(message: Any) -> Optional[Dict[str, Any]]:
+    """Normalize a harness-review proposal into a trainable assistant message."""
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    content = content.strip() if isinstance(content, str) and content.strip() else None
+    tool_calls = [call for call in (message.get("tool_calls") or []) if isinstance(call, dict)]
+    if content is None and not tool_calls:
+        return None
+    normalized: Dict[str, Any] = {"role": "assistant", "content": content}
+    if tool_calls:
+        normalized["tool_calls"] = tool_calls
+    return normalized
+
+
+def _build_dpo_rows(
+    path: Path,
+    line_index: int,
+    row: Dict[str, Any],
+    filter_set: Optional[RolloutFilterSet] = None,
+    stats: Optional[FilterStats] = None,
+) -> List[Dict[str, Any]]:
+    """Project harness-review replacements into DPO preference pairs.
+
+    Each REPLACE decision in ``metadata.environment.harness_review`` pairs the
+    executed correction (chosen) with the student's unexecuted proposal
+    (rejected) at the same student-visible state. Pairs whose replacement was
+    flagged for reviewer-voice reasoning, or whose proposal is empty, are
+    skipped. Only quality-positive rollouts are projected.
+    """
+    metadata = row.get("metadata") or {}
+    review = ((metadata.get("environment") or {}).get("harness_review")) or {}
+    turns = review.get("turns") if isinstance(review, dict) else None
+    if not turns or not _is_quality_positive(metadata):
+        return []
+    if not _passes_filters(row, "dpo", filter_set, stats):
+        return []
+    trace = row.get("conversation_trace") or []
+    if not isinstance(trace, list):
+        return []
+    conversations, assistant_positions, _, _ = _trace_conversation(trace)
+
+    rows: List[Dict[str, Any]] = []
+    for turn in turns:
+        if not isinstance(turn, dict) or turn.get("decision") != "REPLACE" or turn.get("reviewer_voice"):
+            continue
+        position = assistant_positions.get(turn.get("turn_index"))
+        rejected = _review_message(turn.get("proposal"))
+        if position is None or rejected is None:
+            continue
+        rows.append(_attach_judge_metadata({
+            "prompt": conversations[:position],
+            "chosen": [conversations[position]],
+            "rejected": [rejected],
+            "scenario_id": str(metadata.get("scenario") or "unknown"),
+            "source_example_id": f"{path.name}:{line_index}:turn{turn.get('turn_index')}",
+            "metadata": {
+                "source_artifact": path.name,
+                "seed_id": ((metadata.get("environment_seed") or {}).get("seed_id")),
+                "scenario": metadata.get("scenario"),
+                "turn_index": turn.get("turn_index"),
+                "structural_replacement": bool(turn.get("structural_replacement")),
+                "components_used": turn.get("components_used") or [],
+                "review_reason": turn.get("reason"),
+            },
+        }, row))
+    return rows
+
+
+def _build_sft_row(
+    path: Path,
+    line_index: int,
+    row: Dict[str, Any],
+    filter_set: Optional[RolloutFilterSet] = None,
+    stats: Optional[FilterStats] = None,
+) -> Optional[Dict[str, Any]]:
+    """Project a successful rollout into a full multi-turn SFT row.
+
+    Reconstructs the entire conversation from ``conversation_trace`` in order,
+    preserving OpenAI-style assistant ``tool_calls`` and emitting tool-result
+    turns as ``tool``-role messages. Only quality positives are projected, and
+    the generic filter engine is applied at the ``sft`` target seam.
+    """
+    metadata = row.get("metadata") or {}
+    if not _is_quality_positive(metadata):
+        return None
+
+    if not _passes_filters(row, "sft", filter_set, stats):
+        return None
+
+    trace = row.get("conversation_trace") or []
+    if not isinstance(trace, list):
+        return None
+
+    conversations, _, has_user, has_assistant = _trace_conversation(trace)
+
     if not has_assistant or not has_user:
         return None
 
@@ -312,6 +397,38 @@ def _build_sft_row(
             "stop_reason": episode_trace.get("stop_reason"),
         },
     }, row)
+
+
+def _build_sft_turn_rows(
+    path: Path,
+    line_index: int,
+    row: Dict[str, Any],
+    filter_set: Optional[RolloutFilterSet] = None,
+    stats: Optional[FilterStats] = None,
+) -> List[Dict[str, Any]]:
+    """Project a successful rollout into one SFT row per assistant turn.
+
+    Each row is the transcript up to and including one assistant turn, so a
+    final-turn loss mask supervises every accepted response in the episode.
+    Turns flagged in ``harness_review.reviewer_voice_turns`` are skipped.
+    """
+    full = _build_sft_row(path, line_index, row, filter_set, stats)
+    if full is None:
+        return []
+    trace = row.get("conversation_trace") or []
+    conversations, assistant_positions, _, _ = _trace_conversation(trace)
+    review = (((row.get("metadata") or {}).get("environment") or {}).get("harness_review")) or {}
+    skip_turns = set(review.get("reviewer_voice_turns") or [])
+    rows: List[Dict[str, Any]] = []
+    for turn_index, position in sorted(assistant_positions.items()):
+        if turn_index in skip_turns:
+            continue
+        turn_row = dict(full)
+        turn_row["conversations"] = conversations[: position + 1]
+        turn_row["source_example_id"] = f"{full['source_example_id']}:turn{turn_index}"
+        turn_row["metadata"] = {**full["metadata"], "turn_index": turn_index}
+        rows.append(turn_row)
+    return rows
 
 
 def _build_kto_row(
@@ -526,6 +643,25 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--sft-projection",
+        choices=["full", "per_turn"],
+        default="full",
+        help=(
+            "How --sft-output projects rollouts: one full multi-turn row per rollout, or one "
+            "row per assistant turn ending at that turn (so a final-turn loss mask trains "
+            "every accepted turn)."
+        ),
+    )
+    parser.add_argument(
+        "--dpo-output",
+        default=None,
+        help=(
+            "Optional output JSONL path for DPO preference pairs from harness-review "
+            "replacements (chosen = executed correction, rejected = student proposal). "
+            "Only rollouts carrying metadata.environment.harness_review produce rows."
+        ),
+    )
+    parser.add_argument(
         "--grpo-projection",
         choices=["first_tool", "tool_turns"],
         default="first_tool",
@@ -557,16 +693,21 @@ def main() -> int:
     kto_rows: List[Dict[str, Any]] = []
     grpo_rows: List[Dict[str, Any]] = []
     sft_rows: List[Dict[str, Any]] = []
+    dpo_rows: List[Dict[str, Any]] = []
 
     for path, line_index, row in _iter_records(input_paths):
         canonical_rows.append(_build_canonical_row(path, row))
         kto_row = _build_kto_row(path, line_index, row, filter_set, filter_stats)
         if kto_row is not None:
             kto_rows.append(kto_row)
-        if args.sft_output:
+        if args.sft_output and args.sft_projection == "per_turn":
+            sft_rows.extend(_build_sft_turn_rows(path, line_index, row, filter_set, filter_stats))
+        elif args.sft_output:
             sft_row = _build_sft_row(path, line_index, row, filter_set, filter_stats)
             if sft_row is not None:
                 sft_rows.append(sft_row)
+        if args.dpo_output:
+            dpo_rows.extend(_build_dpo_rows(path, line_index, row, filter_set, filter_stats))
         if args.grpo_projection == "tool_turns":
             grpo_rows.extend(
                 _build_grpo_tool_turn_rows(
@@ -596,6 +737,10 @@ def main() -> int:
         sft_count = _write_jsonl(Path(args.sft_output), sft_rows)
         summary["sft_output"] = str(Path(args.sft_output))
         summary["sft_count"] = sft_count
+        summary["sft_projection"] = args.sft_projection
+    if args.dpo_output:
+        summary["dpo_output"] = str(Path(args.dpo_output))
+        summary["dpo_count"] = _write_jsonl(Path(args.dpo_output), dpo_rows)
     if filter_set is not None and not filter_set.is_empty:
         summary["filter_config"] = str(Path(args.filter_config))
         summary["filter_stats"] = filter_stats.as_dict()

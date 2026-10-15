@@ -11,7 +11,9 @@ Usage: Called by SynthChatGenerator._generate_agentic_episode in generator.py
 import json
 from typing import Any, Callable, Dict, List, Optional, Sequence, Mapping, Tuple
 
+from ..schemas.tool_response_schema import build_tool_generation_prompt
 from ..template_utils import _make_json_safe
+from .harness_review import HarnessReviewConfig, build_harnessed_respond, build_review_schema
 
 try:
     from shared.agentic_judge import AgenticTurnJudge
@@ -188,9 +190,15 @@ def generate_agentic_episode(
     generate_assistant_response: Callable,
     parse_response: Callable,
     stringify_response: Callable,
+    resolve_tool_response_contract: Optional[Callable] = None,
+    call_llm_structured: Optional[Callable] = None,
     logger: Any = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[Dict[str, Any]]]:
-    """Generate a multi-turn agentic rollout using the shared episode runner."""
+    """Generate a multi-turn agentic rollout using the shared episode runner.
+
+    With ``harness_review.enabled`` the configured student model proposes each
+    turn and a reviewing agent passes or replaces it before execution.
+    """
     loop_cfg = resolved_environment_config.get("loop") if isinstance(resolved_environment_config, dict) else {}
     max_turns = int(loop_cfg.get("max_turns", 6) or 6)
     max_tool_steps = int(loop_cfg.get("max_tool_steps", resolved_environment_config.get("max_steps", 0)) or 0)
@@ -233,6 +241,42 @@ def generate_agentic_episode(
             system_prompt_text = msg.get("content") or ""
             break
 
+    def teacher_respond(messages, turn_index):
+        return synthchat_loop_response(
+            scenario=scenario,
+            system_context=resolved_system_context,
+            messages=messages,
+            assistant_prompt=assistant_prompt,
+            randomize_params=randomize_params,
+            scenario_key=scenario_key,
+            turn_index=turn_index,
+            thinking_content=thinking_content,
+            build_loop_assistant_context=build_loop_assistant_context,
+            generate_assistant_response=generate_assistant_response,
+            parse_response=parse_response,
+        )
+
+    respond = teacher_respond
+    review_state = None
+    review_config = None
+    harness_cfg = scenario.get("harness_review")
+    if isinstance(harness_cfg, dict) and harness_cfg.get("enabled"):
+        respond, review_state, review_config = _build_review_respond(
+            harness_cfg=harness_cfg,
+            scenario_key=scenario_key,
+            scenario=scenario,
+            resolved_system_context=resolved_system_context,
+            randomize_params=randomize_params,
+            get_stage_llm_clients=get_stage_llm_clients,
+            build_loop_assistant_context=build_loop_assistant_context,
+            generate_assistant_response=generate_assistant_response,
+            parse_response=parse_response,
+            stringify_response=stringify_response,
+            resolve_tool_response_contract=resolve_tool_response_contract,
+            call_llm_structured=call_llm_structured,
+            logger=logger,
+        )
+
     session = environment_validator.start_session(
         system_prompt=system_prompt_text,
         environment_config=resolved_environment_config,
@@ -242,19 +286,7 @@ def generate_agentic_episode(
         episode = run_environment_episode(
             initial_messages=example["conversations"],
             session=session,
-            respond=lambda messages, turn_index: synthchat_loop_response(
-                scenario=scenario,
-                system_context=resolved_system_context,
-                messages=messages,
-                assistant_prompt=assistant_prompt,
-                randomize_params=randomize_params,
-                scenario_key=scenario_key,
-                turn_index=turn_index,
-                thinking_content=thinking_content,
-                build_loop_assistant_context=build_loop_assistant_context,
-                generate_assistant_response=generate_assistant_response,
-                parse_response=parse_response,
-            ),
+            respond=respond,
             validate=validate_agentic_synthchat_response,
             max_turns=max_turns,
             max_tool_steps=max_tool_steps,
@@ -281,6 +313,8 @@ def generate_agentic_episode(
 
     if not episode.environment_result.passed:
         stage_failures.append("environment")
+    if review_state is not None and review_state.failed:
+        stage_failures.append("harness_review")
 
     if episode.stop_reason in {
         "schema_validation_failed",
@@ -304,7 +338,80 @@ def generate_agentic_episode(
     environment_trace["final_text_required"] = episode.final_text_required
     environment_trace["final_text_satisfied"] = episode.final_text_satisfied
     environment_trace["validation_retries"] = episode.validation_retries
+    if review_state is not None:
+        environment_trace["harness_review"] = review_state.summary(review_config.replace_budget)
     return final_response, example, {
         **environment_trace,
         "judge_trace": list(episode.judge_trace),
     }
+
+
+def _build_review_respond(
+    *,
+    harness_cfg: Dict[str, Any],
+    scenario_key: str,
+    scenario: Dict[str, Any],
+    resolved_system_context: Dict[str, Any],
+    randomize_params: bool,
+    get_stage_llm_clients: Callable,
+    build_loop_assistant_context: Callable,
+    generate_assistant_response: Callable,
+    parse_response: Callable,
+    stringify_response: Callable,
+    resolve_tool_response_contract: Optional[Callable],
+    call_llm_structured: Optional[Callable],
+    logger: Any = None,
+):
+    """Build a student->reviewer respond callable for a harness-reviewed episode."""
+    if resolve_tool_response_contract is None or call_llm_structured is None:
+        raise ValueError("harness_review requires tool-response contract and structured-call hooks")
+    config = HarnessReviewConfig.from_scenario(harness_cfg)
+    student_scenario = {**scenario, "assistant_generation": config.student}
+    contract = resolve_tool_response_contract(student_scenario, resolved_system_context)
+    action_space = build_tool_generation_prompt(
+        format_config=contract["format_config"],
+        base_prompt="",
+        allowed_tools=contract["allowed_tools"],
+    ).strip()
+    review_schema = build_review_schema(contract["schema"])
+    reviewer_clients = get_stage_llm_clients(config.reviewer)
+
+    def student_respond(messages, turn_index):
+        return synthchat_loop_response(
+            scenario=student_scenario,
+            system_context=resolved_system_context,
+            messages=messages,
+            assistant_prompt=str(config.student["prompt"]),
+            randomize_params=randomize_params,
+            scenario_key=f"{scenario_key}:student",
+            turn_index=turn_index,
+            thinking_content=None,
+            build_loop_assistant_context=build_loop_assistant_context,
+            generate_assistant_response=generate_assistant_response,
+            parse_response=parse_response,
+        )
+
+    def review(prompt: str, system_prompt: Optional[str]) -> Dict[str, Any]:
+        return call_llm_structured(
+            prompt=prompt,
+            schema=review_schema,
+            randomize=False,
+            system_prompt=system_prompt,
+            trace_label=f"{scenario_key}:harness_review",
+            max_tokens=config.reviewer.get("max_tokens"),
+            llm_clients=reviewer_clients,
+            max_retries=int(config.reviewer.get("max_retries", 2) or 2),
+        )
+
+    respond, state = build_harnessed_respond(
+        config=config,
+        scenario_key=scenario_key,
+        action_space=action_space,
+        student_respond=student_respond,
+        review=review,
+        parse_replacement=lambda payload: parse_response(json.dumps(payload), student_scenario),
+        validate=validate_agentic_synthchat_response,
+        stringify=stringify_response,
+        logger=logger,
+    )
+    return respond, state, config

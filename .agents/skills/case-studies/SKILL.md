@@ -1,12 +1,12 @@
 ---
 name: case-studies
-description: End-to-end case studies showing how to implement the full training pipeline for different skill types. Covers three complete worked examples — tool-calling training, essay-style training, and agentic search (RAG agent) training — demonstrating dataset design, synthetic generation, validation, fine-tuning, evaluation, and iteration. Use when onboarding to the project, understanding how all components fit together, explaining the pipeline to others, or planning a new training capability. This skill is about UNDERSTANDING the system holistically — reference the other skills for specific CLI commands.
+description: End-to-end case studies showing how to implement the full training pipeline for different skill types. Covers four complete worked examples — tool-calling training, essay-style training, agentic search (RAG agent) training, and harness distillation (student rollouts corrected by a reviewing agent) — demonstrating dataset design, synthetic generation, validation, fine-tuning, evaluation, and iteration. Use when onboarding to the project, understanding how all components fit together, explaining the pipeline to others, or planning a new training capability. This skill is about UNDERSTANDING the system holistically — reference the other skills for specific CLI commands.
 allowed-tools: Read, Bash, Write, Grep, Glob
 ---
 
 # Case Studies: Implementing the Training Pipeline
 
-Three end-to-end worked examples showing how to take a capability from concept to trained model.
+Four end-to-end worked examples showing how to take a capability from concept to trained model.
 
 ## Why Case Studies?
 
@@ -18,17 +18,18 @@ The other skills teach you how to use individual tools:
 
 This skill shows you **how they all connect** — the decisions, the iteration, and the order of operations that turn an idea into a trained capability.
 
-## The Three Case Studies
+## The Four Case Studies
 
 | Case Study | What It Teaches | Reference |
 |-----------|----------------|-----------|
 | **Tool Calling** | Structured output training — teaching a model to call APIs with correct syntax, context objects, and parameters | `reference/tool-calling-pipeline.md` |
 | **Essay Style** | Creative output training — teaching a model to transform messy brainstorms into structured outlines with voice and personality | `reference/essay-style-pipeline.md` |
 | **Agentic Search** | RAG agent training — teaching a model to search a corpus, select relevant documents, and answer grounded in sources | `reference/agentic-search-pipeline.md` |
+| **Harness Distillation** | On-policy agent training — a small student acts, a reviewer passes or minimally corrects each step before it runs, and the result becomes per-turn SFT plus DPO pairs | `reference/harness-distillation-pipeline.md` |
 
 ## The Universal Pipeline
 
-All three case studies follow the same high-level pipeline, but diverge in dataset design and validation:
+All four case studies follow the same high-level pipeline, but diverge in dataset design and validation:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -98,6 +99,7 @@ After evaluation, the failure analysis tells you exactly what to generate next. 
 | **Tool Calling Pipeline** | Understanding the full tools training journey — from schema to trained model | `reference/tool-calling-pipeline.md` |
 | **Essay Style Pipeline** | Understanding the full essay training journey — from brainstorm to outline model | `reference/essay-style-pipeline.md` |
 | **Agentic Search Pipeline** | Understanding the full RAG agent training journey — from corpus to grounded-answer model | `reference/agentic-search-pipeline.md` |
+| **Harness Distillation Pipeline** | Running agent-as-harness collection end to end: reference harness, student/reviewer config, inspection, per-turn SFT + DPO projection, validation | `reference/harness-distillation-pipeline.md` |
 | **Pipeline Comparison** | Side-by-side comparison of how the pipelines differ at each stage | `reference/pipeline-comparison.md` |
 
 ## Cross-References to Other Skills
@@ -117,5 +119,6 @@ At each stage of the pipeline, you'll use tools documented in the other skills:
 - Read the tool-calling case study first — it's the simpler, more mechanical pipeline
 - The essay case study shows how to adapt the pipeline for creative/subjective outputs
 - The agentic search case study shows how to train multi-step reasoning where tools are means to an end
-- All three pipelines use the same trainers, evaluator, and upload tools — only the data differs
+- The harness distillation case study shows how to train on the student's own trajectories instead of teacher-written ones
+- All four pipelines use the same trainers, evaluator, and upload tools — only the data differs
 - When planning a new capability, map it to whichever case study is closer, then adapt

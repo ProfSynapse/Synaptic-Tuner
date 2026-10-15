@@ -67,6 +67,42 @@ formats:
       session_id: "session_eval_001"
       workspace_name: "Current Workspace"
 
+  # -- Student-visible CLI workspace: no note contents, no agent-style tool list --
+  # For on-policy student rollouts (e.g. harness_review). The model must read
+  # notes through tools; CLI syntax comes from scenario extra_sections.
+  cli_student:
+    sections:
+      - tag: session_context
+        source: session_context
+        template: |
+          IMPORTANT: When using tools, include these values in your tool call parameters:
+
+          - sessionId: "{session_id}"
+          - workspaceId: "{workspace_id}" (current workspace)
+
+          Include these as top-level fields in the useTools arguments payload.
+
+      - tag: vault_structure
+        source: vault_structure
+        optional: true
+
+      - tag: available_workspaces
+        source: available_workspaces
+        optional: true
+
+      - source: extra_sections
+
+      - source: assistant_instructions
+        raw: true
+
+    selected_workspace_fields:
+      - context
+      - workspaceStructure
+
+    defaults:
+      session_id: "session_eval_001"
+      workspace_name: "Current Workspace"
+
   # -- Example: Coding IDE format --
   coding_ide:
     sections:
