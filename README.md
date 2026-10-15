@@ -1,8 +1,8 @@
 # HF SFT qualification host fixture
 
 This dedicated host branch is not an engine PR. Its engine Gitlink is exactly
-1da0a80891bd9c63f5635a1133275907a2f5f366, with the actual pushed
-`release/stable-candidate-integration` branch hint. Verify its actual public
+91c4bbb2272e91b92f3b7c8169dfe725e0fa4e22, with the actual pushed
+`release/stable-diagnostics-integration` branch hint. Verify its actual public
 branch HEAD before authenticating a new source proof. Do not substitute `main`
 for this exact selected source.
 The host itself must be reviewed/pushed and its exact branch verified before
@@ -60,3 +60,5 @@ provenance correction, Linux builder isolation and intended stable metadata.
 The selected package version remains 1.1.0; final qualification is still pending. Verify its
 actual pushed branch and this host ref before source authentication. CI and live
 qualification are separate; this fixture alone grants no effects. Owner selected private professorsynapse/toolset-training-artifacts, but no job/upload/model download is authorized by this host. Fresh local source/authority/reader keys and caller config remain private, outside tracked files.
+
+The fresh 2026-10-15 proposal retains separate completion and cancellation attempts. Both descriptors opt into cancellation before plan for bounded queued cleanup: after a 15-minute queue cutoff, either queued job may receive one cancellation command, with at most one per known job total. A queued cleanup is not active-cancellation qualification. Publishing this host does not itself grant spending or execution authority. Earlier consumed attempts remain preserved.
