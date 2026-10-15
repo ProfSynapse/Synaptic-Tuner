@@ -23,6 +23,15 @@ causal cancellation. A separate configured, source-free known-run lifecycle
 candidate now has actual fresh-process conformance tests as described below;
 live qualification remains a separate gate.
 
+The ordinary HF SDK receives an argument list, including the raw Python `-c`
+program. Do not add shell quoting around that individual program argument:
+the image entrypoint's `exec "$@"` preserves argument bytes. A host that
+intentionally constructs a shell command must quote that complete command at
+its own boundary. The separate protected launcher retains its existing
+Base64-chunk envelope and historical shell-safe transport constraints. A
+contract regression or entrypoint inspection does not retrospectively establish
+the cause of a historical job with empty logs.
+
 Ordinary HF jobs retain finite failure information in the provider process exit
 code even when provider logs are empty. Codes 80–89 identify bootstrap admission,
 parent materialization, worker input, source materialization, runtime inventory,
