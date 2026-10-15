@@ -673,3 +673,17 @@ Disk SDK transport and CPU image/ML boundaries are explicit test fixtures. This
 proves host-process reconstruction through the installed public APIs, not live
 Modal recovery, GPU training, restored process-local supervisors, cancellation,
 log authority or automatic continuation. An uncertain submission is never replayed.
+
+### Closed isolated-child failure diagnostics
+
+Packaged GRPO preserves fixed child phase and exception categories through the
+parent, Modal worker, reader and checked-in call inspector. Trusted internal
+milestones locate input admission, rewards, dependency/configuration setup,
+combined model/tokenizer loading, LoRA, data preparation, trainer construction,
+training, measurement callbacks/record assembly and saves. Exception messages,
+locals and raw child logs are not diagnostic authority. Unknown exit statuses
+remain generic; cleanup uncertainty takes priority, and a supervisor deadline is
+separate from a child-reported timeout. Torch OOM uses the loaded shared exception
+identity and does not establish a CUDA device, allocation size or batch capacity.
+These new diagnostics cannot explain an older coarse `GRPO_TRAINER` failure or
+permit replay of its consumed attempt. Retain its original claims and call.

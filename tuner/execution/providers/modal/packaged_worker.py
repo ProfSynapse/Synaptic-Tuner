@@ -244,10 +244,26 @@ class ModalPackagedEvidenceSigner(Protocol):
     def sign(self, purpose: str, payload: bytes, key_ref: str) -> bytes: ...
 
 
+
+# Closed wire vocabulary; no trainer import on an SFT/read-only path.
+GRPO_CHILD_FAILURE_STAGES = frozenset(
+    "TRAINER_CHILD_" + phase + "_" + category
+    for phase in ("TRANSPORT", "RELEASE", "INPUT", "IMPORT", "EXEC", "POSTCHECK")
+    for category in ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER")
+) | frozenset("TRAINER_CHILD_EXEC_" + category for category in
+              ("RUNTIME", "TYPE", "ATTRIBUTE", "KEY", "MEMORY", "TORCH_OOM", "TIMEOUT")) | frozenset(
+    "TRAINER_CHILD_EXEC_" + category + "_" + phase
+    for phase in ("INPUT_ADMISSION", "REWARDS", "DEPENDENCIES", "CONFIG", "MODEL_LIBRARY_LOAD",
+                  "LORA_ATTACH", "DATA_PREP", "TRAINER_SETUP", "TRAIN_CALL",
+                  "MEASUREMENT_BEGIN", "MEASUREMENT_END", "MEASUREMENT_RECORD", "SAVE", "POST_SAVE")
+    for category in ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER", "RUNTIME", "TYPE",
+                     "ATTRIBUTE", "KEY", "MEMORY", "TORCH_OOM", "TIMEOUT")
+)
+
 _GRPO_FAILURE_STAGES = frozenset({
     "ADMISSION", "REVALIDATION", "PREPARATION", "INVOCATION", "TRAINER",
     "CHILD_DEADLINE", "CLEANUP_UNCERTAIN", "ARTIFACT",
-})
+}) | GRPO_CHILD_FAILURE_STAGES
 PACKAGED_WORKER_FAILURE_STAGES = PACKAGED_WORKER_FAILURE_STAGES | frozenset(
     "GRPO_" + value for value in _GRPO_FAILURE_STAGES
 ) | {"GRPO_UNKNOWN"}

@@ -241,3 +241,31 @@ def test_retained_runtime_with_real_dataset(tmp_path):
     assert isinstance(events[1][1]["train_dataset"], datasets.Dataset)
     assert events[1][1]["train_dataset"][0]["prompt"] == "say OK"
     assert json.loads(result["training_metrics"].read_bytes())["global_step"] == 3
+
+
+def test_private_milestones_follow_actual_core_boundaries(tmp_path):
+    values = inputs(tmp_path)
+    marks = []
+    runtime.run_grpo(**values, _dependency_factory=dependencies([]), _runtime_milestone=marks.append)
+    assert marks == ['INPUT_ADMISSION', 'REWARDS', 'DEPENDENCIES', 'CONFIG',
+                     'MODEL_LIBRARY_LOAD', 'LORA_ATTACH', 'DATA_PREP', 'TRAINER_SETUP',
+                     'TRAIN_CALL', 'MEASUREMENT_RECORD', 'SAVE', 'POST_SAVE']
+
+
+@pytest.mark.parametrize('boundary', ['config', 'trainer', 'train', 'save'])
+def test_milestone_stays_at_actual_failing_operation(tmp_path, boundary):
+    values = inputs(tmp_path)
+    marks = []
+    deps = dependencies([], save_error=boundary == 'save')()
+    def reject(*args, **kwargs):
+        raise RuntimeError('PRIVATE_SENTINEL')
+    if boundary == 'config':
+        deps['config_class'] = reject
+    elif boundary == 'trainer':
+        deps['trainer_class'] = reject
+    elif boundary == 'train':
+        deps['trainer_class'].train = reject
+    with pytest.raises(Exception):
+        runtime.run_grpo(**values, _dependency_factory=lambda: deps, _runtime_milestone=marks.append)
+    assert marks[-1] == {'config':'CONFIG', 'trainer':'TRAINER_SETUP',
+                          'train':'TRAIN_CALL', 'save':'SAVE'}[boundary]

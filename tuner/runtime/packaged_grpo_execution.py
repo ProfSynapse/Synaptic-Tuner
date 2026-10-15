@@ -24,12 +24,52 @@ _CHILD_SCHEMA = "synaptic-packaged-grpo-child/v1"
 LINEAGE_SCHEMA = "synaptic-packaged-grpo-training-lineage/v1"
 TERMINAL_SCHEMA = "synaptic-packaged-grpo-terminal/v1"
 
+# Exit status is a finite diagnostic channel, never exception text or authority.
+GRPO_RUNTIME_MILESTONES = (
+    "INPUT_ADMISSION", "REWARDS", "DEPENDENCIES", "CONFIG", "MODEL_LIBRARY_LOAD",
+    "LORA_ATTACH", "DATA_PREP", "TRAINER_SETUP", "TRAIN_CALL",
+    "MEASUREMENT_BEGIN", "MEASUREMENT_END", "MEASUREMENT_RECORD", "SAVE", "POST_SAVE",
+)
+_GRPO_EXCEPTION_CATEGORIES = (
+    "OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER", "RUNTIME", "TYPE",
+    "ATTRIBUTE", "KEY", "MEMORY", "TORCH_OOM", "TIMEOUT",
+)
+GRPO_CHILD_EXIT_STAGES = {code: stage for code, stage in shared.CHILD_EXIT_STAGES.items() if code < 80}
+GRPO_CHILD_EXIT_STAGES.update({
+    80 + milestone * len(_GRPO_EXCEPTION_CATEGORIES) + category:
+        "TRAINER_CHILD_EXEC_" + kind + "_" + phase
+    for milestone, phase in enumerate(GRPO_RUNTIME_MILESTONES)
+    for category, kind in enumerate(_GRPO_EXCEPTION_CATEGORIES)
+})
+GRPO_CHILD_EXIT_STAGES[248] = "TRAINER_CHILD_EXEC_TIMEOUT"
+GRPO_CHILD_FAILURE_STAGES = frozenset(GRPO_CHILD_EXIT_STAGES.values())
+
+
+def _classified_grpo_failure(phase, error, milestone=None):
+    from tuner.runtime.packaged_sft_child import _classified_failure, _ChildFailure
+    base = _classified_failure(phase, error)
+    if phase != "EXEC":
+        return base
+    if isinstance(error, TimeoutError):
+        category = "TIMEOUT"
+    elif base.exit_code == 76:
+        category = "TORCH_OOM"
+    elif 70 <= base.exit_code <= 74:
+        category = ("RUNTIME", "TYPE", "ATTRIBUTE", "KEY", "MEMORY")[base.exit_code - 70]
+    else:
+        category = ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER")[base.exit_code - 60]
+    if type(milestone) is str and milestone in GRPO_RUNTIME_MILESTONES:
+        return _ChildFailure(80 + GRPO_RUNTIME_MILESTONES.index(milestone)
+                             * len(_GRPO_EXCEPTION_CATEGORIES)
+                             + _GRPO_EXCEPTION_CATEGORIES.index(category))
+    return _ChildFailure(248) if category == "TIMEOUT" else base
+
 
 class PackagedGRPOExecutionError(RuntimeError):
     """Closed consumed-execution failure; never automatic replay authority."""
     def __init__(self, stage):
         if stage not in {"ADMISSION", "REVALIDATION", "PREPARATION", "INVOCATION",
-                         "TRAINER", "CHILD_DEADLINE", "CLEANUP_UNCERTAIN", "ARTIFACT"}:
+                         "TRAINER", "CHILD_DEADLINE", "CLEANUP_UNCERTAIN", "ARTIFACT"} | GRPO_CHILD_FAILURE_STAGES:
             stage = "ADMISSION"
         self.stage = stage
         super().__init__("PACKAGED_GRPO_" + stage + "_REJECTED")
@@ -206,6 +246,7 @@ def execute_admitted_packaged_grpo(admitted, *, model_preparer, on_metric_frame=
             every_n_steps=1, on_metric_frame=on_metric_frame, on_metric_exhausted=on_metric_exhausted,
             deadline=deadline)
         if exit_code != 0:
+            stage = GRPO_CHILD_EXIT_STAGES.get(exit_code, "TRAINER")
             raise ValueError
         stage = "ARTIFACT"
         custody.check()

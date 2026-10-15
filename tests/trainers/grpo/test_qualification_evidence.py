@@ -332,9 +332,12 @@ def test_real_retained_core_callbacks_rewards_and_saved_records(tmp_path, update
     values["workload"]["model"] = deepcopy(values["model_identity"])
     values["workload"]["config"] = deepcopy(values["config"])
     events = []
+    marks = []
     result = runtime.run_grpo(**values, _dependency_factory=core_factory(events, update=update),
         _packaged_artifacts=True, qualification_evidence=POLICY,
-        _child_deadline=time.monotonic() + 30)
+        _child_deadline=time.monotonic() + 30, _runtime_milestone=marks.append)
+    assert marks[marks.index("TRAIN_CALL") + 1:marks.index("MEASUREMENT_RECORD")] == [
+        "MEASUREMENT_BEGIN", "TRAIN_CALL", "MEASUREMENT_END", "TRAIN_CALL"]
     lineage = json.loads(result["training_lineage"].read_bytes())
     metrics = json.loads(result["training_metrics"].read_bytes())
     assert lineage["qualification_evidence"] == metrics["qualification_evidence"]
@@ -373,3 +376,9 @@ def test_impossible_reward_counts_and_single_value_moments_refuse(change):
         record["rewards"]["nonconstant_callbacks"] = 0
     with pytest.raises(ValueError):
         validate(record, logs)
+
+
+def test_grpo_classification_uses_actual_loaded_torch_oom_identity():
+    from tuner.runtime.packaged_grpo_execution import _classified_grpo_failure, GRPO_CHILD_EXIT_STAGES
+    failure = _classified_grpo_failure('EXEC', torch.OutOfMemoryError('PRIVATE_SENTINEL'), 'TRAIN_CALL')
+    assert GRPO_CHILD_EXIT_STAGES[failure.exit_code] == 'TRAINER_CHILD_EXEC_TORCH_OOM_TRAIN_CALL'
