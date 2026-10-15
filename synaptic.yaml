@@ -1,7 +1,7 @@
 schema_version: synaptic-project/v1
 project:
-  id: sft-final-1da-qualification
-  name: SFT final stable candidate qualification
+  id: sft-lifecycle-91c4-qualification
+  name: SFT final diagnostics active cancellation qualification
 engine:
   requires: '>=1.0,<2.0'
   api: v1

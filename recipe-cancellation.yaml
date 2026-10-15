@@ -1,4 +1,4 @@
-name: sft-final-cf-cancellation-final-1da
+name: sft-active-cancel-final-91c4
 target: cloud
 method: sft
 provider: modal
@@ -56,3 +56,8 @@ artifacts:
   - tokenizer
   retain_checkpoints: false
 allow_cancel_reconcile: true
+
+observation_capture:
+  schema_version: synaptic-training-observation-capture/v1
+  every_n_steps: 1
+  max_records: 32
