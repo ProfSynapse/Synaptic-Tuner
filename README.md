@@ -1,5 +1,27 @@
 # Final Modal SFT qualification host
 
-Genuine engine gitlink55b4e946c33b0c4969e3abecac4580c2dec0bd10 selects release/stable-qualification-fixes. This host branch is a consuming fixture, never an engine-main PR. Existing ingestion/preparation config retains all16 authored documents and eight messages/v2 rows, split6/2, semantic58f367d391782375b2fb04c31c5b7c50fec804b35e4a7a54c668433d9018971d.
+The genuine engine gitlink selects `55b4e946c33b0c4969e3abecac4580c2dec0bd10`
+on `release/stable-qualification-fixes`. This branch is a consuming host fixture;
+it must not be merged into the engine's main branch.
 
-recipe-completion.yaml is a two-step/capture2 configuration for two separately admitted fresh metrics completions on the same final code; generate each canonical candidate with the existing normal --plan metrics-qualification flags. recipe-cancellation.yaml is a separate32step initial-opt-in/capture32 configuration. Use the checked-in caller supervisor only under an exact reviewed admission. CPU transport proof does not imply training, signed metrics delivery, cancellation or image qualification. No logs capability promotion or success is claimed by this fixture. Each run needs fresh resources/claims, original keys and current account/scope/source proof. PriorB1da/ac evidence stays historical; never replay it.
+The existing ingestion and preparation configurations retain all 16 authored
+documents and produce eight messages/v2 rows, with six training rows and two
+validation rows. The semantic dataset digest is
+`58f367d391782375b2fb04c31c5b7c50fec804b35e4a7a54c668433d9018971d`.
+
+`recipe-completion.yaml` selects two training steps and two captured metric
+records. It supports two separately admitted, fresh metrics completion attempts
+on the same final code. Generate each canonical admission candidate using the
+existing normal `--plan` metrics qualification flags.
+
+`recipe-cancellation.yaml` is a separate configuration with 32 steps, initial
+cancellation opt-in and a capture budget of 32 records. Use the checked-in caller
+supervisor only under an exact reviewed admission. A CPU transport proof does
+not establish training, pre-completion metric delivery, cancellation or complete
+image qualification. This fixture does not promote a logs capability or claim
+successful qualification.
+
+Each run requires fresh resources and claims, original signing keys, and current
+account, scope and source evidence. Previous attempts and receipts remain
+historical; never replay them. Candidate source and local preparation remain
+provisional until their independent tests, CI and root review pass.
