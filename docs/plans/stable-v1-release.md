@@ -28,7 +28,50 @@ pipeline compositions retain truthful backend status; no facade or CLI alone
 establishes a stable installed operational contract.
 The Python API is a library contract, not a deployed HTTP/MCP service.
 
-## Current release status — 2026-10-15
+## Current release status — 2026-10-15, qualification repairs
+
+[#256](https://github.com/ProfSynapse/Synaptic-Tuner/pull/256) merged after all
+18 checks passed on `ac5581a8`. Concurrent work reached main first, so the merge
+contains the exact reviewed change but its whole tree differs from that tested
+candidate. Evidence below binds `ac5581a8`, not all concurrent main changes.
+No stable tag or package publication has occurred.
+
+- **Modal SFT:** a fresh `ac5581a8` run completed 32 steps and passed native
+  five-artifact verification/download and cold readback. The local interruption
+  supervisor failed before sending a signal; no cancellation was issued.
+  Active cancellation remains inconclusive. A reusable caller-owned supervisor
+  now retains the process identity, bounds control/output waits and records an
+  owned interruption separately from an unrelated process exit. Its local
+  progress hint does not replace the cold public authority check before cancel.
+- **Modal GRPO:** the `ac5581a8` CPU qualification passed. GPU qualification
+  remains open. The SFT repair changes shared closure members, so that earlier
+  CPU result does not qualify the next source candidate.
+- **HF SFT:** the owner approved two replacement L40S jobs after the pause.
+  Both were submitted and ended in provider `ERROR`, exit 1, with empty retained
+  logs. Their underlying cause is unknown; no cancellation was issued. That
+  two-job approval is consumed. Independent contract tests demonstrate that the
+  ordinary SDK command must pass raw Python source as one argv element; the
+  extra shell quoting is removed. Closed finite exit diagnostics are added for
+  future attempts, without reinterpreting these failures or changing the
+  protected smoke transport. Further paid jobs need a fresh reviewed plan and
+  owner approval.
+- **Docker SFT:** the desktop attempt failed before trainer execution. A CPU
+  replay of its exact staged workload established that unsupported precision
+  fields were rejected; raw-text optional controls also exposed a separate
+  compiler/runtime mismatch. Shared validation now rejects unsupported prepared
+  controls during compilation and accepts the supported neutral raw controls.
+  The fixture uses existing adaptive precision. Both pinned model caches remain
+  retained; the corrected source requires a fresh derived image and attempts.
+- **Nontraining and local publication:** the earlier scoped evidence below
+  remains retained. These training repairs do not justify extra model calls or
+  relabel the original source of those results.
+
+The repair candidate still needs its final source/installed distribution checks,
+CI and affected live qualification. SFT provider parity, active cancellation,
+known-run recovery and a genuine Modal GRPO update remain release gates. Failed
+claims are preserved; no consumed or uncertain submission may be replayed.
+
+## Earlier release status — 2026-10-15, before replacement qualification
 
 Main is `64683fce1005a24ad57a3d0f2ee3e54ee8c68dc3`, through merged
 [#255](https://github.com/ProfSynapse/Synaptic-Tuner/pull/255). Its tree matches
