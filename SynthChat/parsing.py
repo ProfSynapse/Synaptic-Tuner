@@ -230,7 +230,10 @@ def parse_assistant_response(content: str, scenario: Dict, *, wrapper_specs=None
                     normalized_tc["function"]["name"] = normalized_name
                     if isinstance(normalized_args, dict):
                         if isinstance(args, dict):
-                            normalized_args = _omit_optional_wrapper_nulls(normalized_args, wrapper_spec)
+                            normalized_args = _omit_optional_wrapper_nulls(
+                                normalized_args,
+                                wrapper_spec if fn.get("name") == (wrapper_spec or {}).get("wrapper_name") else None,
+                            )
                         if wrapper_spec is not None:
                             normalized_args = _order_wrapper_arguments(normalized_args, wrapper_spec)
                         normalized_tc["function"]["arguments"] = json.dumps(normalized_args)

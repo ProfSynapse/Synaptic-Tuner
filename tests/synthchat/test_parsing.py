@@ -337,3 +337,16 @@ def test_native_null_without_any_wrapper_registry_is_preserved():
         {"function": {"name": "set_value", "arguments": {"value": None, "name": "x"}}}]})
     result = parse_assistant_response(payload, {}, wrapper_specs=[])
     assert json.loads(result["tool_calls"][0]["function"]["arguments"]) == {"value": None, "name": "x"}
+
+
+def test_shape_inferred_native_wrapper_does_not_omit_null():
+    from shared.validation.parsing.configured_formats import build_wrapper_specs
+    specs = build_wrapper_specs({"custom": {"wrapper_name": "configuredAction", "arguments_encoding": "object",
+        "argument_fields": {"required": ["required"], "properties": {
+            "required": {"type": "string"}, "optional": {"type": "string"}}}}})
+    payload = json.dumps({"content": None, "tool_calls": [
+        {"function": {"name": "nativeAction", "arguments": {"required": "value", "optional": None}}}]})
+    result = parse_assistant_response(payload, {}, wrapper_specs=specs)
+    # Legacy shape-based wrapper normalization remains unchanged, but it does
+    # not establish an object-encoding declaration for this native input.
+    assert json.loads(result["tool_calls"][0]["function"]["arguments"]) == {"required": "value", "optional": None}
