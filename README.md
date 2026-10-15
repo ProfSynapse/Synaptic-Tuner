@@ -1,7 +1,7 @@
 # Public Docker SFT qualification host
 
 This dedicated host branch is not an engine PR. Its real engine Gitlink is
-af1cb98912cfbb446101526d41285ac39e54b034, with the declared
+864a9bccbc8bd866c56c021c131f12959f8a8649, with the declared
 `release/stable-qualification-fixes` branch hint (PR258). Local Git
 inspection proves the actual checkout/gitlink and clean source; it does not
 prove this host has been pushed. Root reviews/pushes the host and verifies exact
@@ -58,3 +58,5 @@ verification and CPU result is required before new training. Both independently
 verified model caches and all earlier claims remain preserved. Fresh run IDs,
 source/material bindings and supported explicit cache mapping are required;
 never replay an earlier consumed or uncertain attempt.
+
+The current engine is a test-only successor of `af1cb989`. Its four changed test files are excluded from the reviewed package/runtime source inventories. The existing image C, wheel built from af1, canonical runtime release and CPU evidence keep their original provenance; they are not relabeled as a rebuild from this source. Fresh host/source authentication still binds the actual current engine Gitlink before any new run.
