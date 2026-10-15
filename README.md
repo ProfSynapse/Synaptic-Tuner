@@ -1,8 +1,8 @@
 # Public Docker SFT qualification host
 
 This dedicated host branch is not an engine PR. Its real engine Gitlink is
-1da0a80891bd9c63f5635a1133275907a2f5f366, with the declared
-`release/stable-candidate-integration` branch hint (PR255). Local Git
+018aff48508afecc092d16f97d13b7f794079b7b, with the declared
+`release/stable-diagnostics-integration` branch hint (PR256). Local Git
 inspection proves the actual checkout/gitlink and clean source; it does not
 prove this host has been pushed. Root reviews/pushes the host and verifies exact
 remote refs before source authentication or provider effects.
@@ -46,3 +46,7 @@ model download, GPU training, submission or cancellation. The separately
 approved public base pull is external retained evidence, not a claim by this repo.
 
 Git retains the historical prepared publication bytes, not private filesystem modes. The fixture test verifies an exact private copy; execution must create a fresh private publication through the supported preparation workflow.
+
+This fresh local host selects the diagnostic candidate for review. It has not been pushed or granted new effects. Earlier consumed runs and private state remain preserved.
+
+Docker SFT explicitly reuses the independently verified image B `6ba481fd...`, runtime release `b186cc00...`, and original c8fd wheel provenance under unchanged fixed SFT closures. The image does not contain the diagnostic candidate wheel. Existing completion model cache and run/cache mapping are retained; only fresh signed material outputs will be created after final admission.
