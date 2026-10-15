@@ -1,0 +1,5 @@
+# Final Modal SFT qualification host
+
+Genuine engine gitlink55b4e946c33b0c4969e3abecac4580c2dec0bd10 selects release/stable-qualification-fixes. This host branch is a consuming fixture, never an engine-main PR. Existing ingestion/preparation config retains all16 authored documents and eight messages/v2 rows, split6/2, semantic58f367d391782375b2fb04c31c5b7c50fec804b35e4a7a54c668433d9018971d.
+
+recipe-completion.yaml is a two-step/capture2 configuration for two separately admitted fresh metrics completions on the same final code; generate each canonical candidate with the existing normal --plan metrics-qualification flags. recipe-cancellation.yaml is a separate32step initial-opt-in/capture32 configuration. Use the checked-in caller supervisor only under an exact reviewed admission. CPU transport proof does not imply training, signed metrics delivery, cancellation or image qualification. No logs capability promotion or success is claimed by this fixture. Each run needs fresh resources/claims, original keys and current account/scope/source proof. PriorB1da/ac evidence stays historical; never replay it.

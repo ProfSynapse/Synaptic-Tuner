@@ -1,4 +1,4 @@
-name: sft-final-cf-completion-final-1da
+name: sft-metrics-completion-final-55b4
 target: cloud
 method: sft
 provider: modal
@@ -55,3 +55,7 @@ artifacts:
   - final_model
   - tokenizer
   retain_checkpoints: false
+observation_capture:
+  schema_version: synaptic-training-observation-capture/v1
+  every_n_steps: 1
+  max_records: 2
