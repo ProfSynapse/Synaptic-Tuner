@@ -43,7 +43,7 @@ from shared.training_utils import build_trainer_config, reject_unknown_config_ke
 # src/env_rewards.py. tests/trainers/grpo/test_grpo_config_keys.py fails if this
 # drifts from the keys the code reads.
 ENV_GRPO_CONFIG_SCHEMA = {
-    "model": {"model_name": None},
+    "model": {"model_name": None, "model_revision": None},
     "dataset": {
         "dataset_name": None,
         "dataset_file": None,
@@ -74,6 +74,7 @@ ENV_GRPO_CONFIG_SCHEMA = {
         "optim": None,
         "use_vllm": None,
         "vllm_mode": None,
+        "chat_template_kwargs": None,
         "extra_args": None,
     },
     "lora": {
@@ -171,6 +172,33 @@ def build_grpo_trainer_class(*, allow_transformers_rollout_func: bool):
     return TransformersRolloutGRPOTrainer
 
 
+def _validated_chat_template_kwargs(value: Any) -> Dict[str, Any]:
+    """``training.chat_template_kwargs`` checked with the shared validator ({} when unset)."""
+    if value is None:
+        return {}
+    from synaptic_tuner.api.v1.training_input import validate_chat_template_kwargs
+
+    return validate_chat_template_kwargs(value)
+
+
+def _model_init_kwargs_with_revision(existing: Any, model_revision: str) -> Dict[str, Any]:
+    """Add ``revision`` to GRPOConfig.model_init_kwargs, refusing a conflicting one."""
+    if existing is None:
+        merged: Dict[str, Any] = {}
+    elif isinstance(existing, dict):
+        merged = dict(existing)
+    else:
+        raise TypeError("training.extra_args.model_init_kwargs must be a mapping/dict")
+    configured = merged.get("revision")
+    if configured is not None and configured != model_revision:
+        raise ValueError(
+            "training.extra_args.model_init_kwargs.revision "
+            f"({configured!r}) conflicts with model.model_revision ({model_revision!r})"
+        )
+    merged["revision"] = model_revision
+    return merged
+
+
 def load_config(config_path: str | None = None) -> Dict[str, Any]:
     if config_path is None:
         config_path = str(Path(__file__).parent / "configs" / "env_config.yaml")
@@ -192,6 +220,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     )
     parser.add_argument("--max-examples", type=int, default=0, help="Limit dataset rows during validation")
     parser.add_argument("--model-name", type=str, default=None, help="Override model.model_name")
+    parser.add_argument(
+        "--model-revision",
+        type=str,
+        default=None,
+        help="Override model.model_revision (Hub commit/branch/tag for model and tokenizer)",
+    )
     parser.add_argument("--dataset-name", type=str, default=None, help="Override dataset.dataset_name")
     parser.add_argument("--dataset-file", type=str, default=None, help="Override dataset.dataset_file")
     parser.add_argument("--local-file", type=str, default=None, help="Override dataset.local_file")
@@ -218,6 +252,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
     if args.model_name:
         model_cfg["model_name"] = args.model_name
+    if args.model_revision:
+        model_cfg["model_revision"] = args.model_revision
     if args.dataset_name:
         dataset_cfg["dataset_name"] = args.dataset_name
     if args.dataset_file:
@@ -254,6 +290,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         return {"bootstrap_commands": commands}
 
     env_cfg = config.get("env_training") or {}
+    # Same key and validation as the SFT/GRPO trainers; applied to the dataset
+    # prompt render and to every chat-template render inside the rollout.
+    chat_template_kwargs = _validated_chat_template_kwargs(training_cfg.get("chat_template_kwargs"))
     required_reviews = list((env_cfg.get("required_stage_reviews") or []))
     config_dir = Path(config["_config_path"]).parent if config.get("_config_path") else Path.cwd()
     local_file = dataset_cfg.get("local_file")
@@ -314,6 +353,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     model_name = str(model_cfg.get("model_name") or "").strip()
     if not model_name or model_name == "REPLACE_WITH_BUCKETED_SFT_MODEL":
         raise RuntimeError("Set model.model_name in env_config.yaml to the published bucketed SFT model repo")
+    model_revision = str(model_cfg.get("model_revision") or "").strip() or None
 
     from transformers import AutoTokenizer
     from trl import GRPOConfig
@@ -329,6 +369,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     print("ENV-GRPO TRAINING CONFIGURATION")
     print("=" * 60)
     print(f"Model: {model_name}")
+    print(f"Model revision: {model_revision or '(default branch)'}")
+    print(f"Chat template kwargs: {chat_template_kwargs or '(none)'}")
     print(f"Raw examples: {len(raw_dataset)}")
     print(f"Filtered examples: {len(filtered_dataset)}")
     print(f"Output: {run_dir}")
@@ -343,7 +385,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     print(f"Learning rate: {training_cfg.get('learning_rate', 5e-6)}")
     print("=" * 60 + "\n")
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, revision=model_revision)
     formatted_dataset = formatted_dataset.map(
         lambda ex: {
             **ex,
@@ -351,6 +393,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 ex["prompt_messages"],
                 tokenize=False,
                 add_generation_prompt=True,
+                **chat_template_kwargs,
             ),
         },
         desc="Rendering chat prompts",
@@ -362,7 +405,9 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     rollout_func = build_rollout_func(
         registry=registry,
         env_training_cfg=env_cfg,
+        use_vllm=bool(training_cfg.get("use_vllm", False)),
         runtime_support=runtime_support,
+        chat_template_kwargs=chat_template_kwargs,
     )
     reward_func = build_env_reward_function(config.get("rewards") or {})
     trainer_cls = build_grpo_trainer_class(
@@ -420,6 +465,14 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         raise TypeError("training.extra_args must be a mapping/dict")
     grpo_kwargs.update(extra_args)
     grpo_origins.update({name: f"training.extra_args.{name}" for name in extra_args})
+    if model_revision:
+        # The trainer loads the policy (and any ref model) from model_name via
+        # GRPOConfig.model_init_kwargs; pin it to the same revision as the tokenizer.
+        grpo_kwargs["model_init_kwargs"] = _model_init_kwargs_with_revision(
+            grpo_kwargs.get("model_init_kwargs"),
+            model_revision,
+        )
+        grpo_origins.setdefault("model_init_kwargs", "model.model_revision")
     grpo_args = build_trainer_config(
         GRPOConfig,
         grpo_kwargs,
