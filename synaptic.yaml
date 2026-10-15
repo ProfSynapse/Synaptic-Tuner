@@ -1,7 +1,7 @@
 schema_version: synaptic-project/v1
 project:
-  id: synaptic-grpo-diagnostics-20261015
-  name: GRPO diagnostic candidate qualification
+  id: synaptic-grpo-final-55b4-20261015
+  name: GRPO final qualification fixes candidate
 engine:
   requires: ==1.1.0
   api: v1
