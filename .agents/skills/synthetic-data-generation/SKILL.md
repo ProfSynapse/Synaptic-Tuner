@@ -21,6 +21,8 @@ schemas, mappings, and quality policy in caller configuration.
    - Author or revise rubrics: `references/rubric-authoring.md`.
    - Understand generation quality gates, repair loops, privacy, and config-first
      architecture: `references/generation-workflow.md`.
+   - Collect on-policy student rollouts with a reviewing agent that passes or
+     replaces each turn (agent-as-harness): `references/harness-review.md`.
    - Regenerate selected rows with checked-in commands:
      `references/targeted-regeneration.md`.
    - Project environment rollouts into SFT, KTO, or GRPO data, or pick the
