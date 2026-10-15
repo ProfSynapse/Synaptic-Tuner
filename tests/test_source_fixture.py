@@ -10,7 +10,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "synaptic-tuner"
-PIN = "ac5581a8ee442ec7692bb152c3c5e0c299838ab2"
+PIN = "038a62984a4745574d1eaf739a77272a62bb6deb"
 ORIGIN = "https://github.com/ProfSynapse/Synaptic-Tuner.git"
 
 if ENGINE.resolve(strict=True) != ENGINE:
@@ -60,7 +60,7 @@ class ConsumerSourceTests(unittest.TestCase):
         self.assertEqual(source.engine_source.commit, PIN)
         self.assertEqual(source.engine_source.gitlink_commit, PIN)
         self.assertEqual(source.engine_source.submodule_path, "synaptic-tuner")
-        self.assertEqual(source.engine_source.branch, "release/stable-diagnostics-integration")
+        self.assertEqual(source.engine_source.branch, "release/stable-qualification-fixes")
         self.assertFalse(source.project_source.dirty)
         self.assertFalse(source.engine_source.dirty)
         self.assertFalse(source.project_source.pushed)
@@ -92,6 +92,11 @@ class ConsumerSourceTests(unittest.TestCase):
         config = json.loads((ROOT / "configuration/hf-sft-v1/sft-config.json").read_bytes())
         self.assertEqual(config["dataset"]["revision"], digest)
         self.assertEqual(config["dataset"]["format"], "syntunia-sft-row/v1")
+        self.assertNotIn("bf16", config["sft"])
+        self.assertNotIn("fp16", config["sft"])
+        self.assertIs(config["sft"]["packing"], False)
+        from Trainers.sft.runtime_v1 import validate_sft_runtime_controls
+        validate_sft_runtime_controls(config["sft"], config["dataset"])
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
 # Public Docker SFT qualification host
 
 This dedicated host branch is not an engine PR. Its real engine Gitlink is
-ac5581a8ee442ec7692bb152c3c5e0c299838ab2, with the declared
-`release/stable-diagnostics-integration` branch hint (PR256). Local Git
+038a62984a4745574d1eaf739a77272a62bb6deb, with the declared
+`release/stable-qualification-fixes` branch hint (PR258). Local Git
 inspection proves the actual checkout/gitlink and clean source; it does not
 prove this host has been pushed. Root reviews/pushes the host and verifies exact
 remote refs before source authentication or provider effects.
@@ -19,8 +19,10 @@ Retained bundle digest: cbad3e6be421470a8f3480944f95e52f151ec315d0914472fee27e24
 Prepared semantic identity: 7aa26aba079ac1210466c5c2cdf747f00c764b5bc4ed366e2f67af7ffa0d3770.
 Original JSONL: 2,821 bytes, SHA256739b3df17bf7fc39d5c9487136a633e8ad2703e700271e224756df8074d2c361.
 The retained source SFT config selects Qwen/Qwen3.5-4B and tokenizer revision
-851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a. Its historical three-step config is
-unchanged evidence, not the new Docker completion/cancel request.
+851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a. The source fixture retains its three-step duration and explicitly uses the
+existing adaptive precision policy. Unsupported BF16/FP16 configuration fields
+are removed in this new host commit; earlier commits preserve the original
+configuration. This fixture is not a new completion/cancel request.
 
 New Docker inputs are private and create-only. The checkout-owned
 `examples/training_qualification/prepare_docker.py` alongside the accepted
@@ -49,6 +51,10 @@ Git retains the historical prepared publication bytes, not private filesystem mo
 
 This fresh local host selects the diagnostic candidate for review. Publishing this host does not itself grant execution authority. Earlier consumed runs and private state remain preserved.
 
-Docker SFT explicitly reuses the independently verified image B `6ba481fd...`, runtime release `b186cc00...`, and original c8fd wheel provenance under unchanged fixed SFT closures. The image does not contain the diagnostic candidate wheel. Existing completion model cache and run/cache mapping are retained; only fresh signed material outputs will be created after final admission.
-
-The ac5581a8 source update changes only two test fixtures after the prior 91c4 candidate. Packaged member equality is reviewed separately; the existing final 982a host wheel, image B and independently verified completion/cancellation model caches remain explicitly preserved. Fresh source material must bind this actual pushed host and engine commit; prior source proofs are not relabeled.
+The current candidate changes the SFT core and its authenticated closure. Image B
+and release b186cc00 remain historical evidence; they do not attest this repaired
+runtime. A fresh derived image with the accepted current wheel, actual capture,
+verification and CPU result is required before new training. Both independently
+verified model caches and all earlier claims remain preserved. Fresh run IDs,
+source/material bindings and supported explicit cache mapping are required;
+never replay an earlier consumed or uncertain attempt.
