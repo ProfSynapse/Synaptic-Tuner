@@ -268,3 +268,11 @@ Only actual fresh pending permits a separately requested existing public
 calls cancel or an SDK. Natural completion, unknown state, lost custody or missing
 progress is inconclusive and never authorizes replay. Existing provider/component
 bounds still apply; the supervisor wait bound does not terminate remote work.
+
+Status output also uses nonblocking bounded writes: a nonreading pipe/TTY cannot
+hold the supervisor past its wait deadline (a final closed refusal has at most a
+one-second output tail). An attempted signal is consumed even on error. Only a
+returned owned signal followed by reaping the expected SIGKILL writes a completed
+interruption receipt; an external SIGKILL or uncertain signal is not normalized
+to successful interruption. Ordinary producer exit0 remains completion, not
+cancellation evidence.

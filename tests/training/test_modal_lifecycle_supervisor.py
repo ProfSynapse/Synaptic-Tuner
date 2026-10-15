@@ -716,6 +716,7 @@ def test_signal_failure_keeps_consumed_intent_and_refuses_second_interrupt(
         with pytest.raises(m.Refused, match="INTERRUPTION_CONSUMED"):
             p.interrupt(validate=lambda: 1)
         assert len(calls) == 1 and p.process.poll() is None
+        assert not p.interruption_completed
         assert (
             json.loads((tmp_path / "interruption-intent.json").read_text())["status"]
             == "consumed_before_signal"
@@ -723,3 +724,95 @@ def test_signal_failure_keeps_consumed_intent_and_refuses_second_interrupt(
     finally:
         monkeypatch.setattr(signal, "pidfd_send_signal", real_signal)
         cleanup(p)
+
+
+def test_real_external_sigkill_is_not_completed_owned_interruption(tmp_path):
+    p = producer(tmp_path)
+    try:
+        p.process.kill()
+        assert p.process.wait(timeout=5) == -signal.SIGKILL
+        assert not p.interrupted and not p.interruption_completed
+        assert not (tmp_path / "interruption-receipt.json").exists()
+    finally:
+        cleanup(p)
+
+
+def test_owned_interrupt_has_completed_durable_receipt(tmp_path):
+    p = producer(tmp_path)
+    try:
+        assert p.interrupt(validate=lambda: 1) == -signal.SIGKILL
+        assert p.interruption_completed
+        receipt = json.loads((tmp_path / "interruption-receipt.json").read_text())
+        assert receipt["status"] == "owned_signal_returned_and_reaped"
+        assert receipt["start_time"] == p.start
+    finally:
+        cleanup(p)
+
+
+@pytest.mark.parametrize(
+    "completed,returncode,expected", [(False, -9, 2), (True, -9, 0), (False, 0, 0)]
+)
+def test_cli_never_normalizes_external_or_uncertain_sigkill(
+    tmp_path, monkeypatch, completed, returncode, expected
+):
+    monkeypatch.setattr(
+        sys, "argv", ["supervisor", "--config", str(tmp_path / "config")]
+    )
+    monkeypatch.setattr(m, "load_config", lambda _: {})
+    monkeypatch.setattr(
+        m,
+        "supervise",
+        lambda _: {
+            "producer_returncode": returncode,
+            "interruption_completed": completed,
+        },
+    )
+    assert m.main() == expected
+
+
+def test_actual_full_status_pipe_cannot_block_supervisor_deadline(tmp_path):
+    state, output = tmp_path / "state", tmp_path / "output"
+    state.mkdir(mode=0o700)
+    output.mkdir(mode=0o700)
+    recipe = tmp_path / "recipe"
+    recipe.write_text("fixture")
+    code = f"""
+import importlib.util,sys,os,fcntl
+from pathlib import Path
+s=importlib.util.spec_from_file_location("controller",{str(FILE)!r})
+m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+m.launch=lambda value:m.OwnedProducer([sys.executable,"-I","-S","-c","import time; time.sleep(60)"],cwd={str(tmp_path)!r},environment={{}},output_root=Path({str(output)!r}))
+os.set_blocking(sys.stdout.fileno(),False)
+# Actual pipe is deliberately full while its reading end remains open.
+try:
+ while True:os.write(sys.stdout.fileno(),b'x'*4096)
+except BlockingIOError:
+ pass
+try:
+ m.supervise({{"state_root":{str(state)!r},"recipe":{str(recipe)!r},"maximum_step":31,"maximum_records":33,"wait_seconds":1}})
+except Exception:
+ pass
+"""
+    parent = subprocess.Popen(
+        [sys.executable, "-u", "-c", code],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        assert parent.wait(timeout=5) == 0
+        born = json.loads((output / "producer-birth.jsonl").read_text().splitlines()[0])
+        pid = born["pid"]
+        fd = os.pidfd_open(pid)
+        try:
+            assert Path(f"/proc/{pid}").exists()
+            signal.pidfd_send_signal(fd, signal.SIGKILL)
+        finally:
+            os.close(fd)
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=5)
+        parent.stdin.close()
+        parent.stdout.close()
+        parent.stderr.close()

@@ -250,6 +250,7 @@ class OwnedProducer:
                 birth.close()
             self.armed = False
             self.interrupted = False
+            self.interruption_completed = False
         except BaseException:
             self.close()  # Never signal a possibly running child or make the consumed attempt retryable.
             raise
@@ -280,10 +281,26 @@ class OwnedProducer:
             os.fsync(stream.fileno())
         self.armed = True
         self.interrupted = (
-            True  # An uncertain signal/wait must never permit another interrupt.
+            True  # Consumed even if the signal or wait has an uncertain result.
         )
-        signal.pidfd_send_signal(self.pidfd, signal.SIGKILL)
-        return self.process.wait(timeout=5)
+        with _exclusive(self.output_root / "interruption-receipt.json") as receipt:
+            signal.pidfd_send_signal(self.pidfd, signal.SIGKILL)
+            result = self.process.wait(timeout=5)
+            if result != -signal.SIGKILL:
+                raise Refused("INTERRUPTION_RACE")
+            json.dump(
+                {
+                    "pid": self.process.pid,
+                    "start_time": self.start,
+                    "status": "owned_signal_returned_and_reaped",
+                    "returncode": result,
+                },
+                receipt,
+            )
+            receipt.flush()
+            os.fsync(receipt.fileno())
+        self.interruption_completed = True
+        return result
 
     def close(self):
         with ExitStack() as stack:
@@ -485,20 +502,41 @@ def launch(value):
     )
 
 
+def _emit(document, deadline):
+    """Finite closed status output; a nonreading pipe/PTY cannot stop deadline checks."""
+    raw = canonical_bytes(document) + b"\n"
+    if len(raw) > 512:
+        raise Refused("OUTPUT_BOUND")
+    descriptor = sys.stdout.fileno()
+    while raw:
+        if time.monotonic() >= deadline:
+            raise Refused("OUTPUT_BACKPRESSURE")
+        try:
+            written = os.write(descriptor, raw)
+            if written <= 0:
+                raise Refused("OUTPUT_CLOSED")
+            raw = raw[written:]
+        except BlockingIOError:
+            select.select(
+                [], [descriptor], [], min(1, max(0, deadline - time.monotonic()))
+            )
+
+
 def supervise(value, *, controls=sys.stdin):
     state_info = _private(Path(value["state_root"]), True)
     recipe_path = Path(value["recipe"])
     recipe_sha256 = hashlib.sha256(_bounded_file(recipe_path, 65536)).hexdigest()
     control_fd = controls.fileno()
     was_blocking = os.get_blocking(control_fd)
+    output_fd = sys.stdout.fileno()
+    output_was_blocking = os.get_blocking(output_fd)
     producer = launch(value)
     deadline = time.monotonic() + value["wait_seconds"]
     buffer = b""
     try:
         os.set_blocking(control_fd, False)
-        print(
-            json.dumps({"status": "started", "pid": producer.process.pid}), flush=True
-        )
+        os.set_blocking(output_fd, False)
+        _emit({"status": "started", "pid": producer.process.pid}, deadline)
         while producer.process.poll() is None and time.monotonic() < deadline:
             if b"\n" not in buffer:
                 ready, _, _ = select.select(
@@ -523,7 +561,7 @@ def supervise(value, *, controls=sys.stdin):
                 try:
                     command = _json(raw)
                     if command == {"operation": "status"}:
-                        print(json.dumps({"status": "producer_alive"}), flush=True)
+                        _emit({"status": "producer_alive"}, deadline)
                         continue
                     if (
                         type(command) is not dict
@@ -542,28 +580,39 @@ def supervise(value, *, controls=sys.stdin):
                         )
 
                     producer.interrupt(validate=validate)
-                    print(
-                        json.dumps(
-                            {
-                                "status": "interrupted",
-                                "cold_public_pending_required": True,
-                            }
-                        ),
-                        flush=True,
+                    _emit(
+                        {"status": "interrupted", "cold_public_pending_required": True},
+                        deadline,
                     )
                 except Exception:
-                    print(
-                        json.dumps({"status": "refused", "phase": "INTERRUPTION"}),
-                        flush=True,
-                    )
+                    _emit({"status": "refused", "phase": "INTERRUPTION"}, deadline)
         if producer.process.poll() is None:
             raise Refused("WAIT_EXPIRED")
-        return producer.process.returncode
+        return {
+            "producer_returncode": producer.process.returncode,
+            "interruption_completed": producer.interruption_completed,
+        }
     finally:
         try:
             os.set_blocking(control_fd, was_blocking)
         finally:
-            producer.close()  # Deliberately no terminate/kill on error or supervisor shutdown.
+            try:
+                os.set_blocking(output_fd, output_was_blocking)
+            finally:
+                producer.close()  # Deliberately no terminate/kill on error or supervisor shutdown.
+
+
+def _report_failure(phase):
+    try:
+        descriptor = sys.stdout.fileno()
+        blocking = os.get_blocking(descriptor)
+        try:
+            os.set_blocking(descriptor, False)
+            _emit({"status": "refused", "phase": phase}, time.monotonic() + 1)
+        finally:
+            os.set_blocking(descriptor, blocking)
+    except Exception:
+        pass
 
 
 def main():
@@ -571,9 +620,13 @@ def main():
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args()
     try:
-        return 0 if supervise(load_config(args.config)) in (0, -signal.SIGKILL) else 2
+        result = supervise(load_config(args.config))
+        if result["producer_returncode"] == 0 or result["interruption_completed"]:
+            return 0
+        _report_failure("PRODUCER_EXIT")
+        return 2
     except Exception:
-        print(json.dumps({"status": "refused", "phase": "SUPERVISOR"}), flush=True)
+        _report_failure("SUPERVISOR")
         return 2
 
 
