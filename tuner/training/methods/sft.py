@@ -172,6 +172,14 @@ def compile_sft_workload(
     method_config = config.get("sft")
     if not isinstance(method_config, Mapping):
         raise TypeError("sft must be a mapping")
+    if dataset.get("format") == "synaptic-conversation-sft-row/v1":
+        required = {"dataset_format": "messages", "completion_only_loss": True,
+                    "assistant_only_loss": False, "use_preassigned_splits": True,
+                    "split_dataset": False, "prompt_render": "prompt_completion",
+                    "packing": False, "require_memory_efficient_loss": True}
+        if any(type(method_config.get(key)) is not type(value) or method_config[key] != value
+               for key, value in required.items()):
+            raise ValueError("conversation SFT requires explicit final-target/preassigned controls")
     if dataset.get("format") in _PREPARED_DATASET_FORMATS:
         # The legacy custom-format compiler remains extensible. Authoritative
         # prepared formats must use controls the actual portable trainer honors.
@@ -181,14 +189,6 @@ def compile_sft_workload(
             validate_sft_runtime_controls(method_config, dataset, require_complete=False)
         except RuntimeV1Error:
             raise ValueError("prepared SFT controls are unsupported by the runtime") from None
-    if dataset.get("format") == "synaptic-conversation-sft-row/v1":
-        required = {"dataset_format": "messages", "completion_only_loss": True,
-                    "assistant_only_loss": False, "use_preassigned_splits": True,
-                    "split_dataset": False, "prompt_render": "prompt_completion",
-                    "packing": False, "require_memory_efficient_loss": True}
-        if any(type(method_config.get(key)) is not type(value) or method_config[key] != value
-               for key, value in required.items()):
-            raise ValueError("conversation SFT requires explicit final-target/preassigned controls")
     if "init_lora_weights" in method_config:
         _validate_init_lora_weights(method_config["init_lora_weights"])
     config_bytes = resolved_config.canonical_json.encode("utf-8")

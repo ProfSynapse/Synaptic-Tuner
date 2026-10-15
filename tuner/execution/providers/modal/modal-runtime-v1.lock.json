@@ -318,7 +318,7 @@
     },
     "bootstrap__tuner__runtime__manifests__offline-sft-worker-v1_json": {
       "path": "tuner/runtime/manifests/offline-sft-worker-v1.json",
-      "sha256": "2c1791563c7dc8177d324b612902e125230267c3f809548ba5d0721b6ac58e1d"
+      "sha256": "f9663e95c0d1e8c86ea34dca1e1876014fab4636569c95ef3c10982bccd17915"
     },
     "bootstrap__tuner__runtime__offline_sft_worker_py": {
       "path": "tuner/runtime/offline_sft_worker.py",
@@ -342,7 +342,7 @@
     },
     "bootstrap__tuner__training__methods__sft_py": {
       "path": "tuner/training/methods/sft.py",
-      "sha256": "59a4e682d764838f2c043e11260f04194b9c552a9552b5684d87368673f63771"
+      "sha256": "b501f9c214dec4b0b1550543281c25aba8dbb102604df253c641c85f7cae587b"
     },
     "bootstrap__tuner__training__recipes_py": {
       "path": "tuner/training/recipes.py",

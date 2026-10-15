@@ -41,6 +41,11 @@ def material(profile, tmp_path):
     identity = PreparedTrainingInputIdentity('prepared://sha256/' + digest, digest, digest, len(raw), 'syntunia-sft-row/v1')
     config = training.resolved_config.to_dict()
     config['dataset'] = identity.to_dict()
+    # This fixture now selects authoritative raw input rather than a custom
+    # project adapter, so bind the portable trainer's prepared controls.
+    config['sft'].pop('custom_row_adapter')
+    config['sft'].update(dataset_format='raw_text', completion_only_loss=False,
+        assistant_only_loss=False, use_preassigned_splits=True, split_dataset=False)
     config = CanonicalDocument.from_mapping(config)
     roots = dict(training.execution_source.roots)
     roots.update(engine='/source/engine', project='/source/project')
