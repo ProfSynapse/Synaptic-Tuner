@@ -1,0 +1,15 @@
+{
+  "python": "/ABSOLUTE/COPIED/PINNED-LAUNCHER/bin/python",
+  "project_root": "/ABSOLUTE/CLEAN/PUSHED/HOST",
+  "engine_root": "/ABSOLUTE/CLEAN/PUSHED/HOST/engine",
+  "recipe": "/ABSOLUTE/CLEAN/PUSHED/HOST/recipe-cancellation.yaml",
+  "state_root": "/ABSOLUTE/PRIVATE/FRESH-ATTEMPT/state",
+  "tmp_root": "/ABSOLUTE/PRIVATE/FRESH-ATTEMPT/tmp",
+  "output_root": "/ABSOLUTE/PRIVATE/FRESH-ATTEMPT/supervisor",
+  "env_file": "/ABSOLUTE/PRIVATE/EXPLICIT/.env",
+  "profile": "synaptic-labs",
+  "environment": "synaptic-smoke-v1",
+  "maximum_step": 31,
+  "maximum_records": 33,
+  "wait_seconds": 1020
+}

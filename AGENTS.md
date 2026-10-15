@@ -264,3 +264,14 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - HF Jobs cloud evaluation now uses the same adapter idea: remote JSONL progress, local replay into the existing evaluation dashboard.
 - Modal may stream usable remote stdout directly; verify that before adding a separate local watcher.
 - RunPod currently needs more explicit metric/log plumbing if local dashboard parity is required.
+
+## Owned lifecycle qualification supervision
+
+For explicitly authorized producer-interruption qualifications, use the checked-in
+caller supervisor under `examples/training_qualification/modal_lifecycle.py` rather
+than an ad hoc shell/env wrapper. Preserve direct pinned-Python execution, separate
+session/pidfd ownership, consumed pre-spawn intent and typed complete progress
+validation. Supervisor errors must not implicitly signal the child. Host-origin
+progress does not authenticate pending/Foundation evidence; use the existing cold
+public reader after interruption before any separate public cancellation, and
+never replay an uncertain submission.
