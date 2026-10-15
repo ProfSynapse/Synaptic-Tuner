@@ -61,6 +61,14 @@ def _build_wrapper_schema(
         + ", ".join(guidance_fields)
     )
 
+    encoding = str(format_config.get("arguments_encoding") or "string").strip().lower()
+    if encoding == "object":
+        arguments_schema = _build_wrapper_arguments_object_schema(format_config, context_overrides)
+    elif encoding == "string":
+        arguments_schema = {"type": "string", "minLength": 2, "description": guidance}
+    else:
+        raise ValueError(f"Unknown arguments_encoding: {encoding!r} (expected 'string' or 'object')")
+
     return {
         "type": "object",
         "additionalProperties": False,
@@ -83,17 +91,13 @@ def _build_wrapper_schema(
                             "additionalProperties": False,
                             "properties": {
                                 "id": {"type": "string", "minLength": 1},
-                                "type": {"const": "function"},
+                                "type": {"type": "string", "const": "function"},
                                 "function": {
                                     "type": "object",
                                     "additionalProperties": False,
                                     "properties": {
-                                        "name": {"const": wrapper_name},
-                                        "arguments": {
-                                            "type": "string",
-                                            "minLength": 2,
-                                            "description": guidance,
-                                        },
+                                        "name": {"type": "string", "const": wrapper_name},
+                                        "arguments": arguments_schema,
                                     },
                                     "required": ["name", "arguments"],
                                 },
@@ -105,6 +109,33 @@ def _build_wrapper_schema(
             },
         },
         "required": ["content", "tool_calls"],
+    }
+
+
+def _build_wrapper_arguments_object_schema(
+    format_config: Dict[str, Any],
+    context_overrides: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build a strict object schema for wrapper arguments from the format's declared fields.
+
+    Strict structured output requires every property to be listed as required,
+    so optional fields accept null; parsing drops null wrapper fields.
+    """
+    arg_cfg = format_config.get("argument_fields") or {}
+    declared = dict(arg_cfg.get("properties") or {})
+    declared.update(format_config.get("extra_argument_fields") or {})
+    required = set(format_config.get("argument_required") or arg_cfg.get("required") or [])
+    properties: Dict[str, Any] = {}
+    for name, field_schema in declared.items():
+        field_schema = dict(field_schema or {"type": "string"})
+        if context_overrides.get(name):
+            field_schema = {"type": "string", "const": str(context_overrides[name])}
+        properties[name] = field_schema if name in required else {"anyOf": [field_schema, {"type": "null"}]}
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": properties,
+        "required": list(properties.keys()),
     }
 
 
@@ -131,7 +162,7 @@ def _build_native_schema(allowed_tools: List[str]) -> Dict[str, Any]:
                             "additionalProperties": False,
                             "properties": {
                                 "id": {"type": "string", "minLength": 1},
-                                "type": {"const": "function"},
+                                "type": {"type": "string", "const": "function"},
                                 "function": {
                                     "type": "object",
                                     "additionalProperties": False,

@@ -114,6 +114,17 @@ def _normalize_tool_arguments(args_raw: Any, function_name: Optional[str] = None
     return args
 
 
+def _order_wrapper_arguments(args: Dict[str, Any], wrapper_spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Serialize wrapper arguments in the format's declared field order, extras last.
+
+    Models emit keys in arbitrary order; a canonical order keeps training rows
+    and preference pairs from differing in key order alone.
+    """
+    declared = [name for name in wrapper_spec.get("field_names") or [] if name in args]
+    extras = [name for name in args if name not in declared]
+    return {name: args[name] for name in declared + extras}
+
+
 def stringify_assistant_message(response: Any) -> str:
     """Convert an assistant response dict to a plain text summary."""
     if isinstance(response, str):
@@ -190,6 +201,11 @@ def parse_assistant_response(content: str, scenario: Dict, *, wrapper_specs=None
 
                     normalized_tc["function"]["name"] = normalized_name
                     if isinstance(normalized_args, dict):
+                        if isinstance(args, dict):
+                            # Object-encoded arguments: null marks an omitted optional field.
+                            normalized_args = {k: v for k, v in normalized_args.items() if v is not None}
+                        if wrapper_spec is not None:
+                            normalized_args = _order_wrapper_arguments(normalized_args, wrapper_spec)
                         normalized_tc["function"]["arguments"] = json.dumps(normalized_args)
                     else:
                         normalized_tc["function"]["arguments"] = args

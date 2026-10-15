@@ -53,6 +53,36 @@ class TestParseAssistantResponse:
         assert result["content"] == "Hello there"
         assert "tool_calls" not in result
 
+    def test_object_arguments_are_encoded_and_drop_null_fields(self):
+        payload = json.dumps({
+            "content": None,
+            "tool_calls": [{
+                "id": "call_001",
+                "type": "function",
+                "function": {"name": "useTools", "arguments": {"tool": "search content \"x\"", "strategy": None}},
+            }],
+        })
+        result = parse_assistant_response(payload, {})
+        arguments = result["tool_calls"][0]["function"]["arguments"]
+        assert isinstance(arguments, str)
+        assert json.loads(arguments) == {"tool": "search content \"x\""}
+
+    def test_wrapper_arguments_follow_declared_field_order(self):
+        payload = json.dumps({
+            "content": None,
+            "tool_calls": [{
+                "id": "call_001",
+                "type": "function",
+                "function": {"name": "useTools", "arguments": {
+                    "tool": "search content x", "zzz_extra": "1", "goal": "g", "workspaceId": "default",
+                    "memory": "m", "sessionId": "s",
+                }},
+            }],
+        })
+        result = parse_assistant_response(payload, {})
+        keys = list(json.loads(result["tool_calls"][0]["function"]["arguments"]))
+        assert keys == ["sessionId", "workspaceId", "memory", "goal", "tool", "zzz_extra"]
+
     def test_none_content(self):
         result = parse_assistant_response(None, {})
         assert result["role"] == "assistant"

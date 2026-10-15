@@ -44,9 +44,9 @@ projection:
 
 ### Targets
 
-`sft, grpo, kto_positive, kto_negative`
+`sft, grpo, kto_positive, kto_negative, dpo`
 
-The **default target set** when `applies_to` is omitted is `sft, grpo, kto_positive`. Hard negatives (`kto_negative`) are **NEVER** filtered unless `kto_negative` is explicitly listed in `applies_to`. This is deliberate: quality filters that drop short or low-scoring rollouts should never silently discard your hard-negative training signal.
+The **default target set** when `applies_to` is omitted is `sft, grpo, kto_positive, dpo`. Hard negatives (`kto_negative`) are **NEVER** filtered unless `kto_negative` is explicitly listed in `applies_to`. This is deliberate: quality filters that drop short or low-scoring rollouts should never silently discard your hard-negative training signal.
 
 ### `on_missing` semantics
 
@@ -118,6 +118,24 @@ Behavior:
 - It reconstructs the **whole episode** from `conversation_trace`, dropping the `judge_feedback`, `validation_feedback`, and `final_text_request` scaffolding turns (these are environment scaffolding, not training signal).
 - Tool results become `tool`-role messages on disk; assistant tool-call turns carry `tool_calls`.
 - Schema: [SFT projection schema](../../../Datasets/environment_rollouts/sft_projection.schema.json).
+
+### Per-turn SFT (`--sft-projection per_turn`)
+
+The SFT loss mask trains only the final assistant turn of each row. With
+`--sft-projection per_turn`, each quality-positive rollout becomes one row per
+assistant turn, ending at that turn, so every accepted turn is supervised.
+Turns listed in `metadata.environment.harness_review.reviewer_voice_turns`
+are skipped. Rows carry `metadata.turn_index`. Use `metadata.seed_id` as the
+validation group key so an episode's turns stay together.
+
+### DPO pairs from harness review (`--dpo-output`)
+
+For rollouts collected with `harness_review`, each REPLACE decision becomes a
+pair: `prompt` is the transcript before that turn, `chosen` is the executed
+correction, and `rejected` is the student's proposal. Pairs are taken only
+from quality-positive rollouts. Reviewer-voice turns and empty proposals are
+skipped. Metadata records `turn_index`, `structural_replacement`,
+`components_used` and `review_reason`. The `dpo` filter target applies.
 
 ### Chat-template behavior
 

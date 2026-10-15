@@ -1,0 +1,402 @@
+# Harness-reviewed workspace rollouts (agent-as-harness pilot).
+#
+# A student model proposes every assistant turn from student-visible context
+# only (no answer key in its system prompt). A reviewing agent, guided by the
+# private reference harness below, passes each proposal or replaces it with the
+# smallest correction before it executes (Harness-Zero, arXiv:2609.24974).
+# Accepted turns form the trajectory; every decision is traced under
+# metadata.environment.harness_review.
+
+shared_openrouter_fallback_models: &openrouter_fallback_models
+  - provider: openrouter
+    model: openai/gpt-5.4-mini
+
+shared_review_loop_environment: &review_loop_env
+  loop:
+    enabled: true
+    mode: agentic
+    max_turns: 8
+    max_tool_steps: 8
+    # Read-only tasks: fixture assertions hold from the start, so an
+    # environment pass cannot signal completion. The model decides when to
+    # answer and the final judge checks the answer against task_context.
+    stop_on_text_response: true
+    stop_on_environment_pass: false
+    continue_on_execution_error: true
+    continue_on_validation_error: false
+    require_final_text_after_pass: false
+    stuck_repeat_limit: 3
+    no_progress_window: 3
+    tool_result_name_format: command
+  require_expected_tools: true
+  require_expected_tool_order: false
+  forbid_unexpected_tools: false
+  require_all_tools_ok: false
+
+# Student-visible system context: the tool transport rules a deployed model
+# would see, with no task answer key.
+shared_student_workspace_context: &student_workspace_context
+  available_workspaces:
+    - id: ws_workspace_multistep
+      name: Team Workspace
+      description: Project notes, runbooks, prompts, and operating docs
+      root_folder: ""
+  assistant_instructions: >-
+    Use the workspace context and available tool transport to inspect files
+    before answering or mutating. Prefer the smallest useful next action. Ask
+    for confirmation before broad or destructive changes. Once the relevant
+    tool results answer the user's request or confirm the requested action is
+    complete, stop calling tools and send a normal text response that briefly
+    summarizes the result and what you did.
+  extra_sections:
+    - tag: tool_options
+      content: |
+        Tool transport:
+        - Emit an OpenAI-style tool call with function.name = "useTools".
+        - function.arguments must be a JSON string containing a valid double-quoted JSON object.
+        - Required arguments: workspaceId, sessionId, memory, goal, tool.
+        - Optional arguments: constraints, strategy.
+        - The tool argument is a CLI command string. Multiple commands may be comma-separated when serial execution is appropriate.
+        - Chain commands only when every path and argument is already known before execution.
+        - If a later command depends on search/list output, stop after the search/list command and wait for tool results.
+        - Never put placeholders such as {{found_path}}, <path>, TODO, or ... in the tool string.
+        - Never use shell commands or shell operators such as cat, grep, ls, &&, pipes, or semicolons.
+        - Use the exact CLI syntax from <cli_commands>.
+        - Completion rule: after the needed tool results are available and the task is complete, do not emit another tool call. Reply with concise text summarizing the answer or completed action.
+    - tag: cli_commands
+      content: |
+        Workspace CLI commands for the useTools "tool" argument (quote paths and queries):
+        - search content "<query>" [--limit <n>]   find notes whose text matches the query
+        - storage list [--path "<folder>"]         list files and folders
+        - content read "<path>" <startLine> [--end-line <n>]   read a note; startLine is required (use 1 for the whole note)
+        - content write "<path>" "<content>"       create a note
+        - content replace "<path>" "<oldContent>" "<newContent>" <startLine> <endLine>
+        - content insert "<path>" "<content>" <startLine>
+        - storage move "<path>" "<newPath>"
+        - storage archive "<path>"
+        Example tool values: search content "quarterly budget", content read "docs/plan.md" 1
+
+shared_student_turn: &student_turn
+  provider: openrouter
+  model: qwen/qwen3.5-9b
+  # Only route to providers that enforce the response schema.
+  provider_routing:
+    require_parameters: true
+  schema: use_tools_response
+  response_format: json_object
+  max_tokens: 2048
+  max_retries: 3
+  prompt: |
+    Write the assistant's next message in this conversation.
+
+    Return exactly one JSON object with top-level keys "content" and
+    "tool_calls". Use tool_calls for a useTools call, or set tool_calls to
+    null and put the reply in content when you are answering the user.
+
+# Private reference harness K. Procedural guidance only: no task answers, so
+# corrections teach reusable behavior instead of shortcuts.
+shared_workspace_reference_harness: &workspace_reference_harness
+  components:
+    - id: cli-syntax
+      kind: skill
+      content: |
+        The useTools "tool" argument is a workspace CLI command, exactly as
+        listed in the student's <cli_commands> section, for example
+        `search content "reset password"` or `content read "docs/a.md" 1`.
+        Agent-style names such as searchManager_content or
+        contentManager_read are not valid commands; the CLI may misparse
+        them and return unrelated output.
+        Quoting matters only for arguments that contain spaces: an unquoted
+        `search content password reset` silently searches for "password"
+        alone. Unquoted single-token arguments such as
+        `content read docs/a.md 1` or `search content password` are valid
+        and run correctly, so quoting them is style, not a correction.
+    - id: locate-before-reading
+      kind: skill
+      content: |
+        When the user does not give an exact path, locate the note first with
+        `search content "<keywords>"` using two or three distinctive words from
+        the request. Do not guess or invent paths. Read a note only after a
+        search or `storage list` result shows its path.
+    - id: search-recovery
+      kind: skill
+      content: |
+        Search matches literal text, so multi-word queries fail unless the
+        exact phrase appears in a note. If a search returns no results or only
+        unrelated notes, change the query before giving up: search one
+        distinctive word (for example "password" rather than "password
+        reset"), try a synonym, or use the file names in the vault structure
+        to pick the most likely note and read it. Never repeat an identical
+        failed command, and do not tell the user something is missing while
+        an unread note plausibly covers it.
+    - id: read-before-answering
+      kind: skill
+      content: |
+        Search results are locations and snippets, not full contents. Before
+        answering a question about a note, read it with
+        `content read "<path>" 1` (the start line is required) and base the
+        answer on the read output.
+    - id: grounded-final-answer
+      kind: skill
+      content: |
+        The final answer must be text-only, concise, and quote or paraphrase
+        the evidence actually returned by the tools. Mention which note the
+        answer came from. Do not claim details that no tool output showed.
+    - id: workspace-failure-patterns
+      kind: memory
+      content: |
+        Failure patterns seen in earlier workspace rollouts:
+        - answering from the search snippet without reading the note
+        - chaining `search` and `content read` in one call before the path is known
+        - `content read` with no start line
+        - shell syntax (cat, grep, ls, pipes, &&) inside the tool string
+        - repeating the same empty search instead of changing the query
+        - final answers that add details not present in any tool output
+  middleware:
+    - id: final-before-read
+      final_only: true
+      unless_prior_pattern: "content read"
+      hint: >-
+        The student is answering without having read any note. Unless the user
+        asked something that needs no workspace evidence, replace this with the
+        next locate or read step.
+    - id: agent-style-command
+      tool_only: true
+      pattern: "\\b[a-z]+Manager_[a-zA-Z]+\\b"
+      hint: >-
+        The tool string uses an agent-style name (for example
+        searchManager_content) instead of a CLI command such as
+        search content "<query>".
+    - id: shell-syntax
+      tool_only: true
+      pattern: "(?:\\b(?:cat|grep|ls)\\b|&&|\\|)"
+      hint: >-
+        The tool string appears to contain shell syntax, which the workspace
+        CLI rejects.
+
+shared_harness_review: &harness_review
+  enabled: true
+  replace_budget: 3
+  max_submission_attempts: 3
+  student: *student_turn
+  reference_harness: *workspace_reference_harness
+  leak_patterns:
+    - "\\breviewer\\b"
+    - "\\breference harness\\b"
+    - "\\bharness\\b"
+    - "\\bcomponent id\\b"
+    - "\\bsubmit_review\\b"
+    - "\\btraining data\\b"
+  reviewer_voice_patterns:
+    - "\\bthe student\\b"
+    - "\\bthe proposal\\b"
+    - "\\bproposed (?:response|action|call)\\b"
+    - "\\b(?:the|this) draft\\b"
+    - "\\bI (?:will|would) (?:pass|replace|rewrite)\\b"
+  reviewer:
+    provider: openrouter
+    model: openai/gpt-5.6-terra
+    max_tokens: 4096
+    max_retries: 2
+    fallback_models: *openrouter_fallback_models
+    system: |
+      You are a strong harnessing agent supervising a student model that works
+      in a note workspace through one useTools tool. The accepted trajectory
+      of this trial will be used directly as fine-tuning data for the student.
+      Produce a successful trajectory that stays close to the student's own
+      behavior while using the private reference harness to introduce
+      reusable task-solving patterns through targeted interventions. The
+      student should do most of the work.
+
+      On-policy means every accepted response uses only the student's visible
+      information, its native action space, and a plausible level of
+      complexity for the student. It does not mean preserving mistakes: a
+      replacement should teach a better pattern when the reference harness
+      identifies one that materially improves correctness, progress,
+      recovery, or verification.
+
+      You cannot see the workspace. Treat file contents, paths and search
+      results as known only when they appear in the student-visible
+      transcript. You do not know the task's answer.
+
+      Choose PASS when the proposal is a sound next action and no applicable
+      component calls for a meaningful correction. Pass harmless
+      inefficiencies, stylistic differences, valid alternative methods, and
+      exploratory steps that can produce useful evidence. Also pass
+      recoverable mistakes when the next observation is likely to let the
+      student diagnose and repair them; useful self-recovery is valuable
+      training behavior.
+
+      Choose REPLACE when a meaningful correction is needed for task success
+      or to instantiate a reusable pattern from the reference harness, for
+      example: a missed requirement, an unsupported conclusion or premature
+      final answer, an invalid or fragile command, an ignored or repeated
+      failure, or a missing locate/read/verification step.
+
+      When you replace:
+      - Make the smallest coherent change to the student's next step that
+        installs the correction. This may require a different action.
+      - Preserve the student's intent, established facts, wording and
+        argument values when they remain compatible with the correction.
+      - Correct only the next step and hand control back. Do not complete
+        several future steps or precompute the answer.
+      - Any visible content must read as the student's own voice, never as
+        advice or critique addressed to the student.
+      - The replacement must be a complete response in the student's action
+        space: either one useTools call, or a text-only answer with
+        tool_calls set to null.
+      - Never mention the reviewer, the review, the reference harness,
+        component names, or training in the replacement.
+
+      Pass a final answer only after the student-visible tool results support
+      every part of the user's request. Otherwise replace it with the next
+      locate, read or verification step, not with a teacher-written answer.
+
+      For PASS set replacement to null. For REPLACE provide the complete
+      replacement. Always list the component ids you used and a concise
+      private reason (at most 500 characters).
+    prompt: |
+      Scenario: {scenario_key}
+      Turn: {turn_index}
+      Replacements used: {replacements_used} of {replace_budget} (remaining: {replacements_remaining}).
+      Structural fixes for invalid proposals do not count against the budget.
+
+      <reference_harness>
+      {reference_harness}
+      </reference_harness>
+
+      <student_action_space>
+      {student_action_space}
+      </student_action_space>
+
+      <student_transcript>
+      {student_transcript}
+      </student_transcript>
+
+      <new_events_since_last_review>
+      {new_events}
+      </new_events_since_last_review>
+
+      <your_previous_decisions>
+      {review_history_json}
+      </your_previous_decisions>
+
+      <unexecuted_proposal kind="{proposal_kind}">
+      {proposal_json}
+      </unexecuted_proposal>
+
+      Structural defects in the proposal:
+      {structural_defects}
+
+      Triggered review middleware:
+      {triggered_middleware}
+
+      Submit your decision.
+
+shared_review_final_judge: &review_final_judge
+  enforce: true
+  gates:
+    - type: field_equals
+      field: environment_passed
+      value: true
+  judge:
+    enabled: true
+    max_retries: 3
+    provider: openrouter
+    model: openai/gpt-5.4-mini
+    temperature: 0.1
+    fallback_models: *openrouter_fallback_models
+    prompt: |
+      You are reviewing a completed workspace rollout.
+
+      Scenario key:
+      {scenario_key}
+
+      Task context:
+      {task_context_json}
+
+      Final environment result:
+      {environment_result_json}
+
+      Final assistant response:
+      {assistant_response_json}
+
+      Conversation trace:
+      {conversation_trace_json}
+
+      Return passed=true only if:
+      - the environment result passed
+      - assistant tool turns used the useTools wrapper with valid JSON
+        function.arguments and configured CLI syntax
+      - the assistant located notes through search/list results instead of
+        guessing hidden paths, and read the note before answering
+      - any failed or empty tool results were followed by a changed, sensible
+        next step rather than a repeat
+      - the final response is text-only and answers the user's request with
+        the information in task_context.target_path, grounded in read evidence
+        and without unsupported details
+
+      If environment_result.passed is false, passed must be false.
+
+scenarios:
+  envfs_harness_review_search_then_read:
+    type: tool
+    tool: content read
+    expected_tools: [searchManager_content, contentManager_read]
+    environment_mode: provided
+    tags: [workspace, search, recovery, read, harness_review, pilot]
+    system_template: mocked_workspace_vault
+    workspace_format: cli_student
+    # Structured arguments so the small student emits valid wrapper JSON.
+    tool_call_format:
+      arguments_encoding: object
+    environment:
+      <<: *review_loop_env
+      fixture:
+        directories:
+          - docs
+          - runbooks
+          - notes
+        files:
+          docs/account-access.md: |
+            # Account Access
+
+            To reset your password, open the sign-in page, choose "Forgot password",
+            enter your email address, and use the reset link from your inbox.
+          runbooks/login-troubleshooting.md: |
+            # Login Troubleshooting
+
+            If a user cannot sign in, verify their account status and confirm that
+            SSO is enabled before escalating.
+          notes/release-access-cleanup.md: |
+            # Release Access Cleanup
+
+            The April cleanup moved stale access review notes into the archive.
+      assertions:
+        - type: path_exists
+          path: docs/account-access.md
+        - type: file_contains
+          path: docs/account-access.md
+          text: reset your password
+    # Hidden from the student and the reviewer; used by the user prompt and final judge.
+    task_context:
+      fuzzy_query: reset password
+      target_path: docs/account-access.md
+      required_answer_phrase: reset your password
+      final_answer: To reset your password, open the sign-in page, choose "Forgot password", enter your email address, and use the reset link from your inbox.
+    rubrics:
+      system_prompt: [system_prompt_format]
+      response: []
+    harness_review: *harness_review
+    final_judge: *review_final_judge
+    system_context:
+      <<: *student_workspace_context
+    prompts:
+      user: |
+        OUTPUT ONLY the user request text.
+
+        Ask the assistant to find the workspace note related to
+        {task_fuzzy_query} and tell you the steps it describes. The user
+        request must not include the exact target path or file name.
+      assistant: |
+        Unused: harness_review supplies the student turn prompt.

@@ -8,6 +8,12 @@ formats:
   default:
     wrapper_name: useTools
 
+    # How function.arguments is constrained in structured generation:
+    # "string" (a JSON-encoded string, the wire format) or "object" (a schema
+    # object built from argument_fields; parsing re-encodes it as a string).
+    # Use "object" for small models that write pseudo-JSON inside strings.
+    arguments_encoding: string
+
     # Top-level fields required inside function.arguments
     argument_fields:
       required:
@@ -70,7 +76,7 @@ formats:
       - "If no tool call is needed, respond with normal text in content and set tool_calls to null or []."
       - "The function.arguments value must be a single JSON object with top-level keys: workspaceId, sessionId, memory, goal, tool, and optional constraints/strategy."
       - "The tool field must be a CLI command string, not a nested object."
-      - "Use CLI command names like 'storage move', 'content read', 'prompt execute-prompts', 'memory load-workspace', and 'search search-content'."
+      - "Use CLI command names like 'storage move', 'content read', 'prompt execute', 'memory load-workspace', and 'search content'."
       - "When multiple commands are needed, join them in the tool field as a comma-separated sequence."
       - "Do not use context/calls wrappers, params objects, agent/tool arrays, or direct per-tool function names."
       - "Good: {\"workspaceId\":\"default\",\"sessionId\":\"session_123\",\"memory\":\"Need to inspect notes.\",\"goal\":\"Move a note and read it back.\",\"constraints\":\"Do not touch unrelated files.\",\"tool\":\"storage move \\\"notes/today.md\\\" \\\"archive/today.md\\\", content read \\\"archive/today.md\\\"\",\"strategy\":\"serial\"}"

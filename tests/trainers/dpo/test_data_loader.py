@@ -85,3 +85,29 @@ def test_validate_rejects_malformed_message_lists(tmp_path):
         "rejected": [[]],  # empty -> not a valid message list
     })
     assert data_loader.validate_dpo_dataset(bad) is False
+
+
+def test_tool_calls_and_tool_results_render_to_text(tmp_path):
+    # Multi-turn agentic pairs carry OpenAI tool_calls (arguments as a JSON
+    # string) and tool-result turns; chat templates reject both raw shapes.
+    call = {"id": "c1", "type": "function", "function": {"name": "useTools", "arguments": "{\"tool\": \"search content x\"}"}}
+    row = {
+        "prompt": [
+            {"role": "user", "content": "find x"},
+            {"role": "assistant", "content": None, "tool_calls": [call]},
+            {"role": "tool", "content": "[\"docs/x.md\"]"},
+        ],
+        "chosen": [{"role": "assistant", "content": None, "tool_calls": [call]}],
+        "rejected": [{"role": "assistant", "content": "It is in docs/x.md."}],
+    }
+    path = tmp_path / "dpo_train.jsonl"
+    _write_jsonl(path, [row])
+
+    train, _ = data_loader.load_and_prepare_dataset(local_file=str(path))
+
+    prompt = train[0]["prompt"]
+    assert [m["role"] for m in prompt] == ["user", "assistant", "user"]
+    assert "useTools" in prompt[1]["content"] and "search content x" in prompt[1]["content"]
+    assert "useTools" in train[0]["chosen"][0]["content"]
+    assert train[0]["rejected"][0]["content"] == "It is in docs/x.md."
+    assert all("tool_calls" not in m or m["tool_calls"] is None for m in prompt)

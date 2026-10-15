@@ -120,6 +120,7 @@ def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "quality_rubric": metadata.get("quality_rubric", []),
         "derivation_summary": metadata.get("derivation_summary", {}),
         "judge_trace": metadata.get("judge", {}).get("trace", []),
+        "harness_review": environment.get("harness_review"),
         "final_issues": environment.get("issues", []),
         "conversation_trace": conversation_trace,
         "steps": normalized_steps,
@@ -205,6 +206,25 @@ def print_text(rows: List[Dict[str, Any]], args: argparse.Namespace) -> None:
                     print(f"    feedback_to_model: {truncate(item.get('feedback_to_model'), args.max_chars)}")
                 if item.get("feedback_for_trace"):
                     print(f"    feedback_for_trace: {truncate(item.get('feedback_for_trace'), args.max_chars)}")
+        review = row.get("harness_review")
+        if review:
+            print()
+            print(
+                f"Harness review: reviews={review.get('reviews')} passes={review.get('passes')} "
+                f"replacements={review.get('replacements')} budget={review.get('budgeted_replacements')}/"
+                f"{review.get('replace_budget')} failed={review.get('failed')} "
+                f"reviewer_voice_turns={review.get('reviewer_voice_turns')}"
+            )
+            for item in review.get("turns", []):
+                print(
+                    f"  turn {item.get('turn_index')}: {item.get('decision')} "
+                    f"proposal_valid={item.get('proposal_valid')} middleware={item.get('triggered_middleware')}"
+                )
+                print(f"    proposal: {truncate(item.get('proposal'), args.max_chars)}")
+                if item.get("decision") == "REPLACE":
+                    print(f"    accepted: {truncate(item.get('accepted'), args.max_chars)}")
+                if item.get("reason"):
+                    print(f"    reason: {truncate(item.get('reason'), args.max_chars)}")
         print()
 
 

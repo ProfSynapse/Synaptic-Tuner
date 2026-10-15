@@ -1448,6 +1448,8 @@ class SynthChatGenerator:
             generate_assistant_response=self._generate_assistant_response,
             parse_response=self._parse_assistant_response,
             stringify_response=self._stringify_assistant_message,
+            resolve_tool_response_contract=self._resolve_tool_response_contract,
+            call_llm_structured=self._call_llm_structured,
             logger=self.logger,
         )
 
@@ -1565,6 +1567,48 @@ class SynthChatGenerator:
             return {}
         return self._normalize_generated_environment(parsed)
 
+    def _resolve_tool_response_contract(
+        self,
+        scenario: Dict[str, Any],
+        system_context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Resolve the tool-call format, allowed tools and response schema for a scenario."""
+        tool_schema = self.environment_validator.tool_schema if self.environment_validator else None
+        tool_call_fmt = resolve_tool_call_format(scenario, self._tool_call_formats)
+        # Check tool_schema for wrapper override (e.g. tool_schema.tool_format.wrapper)
+        # This allows the environment validator's tool schema to set the wrapper name
+        wrapper_name = resolve_wrapper_name(tool_call_fmt, tool_schema)
+        if isinstance(tool_schema, dict):
+            ts_wrapper = (tool_schema.get("tool_format") or {}).get("wrapper")
+            if ts_wrapper and str(ts_wrapper).strip():
+                wrapper_name = str(ts_wrapper).strip()
+        allowed_tools = _resolve_allowed_tool_names(
+            scenario=scenario,
+            tool_schema=tool_schema,
+        )
+        session_id, workspace_id = _resolve_context_defaults(
+            system_context=system_context,
+        )
+        # Apply wrapper_name override to format config if needed
+        fmt = tool_call_fmt
+        if wrapper_name != fmt.get("wrapper_name"):
+            fmt = dict(fmt)
+            fmt["wrapper_name"] = wrapper_name
+        context_overrides = {}
+        if session_id:
+            context_overrides["sessionId"] = session_id
+        if workspace_id:
+            context_overrides["workspaceId"] = workspace_id
+        return {
+            "format_config": fmt,
+            "allowed_tools": allowed_tools,
+            "schema": build_tool_response_schema(
+                format_config=fmt,
+                allowed_tools=allowed_tools,
+                context_overrides=context_overrides,
+            ),
+        }
+
     def _generate_assistant_response(
         self,
         *,
@@ -1588,46 +1632,15 @@ class SynthChatGenerator:
         max_retries = int(generation_cfg.get("max_retries", 3) or 3)
         prompt = f"{assistant_context}\n\n{assistant_prompt}"
         if schema_name == "use_tools_response":
-            tool_schema = self.environment_validator.tool_schema if self.environment_validator else None
-            tool_call_fmt = resolve_tool_call_format(scenario, self._tool_call_formats)
-            # Check tool_schema for wrapper override (e.g. tool_schema.tool_format.wrapper)
-            # This allows the environment validator's tool schema to set the wrapper name
-            wrapper_name = resolve_wrapper_name(tool_call_fmt, tool_schema)
-            if isinstance(tool_schema, dict):
-                ts_wrapper = (tool_schema.get("tool_format") or {}).get("wrapper")
-                if ts_wrapper and str(ts_wrapper).strip():
-                    wrapper_name = str(ts_wrapper).strip()
-            allowed_tools = _resolve_allowed_tool_names(
-                scenario=scenario,
-                tool_schema=tool_schema,
-            )
-            session_id, workspace_id = _resolve_context_defaults(
-                system_context=system_context,
-            )
-            # Apply wrapper_name override to format config if needed
-            fmt = tool_call_fmt
-            if wrapper_name != fmt.get("wrapper_name"):
-                fmt = dict(fmt)
-                fmt["wrapper_name"] = wrapper_name
-
+            contract = self._resolve_tool_response_contract(scenario, system_context)
             prompt = build_tool_generation_prompt(
-                format_config=fmt,
+                format_config=contract["format_config"],
                 base_prompt=prompt,
-                allowed_tools=allowed_tools,
+                allowed_tools=contract["allowed_tools"],
             )
-            context_overrides = {}
-            if session_id:
-                context_overrides["sessionId"] = session_id
-            if workspace_id:
-                context_overrides["workspaceId"] = workspace_id
-
             payload = self._call_llm_structured(
                 prompt=prompt,
-                schema=build_tool_response_schema(
-                    format_config=fmt,
-                    allowed_tools=allowed_tools,
-                    context_overrides=context_overrides,
-                ),
+                schema=contract["schema"],
                 randomize=randomize_params,
                 trace_label=trace_label,
                 max_tokens=max_tokens,

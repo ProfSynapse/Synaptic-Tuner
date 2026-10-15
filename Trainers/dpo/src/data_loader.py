@@ -19,6 +19,7 @@ prompt/chosen/rejected pass-through with structural validation.
 from typing import Optional, Tuple
 from datasets import load_dataset, Dataset
 
+from shared.sft_preprocessing import sanitize_messages_for_chat_template
 from shared.training_utils import (
     DEFAULT_SPLIT_SEED,
     extract_dataset_group_values,
@@ -112,7 +113,11 @@ def load_and_prepare_dataset(
         print(f"Dropping non-DPO columns: {extra_cols}")
         raw_datasets = raw_datasets.remove_columns(extra_cols)
 
-    train_dataset = raw_datasets
+    # Render tool calls and tool results to text exactly as the SFT trainer
+    # does, so multi-turn agentic pairs template on any tokenizer.
+    train_dataset = raw_datasets.map(
+        lambda row: {column: sanitize_messages_for_chat_template(row[column]) for column in REQUIRED_DPO_COLUMNS}
+    )
 
     # Optional train/validation split
     eval_dataset = None
