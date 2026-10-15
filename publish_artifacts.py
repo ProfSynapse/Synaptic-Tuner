@@ -1,4 +1,4 @@
-"""Caller-owned local publication of an already verified, retained HF run."""
+"""Caller-owned local publication of an already verified, retained training run."""
 
 import argparse
 import json
@@ -36,7 +36,7 @@ def load(path):
     value = launch._json(launch.stable_read(Path(path), 65536))
     if (
         type(value) is not dict
-        or set(value)
+        or set(value) - {"modal"}
         != {
             "schema_version",
             "consumer",
@@ -53,6 +53,19 @@ def load(path):
         or value["schema_version"] != "synaptic-local-publication-host/v1"
     ):
         raise ValueError("publication configuration invalid")
+    if "modal" in value:
+        modal = value["modal"]
+        if type(modal) is not dict or set(modal) != {"root", "profile", "environment"}:
+            raise ValueError("modal publication source invalid")
+        source = Path(modal["root"])
+        if not source.is_absolute() or source != Path(os.path.normpath(source)):
+            raise ValueError("modal retained root invalid")
+        from tuner.execution.foundation_v2.canonical import safe_ref
+
+        safe_ref(modal["profile"], "modal_profile")
+        safe_ref(modal["environment"], "modal_environment")
+        if value["consumer"]["path"] != str(source / "readback-inputs.json"):
+            raise ValueError("original modal readback commitment required")
     TrainingRunRef.from_dict(value["run"])
     SecretRef.from_dict(value["secret"])
     root = Path(value["root"])
@@ -164,6 +177,36 @@ def main(argv=None):
     parser.add_argument("--config", required=True)
     args = parser.parse_args(argv)
     config = load(args.config)
+    if "modal" in config:
+        import modal
+        from tuner.training.modal_host_authority import UTCClock
+        from tuner.training.modal_retained_reader import open_retained_modal_runs
+
+        original = launch.read_committed(config["consumer"], maximum=4 << 20)
+        selected = config["modal"]
+        with open_retained_modal_runs(
+            root=Path(selected["root"]),
+            run=TrainingRunRef.from_dict(config["run"]),
+            modal_profile=selected["profile"],
+            modal_environment=selected["environment"],
+            sdk=modal,
+            clock=UTCClock(),
+        ) as retained:
+            if (
+                retained.run.to_dict() != config["run"]
+                or launch.read_committed(config["consumer"], maximum=4 << 20)
+                != original
+            ):
+                raise ValueError("original modal run required")
+            result = local_publication(
+                config,
+                args.action,
+                runs=retained.runs,
+                secrets=launch.NamedSecrets(),
+                clock=UTCClock().now,
+            )
+        print(json.dumps(result, sort_keys=True))
+        return
     original = launch.read_committed(config["consumer"], maximum=4 << 20)
     consumer = launch.load_config(config["consumer"]["path"])
     if consumer != launch._json(original):

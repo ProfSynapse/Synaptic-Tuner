@@ -3,7 +3,7 @@
 This host command joins the existing public `RunsAPI` and `ArtifactsAPI` with
 caller-owned SQLite, transfer locks, bounded disk spool and local destination.
 It publishes the five original native artifacts of a stored, successfully
-verified HF training run. It does not train, observe a pending run, verify a
+verified HF or Modal training run. It does not train, observe a pending run, verify a
 training run or upload a model repository.
 
 Install the exact reviewed engine wheel and its pinned HF host dependencies in
@@ -46,3 +46,33 @@ The tests use actual public native verification and SQLite with explicit
 scripted provider/ML observations. Their fresh cold composition proves lookup
 does not reopen native streams or write destination files. Genuine completed
 training and its local publication remain separate live qualification evidence.
+
+
+## Retained Modal run
+
+`publication.modal.example.json` uses the same publication configuration plus an
+explicit `modal` mapping containing the original retained run root, named profile
+and environment. Here `consumer` commits the exact original
+`<modal.root>/readback-inputs.json`, not an HF consumer file. Preserve the original
+`authority-keys.json`, workflow SQLite and attempt journal; the existing read-only
+Modal opener authenticates them without source/preparation or submit authority.
+The engine Gitlink remains exact1da; a new host-script commit does not relabel the
+original training source. No cancellation or replay is available from this host.
+
+Use the existing copied CPython3.11.14 launcher and Modal1.5.4 with the exact
+reviewed installed engine wheel. The publication SecretRef is a separate
+caller-owned key, not HF_TOKEN or a Modal credential. Resolve it only for an
+admitted operation through the existing explicit dotenv CLI. No key values belong
+in this configuration or its logs.
+
+A fresh Modal `lookup` still performs the existing bounded workspace/environment
+scope reads while composing its retained RunsAPI. The publication kernel itself
+uses stored run/manifest evidence and destination lookup: it must not poll the
+training call, reopen native streams, transfer artifacts or submit training. The
+host does not claim entirely provider-free composition. Both `publish` and
+`lookup` retain the same fixed, non-secret error convention.
+
+The Modal composition test uses genuine GRPO native five-role verification with
+explicit CPU/SDK observations to exercise the method-neutral join. Actual local
+publication of the independently verified live Modal SFT run is a separate,
+root-admitted effect; unit tests do not claim that live result.
