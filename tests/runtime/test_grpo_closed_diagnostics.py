@@ -79,7 +79,22 @@ def test_wire_tables_are_exact_and_exit_status_fits_byte():
     from tuner.execution.providers.modal import packaged_worker as worker
     from tuner.training import modal_host_reader as reader
     from scripts import inspect_modal_packaged_call as inspector
-    expected = execution.GRPO_CHILD_FAILURE_STAGES
+    expected = frozenset(
+        "TRAINER_CHILD_" + phase + "_" + category
+        for phase in ("TRANSPORT", "RELEASE", "INPUT", "IMPORT", "EXEC", "POSTCHECK")
+        for category in ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER")
+    ) | frozenset("TRAINER_CHILD_EXEC_" + category for category in (
+        "RUNTIME", "TYPE", "ATTRIBUTE", "KEY", "MEMORY", "TORCH_OOM", "TIMEOUT",
+    )) | frozenset(
+        "TRAINER_CHILD_EXEC_" + category + "_" + phase
+        for phase in ("INPUT_ADMISSION", "REWARDS", "DEPENDENCIES", "CONFIG",
+                      "MODEL_LIBRARY_LOAD", "LORA_ATTACH", "DATA_PREP", "TRAINER_SETUP",
+                      "TRAIN_CALL", "MEASUREMENT_BEGIN", "MEASUREMENT_END",
+                      "MEASUREMENT_RECORD", "SAVE", "POST_SAVE")
+        for category in ("OS", "IMPORT", "VALUE", "SYSTEM_EXIT", "OTHER", "RUNTIME",
+                         "TYPE", "ATTRIBUTE", "KEY", "MEMORY", "TORCH_OOM", "TIMEOUT")
+    )
+    assert execution.GRPO_CHILD_FAILURE_STAGES == expected
     assert worker.GRPO_CHILD_FAILURE_STAGES == reader.GRPO_CHILD_FAILURE_STAGES == inspector.GRPO_CHILD_FAILURE_STAGES == expected
     assert all(type(code) is int and 0 < code < 256 for code in execution.GRPO_CHILD_EXIT_STAGES)
     assert len(set(execution.GRPO_CHILD_EXIT_STAGES.values())) == len(execution.GRPO_CHILD_EXIT_STAGES)
