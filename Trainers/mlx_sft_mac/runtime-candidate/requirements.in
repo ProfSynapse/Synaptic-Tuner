@@ -1,0 +1,4 @@
+# Candidate only: macOS arm64, CPython 3.11.14; not an admitted training runtime.
+# Upstream mlx-lm v0.32.2: 93e6d4a6447b3080861985947f0820e76fcb957d.
+mlx==0.32.2
+mlx-lm[train]==0.32.2
