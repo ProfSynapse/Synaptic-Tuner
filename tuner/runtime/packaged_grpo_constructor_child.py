@@ -8,7 +8,6 @@ immediately after trainer construction. All observable diagnostics are closed.
 from __future__ import annotations
 
 import base64
-import contextlib
 import hashlib
 import importlib.resources
 import inspect
@@ -17,7 +16,6 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import signal
-import stat
 import subprocess
 import sys
 import tempfile

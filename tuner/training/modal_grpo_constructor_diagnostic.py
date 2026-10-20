@@ -12,7 +12,6 @@ import hashlib
 from io import BytesIO
 from pathlib import Path
 import queue
-import secrets
 import threading
 import time
 from zipfile import ZipFile

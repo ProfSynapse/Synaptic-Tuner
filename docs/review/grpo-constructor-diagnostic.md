@@ -80,9 +80,9 @@ Before one effect, root must review and bind:
 
 1. The final clean pushed engine and host superproject commits and gitlink;
    the complete refreshed GRPO offline closure digest
-   `a3004e24020e9f716671a343725e26efc4bb75d695a45d0f6bcc957eaaf9ba8b`
+   `8c7b40c6aec21c4aeeb1f66c7184de915126640c4a55726099007cdec594eb59`
    (133 members), outer closure digest
-   `e8a87173ba26f9a2f28ad5302f31c41f74d68158f0d4f187f43f00d01c30e68a`
+   `7b4c35b9523cd1d1ef95cd9c66800f13b570ae5d19b1c446a91cbd68b57e2c83`
    (14 members), Modal runtime lock file SHA256
    `3bcd5d9ca2065a1462745e738e4e1d60f89e3c31829964bc2f054b795cf4b561`;
    the final wheel SHA256, runtime release digest, exact newly deployed Modal
