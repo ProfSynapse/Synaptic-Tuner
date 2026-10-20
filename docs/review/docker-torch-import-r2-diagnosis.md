@@ -233,12 +233,12 @@ deadline, single owned stop and independent terminal inspection. The fixed
 child still only installs the source guard, bootstraps and imports Torch; it
 does not invoke the trainer, load a model or run training.
 
-**Proposal for root review; do not execute under the r6 authorization.** A
-future reviewed run would require a clean checkout of the new helper commit,
+Root separately reviewed and authorized the following command for one r8
+import-only run. It required a clean checkout of `98e4a49ee175102f645e8c497acaff90fd5c4248`,
 fresh read-only daemon/image/source/custody checks, a new private mode-0700
 `/home/profsynapse/.local/share/synaptic-qualification/torch-import-r7-20261020`
 parent, an absent `guarded-gpu0-1` child, and a saved/read-back one-use
-admission. Its exact command is:
+admission. This exact command ran once and is consumed:
 
 ```sh
 python3 -I scripts/diagnose_docker_torch_import.py \
@@ -255,3 +255,43 @@ python3 -I scripts/diagnose_docker_torch_import.py \
   --gpu-device 0 \
   --output-dir /home/profsynapse/.local/share/synaptic-qualification/torch-import-r7-20261020/guarded-gpu0-1
 ```
+
+## r8 single GPU-visible import result
+
+Before the single r8 start, a fresh clean WSL checkout and the reviewed helper
+SHA-256 `95849f03b1133302cef1bc7ceec1e20674897877152c9b35b64af2b86cf718c3`
+were authenticated. The trusted closure verifier SHA-256 was
+`2304eeb00667954510c34cc4aacaa818532a301fbeabf04c2fb165d6cd1d70b5`.
+Release, image, daemon, retained source lock, manifest and closure identities
+matched those above. The source and ancestors passed private-custody checks,
+no matching writer was observed, and the private mode-0700 output parent had
+no `guarded-gpu0-1` child. Windows and WSL GPU queries both identified device
+0 as `GPU-ac4398bb-fc15-d722-b39c-2790b4b5f9cc` (RTX 3090) and returned
+no active compute-process row. The one-use Nexus admission was saved and read
+back before Docker create.
+
+The closed r8 result is `PASS` at `TORCH_IMPORT`, `gpu_device="0"`,
+`gpu_used=null` (device use not measured), and `training_executed=false`.
+Container `d41a2c26ee089777b7583e6100e67c5a899eedc7ff2c72b9beddae22cfe669c2`
+is retained. Independent Docker inspection found the exact claim label
+`e076d416d5d8ea04d97ae245d989db7d1d41d4ef74efe036c3aec723dff57dd2`,
+image ID, one device request with `DeviceIDs=["0"]` and `Capabilities=[["gpu"]]`,
+2 CPUs, 4 GiB, network `none`, read-only root, UID/GID 1000, all capabilities
+dropped, and terminal `exited` with code 0. It ran from
+`2026-10-20T15:11:08.249437944Z` to `2026-10-20T15:11:11.665541884Z`.
+Events record one claimed create, one start and terminal exit 0; no stop or
+deletion occurred. The retained `claim.json`, `events.jsonl` and `result.json`
+under `torch-import-r7-20261020/guarded-gpu0-1` have SHA-256
+`a7a85de97044ed8b2381f20be1c5e0846fc9ddb1b0217bde6b1da7b3d95ae89c`,
+`05b15a0b21e2dc653572f5f4f51f12e5b98371a65fe216a5b76969efecdc158d`,
+and `439d5a19c1b838840ee8cd49085a95b68acfa50e8182e3dceca43b52722794f1`,
+respectively. The r2/r4/r6 claims and containers remain unchanged.
+
+Both guarded r6 CPU and r8 device-0 imports passed in the reduced diagnostic.
+Adding device-0 exposure and removing the two visibility suppressors did not
+reproduce r2's closed import rejection under those conditions. It does not
+recreate the r2 parent/isolated-child environment, Python entry, root/default
+capabilities, writable filesystem or 16-GiB limit, and cannot establish or
+rule out an interaction with them. The cause of r2 remains unproven. This
+consumed diagnostic grants no replay, broader GPU comparison or training
+authority.
