@@ -29,10 +29,11 @@ _REASONS = frozenset({"DAEMON_ID_INVALID", "INPUT_INVALID", "DOCKER_INVALID",
     "DOCKER_CHANGED", "DOCKER_COMMAND_REJECTED", "DIAGNOSTIC_OUTPUT_INVALID",
     "RELEASE_INVALID", "RELEASE_HASH_INVALID", "OUTPUT_INVALID", "SOURCE_INVALID", "DAEMON_INVALID", "IMAGE_INVALID",
     "CHILD_OUTPUT_INVALID", "CONTAINER_ID_INVALID", "CONTAINER_IMAGE_INVALID",
-    "IMAGE_CHANGED", "SOURCE_IDENTITY_INVALID", "CREATE_UNCERTAIN", "START_UNCERTAIN",
+    "IMAGE_CHANGED", "SOURCE_IDENTITY_INVALID", "GPU_SCOPE_INVALID", "CREATE_UNCERTAIN", "START_UNCERTAIN",
     "DEADLINE_UNCERTAIN", "DEADLINE_STOPPED", "STOP_UNCONFIRMED", "CONTAINER_STATE_INVALID"})
 _CLI_BUDGET = 8192
 _RUN_SECONDS = 120
+_HIDDEN_GPU_ENV = ",'CUDA_VISIBLE_DEVICES':'','NVIDIA_VISIBLE_DEVICES':'void'"
 _INSPECT = "{{json .Id}}\n{{json .Name}}\n{{json .Image}}\n{{json .Config.Labels}}\n{{json .State.Status}}\n{{json .State.ExitCode}}"
 
 # This fixed program never formats an exception, inspects its attributes, or
@@ -269,6 +270,26 @@ def _inspect_owned(authority, identifier: str, *, name: str, label: str, image: 
     return status, code
 
 
+def _require_gpu_zero(authority, identifier: str) -> None:
+    """Confirm the fixed device request before any GPU-exposed code starts."""
+    result = _run(authority, ("container", "inspect", "--format",
+                              "{{json .HostConfig.DeviceRequests}}", identifier))
+    if result.stderr:
+        raise ValueError("GPU_SCOPE_INVALID")
+    try:
+        requests = json.loads(_one_line(result.stdout))
+    except Exception:
+        raise ValueError("GPU_SCOPE_INVALID") from None
+    if (type(requests) is not list or len(requests) != 1
+            or type(requests[0]) is not dict
+            or requests[0].get("DeviceIDs") != ["0"]
+            or requests[0].get("Capabilities") != [["gpu"]]
+            or requests[0].get("Count") != 0
+            or requests[0].get("Driver") != ""
+            or requests[0].get("Options") != {}):
+        raise ValueError("GPU_SCOPE_INVALID")
+
+
 def _stop_once(authority, identifier: str, *, name: str, label: str,
                image: str, daemon_id: str, output_dir: Path) -> bool:
     """One stop request; only a separate exact inspection can prove terminal state."""
@@ -314,7 +335,10 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
              source_root: Path | None = None, source_lock: Path | None = None,
              expected_source_lock_sha256: str | None = None,
              expected_manifest_sha256: str | None = None,
-             expected_closure_digest: str | None = None) -> dict[str, object]:
+             expected_closure_digest: str | None = None,
+             gpu_device: str | None = None) -> dict[str, object]:
+    if gpu_device not in (None, "0") or (gpu_device is not None and source_root is None):
+        raise ValueError("GPU_SCOPE_INVALID")
     if not re.fullmatch(r"[0-9a-f-]{36}", daemon_id):
         raise ValueError("DAEMON_ID_INVALID")
     release_raw = _read(release_path, 128 * 1024)
@@ -364,6 +388,12 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     name = "synaptic-torch-import-" + nonce
     probe = _PROBE if source_root is None else _GUARDED_PROBE.replace(
         "EXPECTED_CLOSURE_DIGEST", expected_closure_digest)
+    if gpu_device is not None:
+        if probe.count(_HIDDEN_GPU_ENV) != 1:
+            raise ValueError("GPU_SCOPE_INVALID")
+        # The r2 isolated child did not inherit either visibility variable.
+        # The host device request is separately inspected before start.
+        probe = probe.replace(_HIDDEN_GPU_ENV, "")
     claim = {"schema_version": SCHEMA, "daemon_id": daemon_id, "image_id": image,
              "release_sha256": expected_release_sha256, "source_identity": source_identity,
              "name": name, "scope": "bare" if source_root is None else "guarded",
@@ -371,6 +401,8 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
              "probe_sha256": hashlib.sha256(probe.encode("utf-8")).hexdigest(),
              "docker_file_identity": list(authority[2]),
              "docker_config_identity": list(authority[3])}
+    if gpu_device is not None:
+        claim["gpu_device"] = gpu_device
     claim_raw = json.dumps(claim, sort_keys=True, separators=(",", ":")).encode("ascii")
     label = hashlib.sha256(claim_raw).hexdigest()
     with (output_dir / "claim.json").open("xb") as stream:
@@ -382,6 +414,8 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
              ("--mount", f"type=bind,src={source_root.parent},dst=/source,readonly"))
     user = (() if source_root is None else
             ("--user", f"{source_root.stat().st_uid}:{source_root.stat().st_gid}"))
+    visibility = (("--env=NVIDIA_VISIBLE_DEVICES=void", "--env=CUDA_VISIBLE_DEVICES=")
+                  if gpu_device is None else ("--gpus", "device=0"))
     command = (
         "container", "create", "--name", name, "--label", "ai.synapticlabs.torch-import.claim=" + label,
         "--pull=never", "--network=none", "--log-driver", "json-file",
@@ -390,7 +424,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
         "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=4g",
         "--cpus=2", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
         *mount, *user,
-        "--env=NVIDIA_VISIBLE_DEVICES=void", "--env=CUDA_VISIBLE_DEVICES=",
+        *visibility,
         "--workdir=/tmp", "--entrypoint", python,
         image, "-I", "-c", probe,
     )
@@ -415,6 +449,8 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     if _inspect_owned(authority, cid, name=name, label=label, image=image,
                       daemon_id=daemon_id)[0] != "created":
         raise ValueError("CONTAINER_STATE_INVALID")
+    if gpu_device is not None:
+        _require_gpu_zero(authority, cid)
     # Recheck the exact source bytes immediately before starting mounted code.
     if source_root is not None and _source_identity(source_root, source_lock,
             expected_source_lock_sha256, expected_manifest_sha256,
@@ -487,12 +523,14 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     report = {"schema_version": SCHEMA, "category": child["category"],
               "container_id": cid, "image_id": image, "daemon_id": daemon_id,
               "runtime_release_digest": digest,
-              "training_executed": False, "gpu_used": False,
+              "training_executed": False, "gpu_used": None if gpu_device is not None else False,
               "scope": "bare" if source_root is None else "guarded",
               "claim_sha256": label, "source_identity": source_identity,
               "terminal_observed": True}
     if source_root is not None:
         report["stage"] = child["stage"]
+    if gpu_device is not None:
+        report["gpu_device"] = gpu_device
     with (output_dir / "result.json").open("x", encoding="ascii") as stream:
         json.dump(report, stream, sort_keys=True, separators=(",", ":"))
         stream.write("\n")
@@ -510,6 +548,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-source-lock-sha256")
     parser.add_argument("--expected-manifest-sha256")
     parser.add_argument("--expected-closure-digest")
+    parser.add_argument("--gpu-device")
     args = parser.parse_args(argv)
     try:
         report = diagnose(docker=args.docker, docker_config=args.docker_config,
@@ -519,7 +558,8 @@ def main(argv: list[str] | None = None) -> int:
                           source_root=args.source_root, source_lock=args.source_lock,
                           expected_source_lock_sha256=args.expected_source_lock_sha256,
                           expected_manifest_sha256=args.expected_manifest_sha256,
-                          expected_closure_digest=args.expected_closure_digest)
+                          expected_closure_digest=args.expected_closure_digest,
+                          gpu_device=args.gpu_device)
     except BaseException as error:
         reason = error.args[0] if type(error) is ValueError and len(error.args) == 1 else None
         if type(reason) is not str or reason not in _REASONS:

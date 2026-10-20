@@ -42,6 +42,8 @@ elif a[:2]==['image','inspect']: print('sha256:'+'a'*64)
 elif a[:2]==['container','create']:
  s['status']='created'; s['name']=a[a.index('--name')+1]
  s['guarded']='--mount' in a
+ s['gpu_requested']='--gpus' in a and a[a.index('--gpus')+1]=='device=0' if '--gpus' in a else False
+ s['gpu_probe_unhidden']=s['gpu_requested'] and "'NVIDIA_VISIBLE_DEVICES':'void'" not in a[-1] and "'CUDA_VISIBLE_DEVICES':''" not in a[-1]
  s['label']=a[a.index('--label')+1].split('=',1)[1]; save()
  if s['mode']=='create_hang': time.sleep(10)
  if s['mode']=='bad_id': print('invalid'); sys.exit(0)
@@ -54,6 +56,10 @@ elif a[:2]==['container','start']:
  if s['mode']=='start_stderr_flood': sys.stderr.write('x'*20000); sys.exit(0)
  print('b'*64)
 elif a[:2]==['container','inspect']:
+ if 'DeviceRequests' in a[a.index('--format')+1]:
+  if s['mode']=='wrong_gpu_request': print('null')
+  else: print(json.dumps([{'Capabilities':[['gpu']],'Count':0,'DeviceIDs':['0'],'Driver':'','Options':{}}] if s.get('gpu_requested') else None))
+  sys.exit(0)
  name='/' + s.get('name','missing')
  if s['mode']=='wrong_identity' or (s['mode']=='wrong_running_identity' and s['status']=='running'):
   name='/another-container'
@@ -165,6 +171,60 @@ def test_guarded_happy_path_records_independent_source_identity(tmp_path: Path, 
     assert report["source_identity"]["manifest_sha256"] == flags["expected_manifest_sha256"]
 
 
+def test_gpu_visibility_is_fixed_guarded_import_only(tmp_path: Path, monkeypatch) -> None:
+    flags, _, _ = _stage_source(tmp_path)
+    docker, config, state = _fake_docker(tmp_path)
+    monkeypatch.setattr(diagnostic, "_RUN_SECONDS", 2)
+    original_inspect = diagnostic._inspect_owned
+    def inspect(*args, **kwargs):
+        status, code = original_inspect(*args, **kwargs)
+        if status == "running":
+            _state(state, status="exited")
+        return status, code
+    monkeypatch.setattr(diagnostic, "_inspect_owned", inspect)
+    report = _call(tmp_path, docker, config, gpu_device="0", **flags)
+    claim = json.loads((tmp_path / "out/claim.json").read_text())
+    actual = json.loads(state.read_text())
+    assert claim["gpu_device"] == "0"
+    assert actual["gpu_requested"] is True and actual["gpu_probe_unhidden"] is True
+    assert actual["stops"] == 0
+    assert report["category"] == "PASS" and report["stage"] == "TORCH_IMPORT"
+    assert report["gpu_device"] == "0" and report["gpu_used"] is None
+    assert report["training_executed"] is False
+
+
+def test_gpu_scope_rejects_before_effect_or_start(tmp_path: Path) -> None:
+    docker, config, state = _fake_docker(tmp_path)
+    with pytest.raises(ValueError, match="GPU_SCOPE_INVALID"):
+        _call(tmp_path, docker, config, gpu_device="0")
+    assert json.loads(state.read_text())["status"] == "absent"
+    assert not (tmp_path / "out").exists()
+    flags, _, _ = _stage_source(tmp_path)
+    with pytest.raises(ValueError, match="GPU_SCOPE_INVALID"):
+        _call(tmp_path, docker, config, gpu_device="1", **flags)
+    assert json.loads(state.read_text())["status"] == "absent"
+    _state(state, mode="wrong_gpu_request")
+    with pytest.raises(ValueError, match="GPU_SCOPE_INVALID"):
+        _call(tmp_path, docker, config, gpu_device="0", **flags)
+    assert json.loads(state.read_text())["status"] == "created"
+    assert json.loads(state.read_text())["stops"] == 0
+    assert (tmp_path / "out/claim.json").exists()
+    assert not (tmp_path / "out/result.json").exists()
+
+
+def test_invalid_gpu_cli_value_is_closed(tmp_path: Path, capsys) -> None:
+    exit_code = diagnostic.main([
+        "--docker", str(tmp_path / "docker"), "--docker-config", str(tmp_path / "config"),
+        "--release", str(tmp_path / "release"), "--output-dir", str(tmp_path / "out"),
+        "--daemon-id", DAEMON, "--expected-release-sha256", "a" * 64,
+        "--gpu-device", "private-value",
+    ])
+    captured = capsys.readouterr()
+    assert exit_code == 2 and captured.out == ""
+    assert json.loads(captured.err) == {"schema_version": diagnostic.SCHEMA,
+        "status": "REJECTED", "reason_code": "GPU_SCOPE_INVALID"}
+
+
 @pytest.mark.parametrize("mode,reason,expected_stops", [
     ("start_hang", "START_UNCERTAIN", 1),
     ("start_error", "START_UNCERTAIN", 1),
@@ -268,7 +328,7 @@ def test_uncertain_stop_acknowledgement_is_independently_inspected(tmp_path: Pat
         return result
 
     monkeypatch.setattr(diagnostic, "_run", run)
-    monkeypatch.setattr(diagnostic, "_RUN_SECONDS", 0.1)
+    monkeypatch.setattr(diagnostic, "_RUN_SECONDS", 1)
     with pytest.raises(ValueError, match="DEADLINE_STOPPED"):
         _call(tmp_path, docker, config)
     actual = json.loads(state.read_text())

@@ -511,8 +511,9 @@ The import execution has a
 to the authenticated new container and separately inspects terminal state;
 cleanup takes additional bounded time, and a stop acknowledgment alone is not
 quiescence. An uncertain create/start/stop remains consumed in `claim.json` and
-`events.jsonl`, with no automatic replay or container removal. The probe asks
-for at most 2 CPUs, 4 GiB, no network/GPU/model mount, and a read-only root.
+`events.jsonl`, with no automatic replay or container removal. The default
+probe asks for at most 2 CPUs, 4 GiB, no network/GPU/model mount, and a
+read-only root.
 Bare mode mounts no source. Guarded mode mounts the independently authenticated
 retained source and runs the worker closure check, module guard, trainer path
 setup, environment bootstrap and Torch import. Neither runs training. `PASS`
@@ -521,6 +522,17 @@ failure. Review the pinned package/runtime source before changing a profile,
 image or runtime policy.
 The exact r2 CPU evidence and its unresolved runtime difference are in
 `docs/review/docker-torch-import-r2-diagnosis.md`.
+
+The guarded-only `--gpu-device 0` option is an import-only comparison that
+requires separate exact root review before any live use. It requests only
+device 0, verifies Docker retained that device request before start, removes
+the CPU probe's visibility suppressors, and records the scope in its claim.
+`gpu_used=null` means actual device use was not measured. The same 8-KiB
+output budget, 120-second execution deadline, owned cleanup, source
+authentication and closed child codes apply. It neither invokes the trainer
+nor loads a model; a PASS or failure cannot retrospectively diagnose an
+earlier trainer attempt. See the exact proposed command and remaining
+environment/user/filesystem gaps in the r2 diagnosis note.
 
 After an intentional worker source change, check and refresh existing
 manifests with the checked-in maintainers in dependency order:
