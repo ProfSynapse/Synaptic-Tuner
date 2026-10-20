@@ -163,12 +163,7 @@ def prepare_model_snapshot(
         raise ModelSnapshotPreparationError(stage[0]) from None
 
 
-def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
-             scratch_root, persistent_binding, stage):
-    from huggingface_hub import HfApi, snapshot_download
-    _bind_hub_api(HfApi, snapshot_download)
-
-    stage[0] = "INPUT"
+def _validated_model_parts(model_ref, revision):
     parts = model_ref.split("/")
     if len(parts) not in (1, 2) or any(
         re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", part) is None
@@ -176,17 +171,16 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
         for part in parts
     ) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise ValueError("model identity is not pinned")
-    stage[0] = "WORKSPACE_SETUP"
-    for root in (destination_root, scratch_root):
-        _directory(root)
-    if persistent_binding is None:
-        _directory(persistent_root)
-    credential = token if isinstance(token, str) and token.strip() else False
-    stage[0] = "METADATA_FETCH"
-    info = HfApi(endpoint=_ENDPOINT, token=credential).model_info(
-        model_ref, revision=revision, files_metadata=True, token=credential,
-    )
-    stage[0] = "METADATA_VALIDATION"
+    return parts
+
+
+def authoritative_model_members(info, *, model_ref, revision):
+    """Validate exact Hub metadata independently of retained Volume contents.
+
+    The caller must obtain ``info`` through the pinned SDK's exact model_info
+    read. This pure projection is also used by ordinary model preparation.
+    """
+    _validated_model_parts(model_ref, revision)
     if info.sha != revision or not info.siblings or len(info.siblings) > _MAX_FILES:
         raise ValueError("model metadata is not exact")
     members = {}
@@ -218,6 +212,29 @@ def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
         ) is None:
             raise ValueError("model metadata digest is missing")
         members[name] = (size, kind, expected)
+
+    return members
+
+
+def _prepare(*, model_ref, revision, token, persistent_root, destination_root,
+             scratch_root, persistent_binding, stage):
+    from huggingface_hub import HfApi, snapshot_download
+    _bind_hub_api(HfApi, snapshot_download)
+
+    stage[0] = "INPUT"
+    parts = _validated_model_parts(model_ref, revision)
+    stage[0] = "WORKSPACE_SETUP"
+    for root in (destination_root, scratch_root):
+        _directory(root)
+    if persistent_binding is None:
+        _directory(persistent_root)
+    credential = token if isinstance(token, str) and token.strip() else False
+    stage[0] = "METADATA_FETCH"
+    info = HfApi(endpoint=_ENDPOINT, token=credential).model_info(
+        model_ref, revision=revision, files_metadata=True, token=credential,
+    )
+    stage[0] = "METADATA_VALIDATION"
+    members = authoritative_model_members(info, model_ref=model_ref, revision=revision)
 
     stage[0] = "WORKSPACE_SETUP"
     relative = Path("models--" + "--".join(parts)) / "snapshots" / revision

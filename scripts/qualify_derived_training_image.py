@@ -137,6 +137,10 @@ def _parser() -> argparse.ArgumentParser:
     local.add_argument("--docker-config", required=True, type=Path)
     local.add_argument("--execute", action="store_true")
     local_verify.add_argument("--evidence", required=True, type=Path)
+    grpo_input = release_actions.add_parser(
+        "plan-grpo-constructor-input", help="Derive the exact four-row constructor input from normal plan and recipe")
+    for flag in ("plan-ready", "recipe", "dataset", "profiles-root"):
+        grpo_input.add_argument("--" + flag, required=True, type=Path)
     return parser
 
 
@@ -238,6 +242,14 @@ def main(argv: list[str] | None = None) -> int:
             _json({"schema_version": result["schema_version"], "status": result["status"]})
             return 0
         if args.command == "release":
+            if args.release_command == "plan-grpo-constructor-input":
+                from tuner.cloud.grpo_constructor_diagnostic import derive_probe_input
+                raw = derive_probe_input(recipe_path=args.recipe, plan_ready_path=args.plan_ready,
+                                         dataset_path=args.dataset, profiles_root=args.profiles_root)
+                _json({"schema_version": "synaptic-grpo-constructor-input-plan/v1",
+                       "status": "PLAN_ONLY", "input_sha256": hashlib.sha256(raw).hexdigest(),
+                       "input_size_bytes": len(raw), "row_count": 4})
+                return 0
             if args.release_command in {"qualify-local", "verify-local"}:
                 inputs = dict(qualification_config_path=args.qualification_config, release_path=args.release,
                     profile_path=args.config, build_receipt_path=args.build_receipt, candidate_path=args.candidate,

@@ -13,7 +13,8 @@ from .offline_sft_worker import _strict_document, _canonical_json
 GRPO_OUTER_SCHEMA = "synaptic-packaged-grpo-worker-closure/v1"
 GRPO_OUTER_RESOURCE = "manifests/packaged-grpo-worker-v1.json"
 GRPO_OUTER_MEMBERS = tuple(sorted((
-    "tuner/runtime/packaged_grpo_child.py", "tuner/runtime/packaged_grpo_execution.py",
+    "tuner/runtime/packaged_grpo_child.py", "tuner/runtime/packaged_grpo_constructor_child.py",
+    "tuner/runtime/packaged_grpo_execution.py",
     "tuner/runtime/packaged_grpo_verification.py", "tuner/runtime/packaged_grpo_worker_closure.py",
     "tuner/runtime/packaged_sft_child.py", "tuner/runtime/packaged_sft_execution.py",
     "tuner/runtime/packaged_training_worker.py", "tuner/runtime/packaged_worker_closure.py",

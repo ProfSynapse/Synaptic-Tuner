@@ -1079,8 +1079,8 @@ jobs:
           import hashlib
           from tuner.runtime.offline_grpo_worker import verify_installed_grpo_members
           from tuner.runtime.packaged_grpo_worker_closure import load_packaged_grpo_worker_closure
-          assert len(verify_installed_grpo_members().closure.members) == 131
-          assert len(load_packaged_grpo_worker_closure().members) == 13
+          assert len(verify_installed_grpo_members().closure.members) == 133
+          assert len(load_packaged_grpo_worker_closure().members) == 14
           for package, relative in (
               ("tuner.runtime", "manifests/offline-grpo-worker-v1.json"),
               ("tuner.runtime", "manifests/packaged-grpo-worker-v1.json"),

@@ -2,6 +2,23 @@
 
 Group Relative Policy Optimization — optimizes model behavior using reward functions against generated completions.
 
+For the consumed 0d515 Modal trainer-setup failure and restricted,
+constructor-only Modal diagnostic, see
+`docs/review/grpo-constructor-diagnostic.md`. The pinned Unsloth Zoo 2026.1.2
+source requires an accelerator at import, so a CPU-only patched-constructor
+probe cannot reach that boundary. The checked-in
+`scripts/qualify_derived_training_image.py release plan-grpo-constructor-input`
+command derives the exact four-row input. The private configured consumer is
+`examples/training_qualification/grpo_constructor.py`; use its owner-only
+example config and separate `prepare-model`, `plan`, `prepare`, `admit`,
+`execute-once`, and `readback` review gates. It requires reviewed new
+image/source and independent read-only retained snapshot custody. A diagnostic
+claim is consumed; it grants no training replay or qualification. The old
+deployment's superseded app generation is retained evidence, while the exact
+old model Volume identity is rehydrated read-only. Generated Unsloth code is
+not source-attested by pinned wheel files, so its type-site label remains
+`OTHER` unless a future exact generated-code proof is added.
+
 ## Public GRPO declarations and CPU preparation
 
 The provider-neutral `TrainingInputV1` accepts explicit method `grpo` with
@@ -206,7 +223,7 @@ auto-select BF16 on BF16-capable hardware while the recipe requests FP16 can
 fail at `TRAINER_SETUP`. A closed `TypeError` marker alone cannot establish
 that this was the historical cause, and it does not authorize replay.
 
-GRPO has a separate fixed 131-member offline inventory and 13-member outer
+GRPO has a separate fixed 133-member offline inventory and 14-member outer
 closure. Existing SFT inventories remain unchanged. Maintenance uses the
 checked-in command, offline first because the outer closure binds its bytes:
 
@@ -633,7 +650,7 @@ actual accepted wheel anchor is replaced by the actual newly built current-sourc
 wheel in bound build material, using the existing normal builder. Never invent a
 future SHA or embed a circular self-hash. Actual derived-image inventory and CPU
 GRPO qualification remain separate from the 396-distribution base observation.
-The old SFT profiles and fixed SFT68/outer5 and GRPO131/outer13 inventories stay
+The old SFT profiles and fixed SFT68/outer5 and GRPO133/outer14 inventories stay
 unchanged. Installed candidate tests require an actual fresh wheel, verify the
 runtime YAML/inventory are shipped and the source image profile is absent, and
 label their synthetic Git preplan observation as CPU control-flow evidence only.

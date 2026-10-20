@@ -177,12 +177,21 @@ def build_grpo_config(config: dict, checkpoints_dir: Path, *, config_class, bf16
 
 
 def train_grpo_core(*, model, tokenizer, reward_fn, formatted_dataset,
-                    training_args, callbacks, trainer_class, resume=None, _runtime_milestone=None):
+                    training_args, callbacks, trainer_class, resume=None, _runtime_milestone=None,
+                    _constructor_only=False, _constructor_observer=None):
+    if type(_constructor_only) is not bool or (
+        _constructor_only and (resume is not None or not callable(_constructor_observer))
+    ) or (_constructor_observer is not None and not callable(_constructor_observer)):
+        raise ValueError("invalid constructor diagnostic selection")
     if _runtime_milestone is not None:
         _runtime_milestone("TRAINER_SETUP")
-    trainer = create_grpo_trainer(trainer_class=trainer_class, model=model, processing_class=tokenizer,
-                            reward_funcs=reward_fn, args=training_args,
-                            train_dataset=formatted_dataset, callbacks=callbacks)
+    kwargs = dict(model=model, processing_class=tokenizer, reward_funcs=reward_fn,
+                  args=training_args, train_dataset=formatted_dataset, callbacks=callbacks)
+    if _constructor_observer is not None:
+        _constructor_observer(trainer_class, kwargs)
+    trainer = create_grpo_trainer(trainer_class=trainer_class, **kwargs)
+    if _constructor_only:
+        return trainer, None
     if _runtime_milestone is not None:
         _runtime_milestone("TRAIN_CALL")
     result = train_grpo_trainer(trainer, resume=resume)
@@ -422,7 +431,8 @@ def _stamp_packaged_adapter(final_model, model_ref):
 def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
              model_snapshot, model_identity, output_root, workload,
              metric_sink=None, _dependency_factory=None, _packaged_artifacts=False,
-             qualification_evidence=None, _child_deadline=None, _runtime_milestone=None):
+             qualification_evidence=None, _child_deadline=None, _runtime_milestone=None,
+             _constructor_only=False, _constructor_observer=None):
     """Run the existing GRPO core with explicit immutable admitted inputs.
 
     This entry does not authenticate a public plan or attest model member
@@ -431,6 +441,10 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
     """
     if _runtime_milestone is not None and not callable(_runtime_milestone):
         raise ValueError("invalid private runtime milestone callback")
+    if type(_constructor_only) is not bool or (
+        _constructor_only and (not _packaged_artifacts or not callable(_constructor_observer))
+    ) or (_constructor_observer is not None and not callable(_constructor_observer)):
+        raise ValueError("invalid constructor diagnostic selection")
     def mark(value):
         if _runtime_milestone is not None:
             _runtime_milestone(value)
@@ -528,7 +542,10 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
     trainer, result = train_grpo_core(model=model, tokenizer=tokenizer, reward_fn=reward_fn,
         formatted_dataset=dataset, training_args=args, callbacks=callbacks,
         trainer_class=deps['trainer_class'],
-        **({"_runtime_milestone": mark} if _runtime_milestone is not None else {}))
+        **({"_runtime_milestone": mark} if _runtime_milestone is not None else {}),
+        _constructor_only=_constructor_only, _constructor_observer=_constructor_observer)
+    if _constructor_only:
+        return trainer
     mark("MEASUREMENT_RECORD")
     evidence = measurements.record(workload) if measurements is not None else None
     mark("SAVE")
