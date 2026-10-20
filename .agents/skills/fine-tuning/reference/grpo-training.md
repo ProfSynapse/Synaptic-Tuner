@@ -2,6 +2,16 @@
 
 Group Relative Policy Optimization — optimizes model behavior using reward functions against generated completions.
 
+For the consumed 0d515 Modal trainer-setup failure and the bounded,
+constructor-only derived-image diagnostic, see
+`docs/review/grpo-constructor-diagnostic.md`. The pinned Unsloth Zoo 2026.1.2
+source requires an accelerator at import, so a CPU-only patched-constructor
+probe cannot reach that boundary. Use the checked-in
+`scripts/qualify_derived_training_image.py release plan-grpo-constructor-input`
+and `release diagnose-grpo-constructor` commands after reviewing exact source,
+image, normal plan and offline model custody. A diagnostic claim is consumed;
+it grants no training replay or qualification.
+
 ## Public GRPO declarations and CPU preparation
 
 The provider-neutral `TrainingInputV1` accepts explicit method `grpo` with
