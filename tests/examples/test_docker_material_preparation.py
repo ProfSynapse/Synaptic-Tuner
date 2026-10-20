@@ -167,7 +167,7 @@ def test_pinned_model_preparation_disjoint_cache_and_one_attempt(configured):
         (target / "synthetic-config.json").write_text('{"fixture":true}')
         return target
 
-    result = helper.prepare_model(c, model_preparer=model_preparer)
+    result = helper.prepare_model(c, model_preparer=model_preparer, sdk_preflight=lambda: None)
     assert calls[0]["token"] is False
     assert (
         calls[0]["revision"]
@@ -179,7 +179,7 @@ def test_pinned_model_preparation_disjoint_cache_and_one_attempt(configured):
         Path(c["consumer"]["docker"]["artifact_host_root"])
     )
     with pytest.raises(FileExistsError):
-        helper.prepare_model(c, model_preparer=model_preparer)
+        helper.prepare_model(c, model_preparer=model_preparer, sdk_preflight=lambda: None)
     assert len(calls) == 1
 
 
@@ -203,8 +203,109 @@ def test_hostile_model_roots_refuse_before_model_calls(configured, kind):
         artifact.chmod(0o755)
     with pytest.raises(ValueError):
         helper.prepare_model(
-            c, model_preparer=lambda **kwargs: pytest.fail("no model dispatch")
+            c, model_preparer=lambda **kwargs: pytest.fail("no model dispatch"),
+            sdk_preflight=lambda: None,
         )
+
+
+def test_model_sdk_failure_precedes_directories_and_claim(configured):
+    c, verifier, auth, clock, _ = configured
+    helper.prepare(c, pushed_sources=verifier, authenticator=auth, clock=clock)
+
+    def missing_sdk():
+        raise helper.ModelSnapshotPreparationError("SDK_ADMISSION")
+
+    with pytest.raises(helper.ModelSnapshotPreparationError):
+        helper.prepare_model(
+            c, sdk_preflight=missing_sdk,
+            model_preparer=lambda **kwargs: pytest.fail("no model dispatch"),
+        )
+    assert not (Path(c["output_root"]) / "model-preparation-attempt.json").exists()
+    assert not Path(c["consumer"]["docker"]["source_host_root"]).exists()
+    assert not Path(c["consumer"]["docker"]["artifact_host_root"]).exists()
+
+
+def test_model_preflight_missing_sdk_is_closed(monkeypatch):
+    import builtins
+    original = builtins.__import__
+
+    def guarded(name, *args, **kwargs):
+        if name == "huggingface_hub":
+            raise ModuleNotFoundError("private path and credential text")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded)
+    with pytest.raises(helper.ModelSnapshotPreparationError) as caught:
+        helper.model_preflight()
+    assert caught.value.stage == "SDK_ADMISSION"
+    assert str(caught.value) == "model preparation failed"
+    assert caught.value.__suppress_context__ is True
+
+
+def test_cli_model_preflight_checks_signatures_without_client_or_download(
+    tmp_path, monkeypatch, capsys,
+):
+    import sys
+    import types
+
+    class HfApi:
+        def __init__(self, *, endpoint, token):
+            pytest.fail("client construction")
+
+        def model_info(self, repo_id, *, revision, files_metadata, token):
+            pytest.fail("metadata request")
+
+    def snapshot_download(
+        *, repo_id, revision, token, endpoint, local_dir, cache_dir,
+        allow_patterns, max_workers,
+    ):
+        pytest.fail("download request")
+
+    monkeypatch.setitem(
+        sys.modules, "huggingface_hub",
+        types.SimpleNamespace(HfApi=HfApi, snapshot_download=snapshot_download),
+    )
+    config = tmp_path / "config.json"
+    config.write_text("{}")
+    assert helper.main(["model-preflight", str(config)]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "model_sdk_contract": "compatible",
+        "model_download": False,
+        "provider_qualified": False,
+    }
+    assert set(tmp_path.iterdir()) == {config}
+
+
+@pytest.mark.parametrize("stage", ["SDK_ADMISSION", "DOWNLOAD", "DESTINATION_VERIFICATION"])
+def test_cli_retains_only_existing_closed_model_stage(tmp_path, monkeypatch, capsys, stage):
+    config = tmp_path / "config.json"
+    config.write_text("{}")
+
+    def fail(_):
+        raise helper.ModelSnapshotPreparationError(stage)
+
+    monkeypatch.setattr(helper, "prepare_model", fail)
+    assert helper.main(["prepare-model", str(config)]) == 2
+    assert json.loads(capsys.readouterr().out) == {
+        "diagnostic_code": "docker_material_preparation_failed",
+        "model_preparation_stage": stage,
+    }
+
+
+def test_cli_unknown_exception_does_not_leak_text_or_stage(tmp_path, monkeypatch, capsys):
+    config = tmp_path / "config.json"
+    config.write_text("{}")
+
+    def fail(_):
+        error = RuntimeError("private path and credential text")
+        error.stage = "private stage"
+        raise error
+
+    monkeypatch.setattr(helper, "prepare_model", fail)
+    assert helper.main(["prepare-model", str(config)]) == 2
+    assert json.loads(capsys.readouterr().out) == {
+        "diagnostic_code": "docker_material_preparation_failed",
+    }
 
 
 def test_actual_native_writer_cpu_filesystem_probe_and_host_read(tmp_path):

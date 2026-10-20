@@ -460,3 +460,13 @@ The CPU `probe-filesystem` command measures actual native writer modes and host
 readability under a reviewed finite container plan; it is not training, GPU,
 provider or cancellation qualification. Source inventory and five-role native
 verification remain closed; no default capability or UID policy is promoted.
+
+Before short-lived source preparation, run `model-preflight` with the exact
+interpreter selected for `prepare-model`; the base consumer may lack the optional
+Hub SDK. This checks only the existing SDK signature contract and creates no
+client or claim. `prepare-model` repeats it before its one-use claim. Use an
+independently verified helper environment; do not upgrade the pinned trainer.
+Create and verify necessary private source/artifact parent directories first.
+Preserve any consumed model-preparation claim after failure. New failures retain
+the existing allowlisted `model_preparation_stage`; never infer that stage or a
+cause for an older generic diagnostic, or replay an uncertain attempt.
