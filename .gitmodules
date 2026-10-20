@@ -1,4 +1,4 @@
 [submodule "engine"]
 	path = engine
 	url = https://github.com/ProfSynapse/Synaptic-Tuner.git
-	branch = release/stable-qualification-fixes
+	branch = release/api-v1-completion

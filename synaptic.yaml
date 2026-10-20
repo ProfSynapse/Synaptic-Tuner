@@ -1,7 +1,7 @@
 schema_version: synaptic-project/v1
 project:
-  id: sft-lifecycle-55b4-qualification
-  name: SFT final qualification fixes lifecycle candidate
+  id: sft-lifecycle-0d515-20261020
+  name: Modal SFT lifecycle local preparation 0d515
 engine:
   requires: '>=1.0,<2.0'
   api: v1
