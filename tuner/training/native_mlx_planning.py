@@ -64,13 +64,50 @@ class NativeQualificationV1:
         safe_ref(self.key_ref, "key_ref")
 
 
+@dataclass(frozen=True)
+class NativeRestrictedAdmissionV1:
+    """An independently authenticated grant for one initial hardware attempt.
+
+    This is not a qualification receipt. Its verifier is supplied by the host;
+    the engine neither issues admissions nor trusts a digest as approval.
+    """
+
+    profile_digest: str
+    source_digest: str
+    runtime_digest: str
+    hardware_digest: str
+    prepared_digest: str
+    model_digest: str
+    tokenizer_digest: str
+    run_id: str
+    attempt: str
+    maximum_updates: int
+    expires_at: str
+    authority_ref: str
+    key_ref: str
+    tag: str
+
+    def __post_init__(self):
+        for name in ("profile_digest", "source_digest", "runtime_digest", "hardware_digest",
+                     "prepared_digest", "model_digest", "tokenizer_digest", "tag"):
+            digest_text(getattr(self, name), name)
+        for name in ("run_id", "attempt", "authority_ref", "key_ref"):
+            safe_ref(getattr(self, name), name)
+        if type(self.maximum_updates) is not int or not 1 <= self.maximum_updates <= 1000000:
+            raise ValueError("restricted native update bound is invalid")
+        expiry = datetime.fromisoformat(self.expires_at.replace("Z", "+00:00"))
+        if expiry.tzinfo is None or expiry.utcoffset() is None:
+            raise ValueError("restricted native admission needs a timezone")
+
+
 class NativePlanningV1:
     """One immutable native material selection; reusable across host restarts."""
 
     __slots__ = (
         "resolved", "run", "workload", "runtime_capture", "limits", "scope",
         "provider", "profile_digest", "_clock", "_qualification",
-        "_qualification_authority", "descriptor", "executor_descriptor",
+        "_qualification_authority", "_restricted_admission", "_restricted_authority",
+        "descriptor", "executor_descriptor",
         "adapter_descriptor", "binding", "context_value", "plan", "_sealed",
     )
 
@@ -83,6 +120,7 @@ class NativePlanningV1:
         self, *, resolved: ResolvedTrainingRequest, run: TrainingRunRef,
         workload: bytes, runtime_capture: bytes, limits: NativeProcessLimits,
         scope: ExecutionScopeV1, clock, qualification=None, qualification_authority=None,
+        restricted_admission=None, restricted_authority=None,
     ):
         if (type(resolved) is not ResolvedTrainingRequest or type(run) is not TrainingRunRef
                 or type(limits) is not NativeProcessLimits or type(scope) is not ExecutionScopeV1):
@@ -108,10 +146,11 @@ class NativePlanningV1:
         })
         self._clock = clock
         self._qualification, self._qualification_authority = qualification, qualification_authority
-        qualified = self.qualified()
+        self._restricted_admission, self._restricted_authority = restricted_admission, restricted_authority
+        available = self.admitted()
         self.descriptor = ProviderDescriptor(
             "synaptic-provider-descriptor/v1", "native-mlx", "Apple native MLX", "1.0.0",
-            ProviderCapabilities(qualified, False, False, False, qualified, False),
+            ProviderCapabilities(available, False, False, False, available, False),
         )
         self.executor_descriptor = ExecutorDescriptorV1("native-mlx", "owned-native-process", "1.0.0")
         self.adapter_descriptor = AdapterDescriptorV1("native-mlx", "no-replay-native-reconciliation", "1.0.0")
@@ -149,6 +188,38 @@ class NativePlanningV1:
         if not self.qualified():
             raise ValueError("native_hardware_qualification_required")
 
+    def restricted(self):
+        proof = self._restricted_admission
+        try:
+            workload = parse_native_workload(self.workload)
+            now = datetime.fromisoformat(self._clock.now().replace("Z", "+00:00"))
+            expires = datetime.fromisoformat(proof.expires_at.replace("Z", "+00:00"))
+            return (
+                type(proof) is NativeRestrictedAdmissionV1
+                and proof.profile_digest == self.profile_digest
+                and proof.source_digest == self.resolved.source_digest
+                and proof.runtime_digest == self.resolved.runtime_digest
+                and proof.prepared_digest == workload.source.content_digest
+                and proof.run_id == self.run.run_id
+                and proof.maximum_updates == workload.controls.iterations
+                and now < expires <= now + timedelta(hours=1)
+                and self._restricted_authority.authenticate(proof) is True
+            )
+        except Exception:
+            return False
+
+    def admitted(self):
+        return self.qualified() or self.restricted()
+
+    def require_admitted(self, *, attempt=None, model_digest=None, tokenizer_digest=None):
+        if self.qualified():
+            return
+        proof = self._restricted_admission
+        if (not self.restricted() or proof.attempt != attempt
+                or proof.model_digest != model_digest
+                or proof.tokenizer_digest != tokenizer_digest):
+            raise ValueError("native_restricted_admission_required")
+
     def describe(self, provider):
         if provider != self.provider:
             raise ValueError("native provider differs")
@@ -174,7 +245,7 @@ class NativePlanningV1:
             raise ValueError("native plan differs")
         now = self._clock.now()
         expiry = (datetime.fromisoformat(now.replace("Z", "+00:00")) + timedelta(minutes=15))
-        ready = self.qualified()
+        ready = self.admitted()
         return TrainingPreflight(
             plan.plan_fingerprint, ready, now,
             expiry.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),

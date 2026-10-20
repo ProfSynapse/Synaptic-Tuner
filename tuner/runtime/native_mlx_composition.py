@@ -170,13 +170,30 @@ def execute_native_sft(
         saved = mx.load(str(final_path))
         if tuple(sorted(saved)) != tuple(name for name, _ in shapes):
             raise ValueError("native saved adapter inventory differs")
-        model.load_weights(list(saved.items()), strict=False)
-        mx.eval(model.parameters())
+        # Reload from the pinned base. Loading into the trained instance could
+        # leave its updated tensors in place even if load_weights did nothing.
+        reloaded, _ = load_model(Path(model_snapshot.root), lazy=False, strict=True,
+                                 trust_remote_code=False)
+        _, reloaded_shapes = attach_native_lora(
+            reloaded, lora, convert=linear_to_lora_layers, flatten=tree_flatten,
+        )
+        if reloaded_shapes != shapes:
+            raise ValueError("native reloaded adapter layout differs")
+        reloaded.load_weights(list(saved.items()), strict=False)
+        mx.eval(reloaded.parameters())
+        actual = dict(tree_flatten(reloaded.trainable_parameters()))
+        if tuple(sorted(actual)) != tuple(sorted(saved)):
+            raise ValueError("native reloaded adapter inventory differs")
+        for name, expected in saved.items():
+            tensor = actual[name]
+            if (tensor.shape != expected.shape or tensor.dtype != expected.dtype
+                    or not bool(mx.all(tensor == expected).item())):
+                raise ValueError("native reloaded adapter tensor differs")
         # Upstream evaluates before its final update. Evaluate the saved adapter
         # separately after loading it, including the partial validation batch.
         iterate, loss = make_mlx_sft_hooks(bound.prepared, mx=mx, nn=nn)
         final_loss = evaluate(
-            model=model, dataset=bound.prepared.validation,
+            model=reloaded, dataset=bound.prepared.validation,
             batch_size=bound.prepared.config.batch_size, num_batches=-1,
             max_seq_length=bound.prepared.config.max_seq_length,
             loss=loss, iterate_batches=iterate, clear_cache_threshold=0,

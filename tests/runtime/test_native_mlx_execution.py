@@ -224,7 +224,8 @@ def test_unconfigured_trainable_base_weight_is_rejected():
                            convert=convert, flatten=lambda v: v.items())
 
 
-def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(monkeypatch):
+@pytest.mark.parametrize("reload_mode", ["complete", "noop", "partial"])
+def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(monkeypatch, reload_mode):
     from tuner.runtime import native_mlx_composition as composition
     from tuner.runtime.native_files import NativeTree
 
@@ -239,17 +240,43 @@ def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(mo
             with NativeTree(snapshot_root) as tree:
                 snapshot = NativeModelSnapshot("configured/model", "a" * 40, str(snapshot_root), tree.inventory())
             events = []
-            shapes = (("layers.0.q_proj.lora_a", (1, 1)),)
-            tensors = {"layers.0.q_proj.lora_a": object()}
-            model = SimpleNamespace(
-                load_weights=lambda values, strict: events.append(("reload", values, strict)),
-                parameters=lambda: {},
-            )
+            names = ("layers.0.q_proj.lora_a", "layers.0.q_proj.lora_b")
+            shapes = tuple((name, (1, 1)) for name in names)
+            def adapter_bytes(value):
+                headers = {name: {"dtype": "F32", "shape": [1, 1],
+                                  "data_offsets": [4 * index, 4 * (index + 1)]}
+                           for index, name in enumerate(names)}
+                raw_header = json.dumps(headers, sort_keys=True, separators=(",", ":")).encode()
+                return struct.pack("<Q", len(raw_header)) + raw_header + struct.pack("<ff", value, value)
+            class Tensor:
+                shape, dtype = (1, 1), "float32"
+
+                def __init__(self, value):
+                    self.value = value
+
+                def __eq__(self, other):
+                    return self.value == other.value
+
+            tensors = {name: Tensor(.5) for name in names}
+            models = []
+            def load_model(*args, **kwargs):
+                model = SimpleNamespace(weights={name: Tensor(0) for name in names}, parameters=lambda: {},
+                                        trainable_parameters=lambda: model.weights)
+                def load_weights(values, strict):
+                    events.append(("reload", values, strict))
+                    if reload_mode == "complete":
+                        model.weights = dict(values)
+                    elif reload_mode == "partial":
+                        model.weights[names[0]] = dict(values)[names[0]]
+                model.load_weights = load_weights
+                models.append(model)
+                return model, {}
             mx = ModuleType("mlx.core")
             mx.random = SimpleNamespace(seed=lambda seed: None)
             mx.eval = lambda *args: None
-            mx.save_safetensors = lambda path, values: Path(path).write_bytes(tensor_bytes([0]))
+            mx.save_safetensors = lambda path, values: Path(path).write_bytes(adapter_bytes(0))
             mx.load = lambda path: tensors
+            mx.all = lambda value: SimpleNamespace(item=lambda: value)
             modules = {
                 "mlx": ModuleType("mlx"), "mlx.core": mx, "mlx.nn": ModuleType("mlx.nn"),
                 "mlx.optimizers": ModuleType("mlx.optimizers"), "mlx.utils": ModuleType("mlx.utils"),
@@ -262,12 +289,13 @@ def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(mo
                 state={}, step=SimpleNamespace(item=lambda: 3),
             )
             modules["mlx.utils"].tree_flatten = lambda tree: tree.items()
-            modules["mlx_lm.utils"].load_model = lambda *args, **kwargs: (model, {})
+            modules["mlx_lm.utils"].load_model = load_model
             modules["mlx_lm.tuner.utils"].linear_to_lora_layers = lambda *args, **kwargs: None
 
             def final_evaluate(**kwargs):
                 assert events[-1][0] == "reload"
                 assert events[-1][1] == list(tensors.items())
+                assert kwargs["model"] is models[1] and models[1] is not models[0]
                 assert kwargs["num_batches"] == -1
                 events.append(("final-evaluation",))
                 return 1.25
@@ -275,12 +303,12 @@ def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(mo
             for key, value in modules.items():
                 monkeypatch.setitem(sys.modules, key, value)
             monkeypatch.setattr(composition, "verify_native_material", lambda *a, **k: None)
-            monkeypatch.setattr(composition, "attach_native_lora", lambda *a, **k: (tensors, shapes))
+            monkeypatch.setattr(composition, "attach_native_lora", lambda model, *a, **k: (model.weights, shapes))
             monkeypatch.setattr(composition, "make_mlx_sft_hooks", lambda *a, **k: (object(), object()))
 
             def train(*args, **kwargs):
                 events.append(("upstream-stale-validation",))
-                Path(kwargs["adapter_file"]).write_bytes(tensor_bytes([.5]))
+                Path(kwargs["adapter_file"]).write_bytes(adapter_bytes(.5))
                 events.append(("final-update-and-save",))
             monkeypatch.setattr(composition, "run_prepared_mlx_sft", train)
             runtime = json.dumps({"runtime": {
@@ -288,16 +316,23 @@ def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(mo
                 "dependency_lock_sha256": "c" * 64,
                 "distributions": {"mlx": "0.32.2", "mlx-lm": "0.32.2"},
             }}).encode()
-            result = json.loads(composition.execute_native_sft(
-                bound=tokenize(source()), model_snapshot=snapshot,
-                lora=NativeLoRA(1, 1, 1, 0, ("q_proj",)),
-                optimizer=NativeAdamW(.001, .9, .999, 1e-8, 0, True, "constant"),
-                output=output, runtime_material=runtime, runtime_digest="f" * 64, dependency_lock=b"lock",
-            ))
+            def execute():
+                return json.loads(composition.execute_native_sft(
+                    bound=tokenize(source()), model_snapshot=snapshot,
+                    lora=NativeLoRA(1, 1, 1, 0, ("q_proj",)),
+                    optimizer=NativeAdamW(.001, .9, .999, 1e-8, 0, True, "constant"),
+                    output=output, runtime_material=runtime, runtime_digest="f" * 64, dependency_lock=b"lock",
+                ))
+            if reload_mode in {"noop", "partial"}:
+                with pytest.raises(ValueError, match="reloaded adapter tensor differs"):
+                    execute()
+                assert len(models) == 2
+                return
+            result = execute()
             assert [item[0] for item in events] == [
                 "upstream-stale-validation", "final-update-and-save", "reload", "final-evaluation",
             ]
-            assert result["parameter_delta"]["delta_l2"] == .5
+            assert result["parameter_delta"]["delta_l2"] == pytest.approx(2 ** -.5)
             assert result["final_validation"]["loss"] == 1.25
             assert result["final_validation"]["phase"] == "reloaded_saved_final_adapter"
     finally:

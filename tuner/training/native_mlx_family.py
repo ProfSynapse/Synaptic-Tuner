@@ -25,10 +25,11 @@ from tuner.execution.foundation_v2.observations import ObservationDisposition, P
 from tuner.execution.foundation_v2.references import ProviderStageRefV1, ScopedProviderRunRefV1
 from tuner.runtime.native_files import NativeFile, NativeTree
 from tuner.runtime.native_mlx_input import NativeModelSnapshot
-from tuner.runtime.native_mlx_material import canonical, strict_json
+from tuner.runtime.native_mlx_material import canonical, strict_json, verify_native_material
 from tuner.runtime.native_mlx_publication import NativeArtifactBudget, verify_native_publication
 from tuner.runtime.native_process import NativeInvocation, NativeOwnedProcess, NativeProcessLimits
 from tuner.training.native_mlx_planning import NativePlanningV1
+from tuner.training.native_mlx_compilation import parse_native_workload
 
 
 @dataclass(frozen=True)
@@ -56,7 +57,7 @@ class NativeCommandMaterialV1:
                 or type(self.model) is not NativeModelSnapshot or type(self.tokenizer) is not NativeModelSnapshot
                 or type(self.artifact_budget) is not NativeArtifactBudget
                 or type(self.tokenizer_members) is not tuple or not self.tokenizer_members
-                or self.tokenizer_members != tuple(sorted(set(self.tokenizer_members)))
+                or self.tokenizer_members != tuple(item.path for item in self.tokenizer.files)
                 or any(type(name) is not str for name in self.tokenizer_members)
                 or type(self.output) is not str
                 or Path(self.output).parent != Path(self.invocation.private_root)):
@@ -196,6 +197,8 @@ class _NativeFamily:
                     or canonical(request["workload"]) != self.planning.workload
                     or canonical(request["model_snapshot"]) != canonical(asdict(material.model))
                     or canonical(request["tokenizer_snapshot"]) != canonical(asdict(material.tokenizer))
+                    or tuple(request["tokenizer_members"]) != material.tokenizer_members
+                    or canonical(request["artifact_budget"]) != canonical(asdict(material.artifact_budget))
                     or request["output"] != material.output):
                 raise ValueError("native_request_material_differs")
             for key in ("runtime_capture", "dependency_lock", "dataset", "output"):
@@ -230,8 +233,12 @@ class _NativeFamily:
         return material, command
 
     def execute_once(self, payload, request):
-        self.planning.require_qualified()
         material, command = self._material(request.command_digest)
+        self.planning.require_admitted(
+            attempt=material.invocation.attempt,
+            model_digest=material.model.digest,
+            tokenizer_digest=material.tokenizer.digest,
+        )
         expected_payload = self.planning.payload(command.preparation, command.operation.effect.kind)
         if (payload != expected_payload or request.descriptor_digest != self.descriptor.digest
                 or (request.provider_id, request.profile_ref, request.account_ref, request.namespace_ref)
@@ -254,6 +261,24 @@ class _NativeFamily:
                     "native-stage-" + command.digest,
                 ),
             )
+        # Keep this outside the dispatch/uncertainty catch: drift discovered
+        # before run_once has not consumed a process claim.
+        with NativeTree(Path(material.invocation.private_root), private=True) as root:
+            child_request = strict_json(root.read(Path(material.invocation.request).name,
+                                                  maximum=2 * 1024 * 1024))
+            lock = root.read(Path(child_request["dependency_lock"]).name, maximum=1024 * 1024)
+            verify_native_material(
+                self.planning.runtime_capture,
+                expected_digest=parse_native_workload(self.planning.workload).profile.runtime_digest,
+                dependency_lock=lock,
+            )
+            root.check()
+        with NativeTree(Path(material.model.root), private=True) as model_tree:
+            material.model.verify(model_tree)
+            model_tree.check()
+        with NativeTree(Path(material.tokenizer.root), private=True) as tokenizer_tree:
+            material.tokenizer.verify(tokenizer_tree)
+            tokenizer_tree.check()
         try:
             outcome = self.transport.run_once(material.invocation)
             terminal = self.authority.process_outcome(material.invocation.digest, outcome)

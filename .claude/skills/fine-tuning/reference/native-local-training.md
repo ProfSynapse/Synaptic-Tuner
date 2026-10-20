@@ -60,10 +60,9 @@ original hash lock and use the existing `uv pip freeze`, `uv pip check`,
 `shasum -a 256` and `otool -L` tools for review evidence; do not install packages
 into the shared interpreter or treat a newly observed inventory as approved.
 
-There is no native launch CLI yet. The internal worker may run only in an
-independently admitted, host-owned bounded child. The desktop plan lists the
-implemented runtime/family boundaries and remaining consumer/qualification work.
-Do not call the worker as an ad hoc substitute for that composition.
+The internal worker may run only in an independently admitted, host-owned
+bounded child. Use the checked-in restricted host consumer described below;
+do not call the worker directly as an ad hoc substitute.
 
 ## Execution-boundary continuation
 
@@ -71,8 +70,8 @@ The internal runtime modules now include a read-only native material capture,
 retained-source/tokenizer join, explicit LoRA/constant-AdamW composition,
 independent safetensors delta verifier, and owned subprocess guardian. These are
 reviewable runtime boundaries. The gated family described below composes them
-through the existing public coordinator; no global provider registration or
-native launch CLI is supplied.
+through the existing public coordinator; no global provider registration is
+supplied.
 
 `scripts/capture_native_mlx_runtime.py` takes a JSON object with `capture` and
 `expectation`. `expectation` uses the existing `MLXRuntimeExpectation` fields.
@@ -113,8 +112,11 @@ LoRA target/layer explicitly, checks the realized trainable names/shapes and use
 explicit AdamW parameters with constant schedule. Unsupported schedules reject.
 It checks the optimizer's actual step count. The native adapter verifier checks
 tensor headers, bounds, names/shapes/dtypes, finite values and a nonzero numeric
-parameter delta. Final validation is a distinct pass **after reloading the saved
-adapter**; upstream in-loop validation occurs before the last optimizer update.
+parameter delta. Final validation loads a second clean pinned base, attaches the
+same configured LoRA, loads the saved final adapter and compares every trainable
+tensor against the saved bytes before evaluating that second model. A no-op or
+partial reload rejects. Upstream in-loop validation occurs before the last
+optimizer update.
 It saves native `adapter_config.json`, `input_binding.json` and
 `native_result.json` exclusively. These worker files become authenticated public
 artifact roles only through the family verifier described below.
@@ -151,7 +153,11 @@ embedded in a launcher.
 `native_mlx_child.py` is an internal `-I -S -B` entrypoint. It restricts import
 roots, checks imported source/extension origins against capture members and
 compiles pinned Python source rather than ambient bytecode. It joins the exact
-staged dataset, capture, lock and snapshots to the recompiled workload. It is
+staged dataset, capture, lock and snapshots to the recompiled workload. Before
+optimizer work, it builds the exact complete tokenizer role archive, extracts
+those bytes into a private temporary directory and loads the tokenizer locally
+with remote code disabled. The host later publishes that same deterministic
+archive. It is
 not a public invocation or an independent source/qualification authority.
 `native_runtime_spec` represents the capture with the existing `RuntimeSpec`
 `native_environment` discriminator; it invents no OCI image. Legacy OCI
@@ -166,9 +172,28 @@ must authenticate actual source evidence and current hardware before signing
 command material. `NativeCommandCatalogV1` retains create-only signed material
 through the existing record port. Signed terminal evidence must also match the
 retained process outcome on every read. It is not an engine database or replay grant.
+Immediately before a submit process claim, the family recaptures the admitted
+runtime/source closure and verifies complete model/tokenizer inventories. Drift
+at this boundary rejects before `run_once`; later dispatch remains uncertain.
+The CPU artifact verifier requires every configured target in the exact final
+model layer set and complete tokenizer snapshot selection.
 
-No accepting hardware authority is shipped. Candidate descriptors have
-observe/artifact capabilities disabled and preflight is not ready. A
+No accepting **ordinary** hardware authority is shipped. An unadmitted
+candidate has observe/artifact capabilities disabled and preflight is not
+ready. A separately verified `NativeRestrictedAdmissionV1` enables only its
+exact initial run, attempt, source, runtime, prepared bytes and model/tokenizer
+snapshots, subject to a finite expiry; it is not qualification. The host
+consumer in `examples/training_qualification/native_host.py` verifies the
+external signature using a separately supplied reviewed public-key SHA-256.
+It has no signing key or acceptance switch. The same host checks the actual
+clean pushed Git ref, full runtime recapture, private prepared publication,
+model snapshot inventories and M4 hardware before issuing command material.
+The proposal remains parameters, not an admission. See
+`examples/training_qualification/native-host.md` for exact config fields,
+preparation/readback commands, and the root signing boundary. No Mac training,
+ML import, model download or host qualification has been performed for this
+consumer yet.
+
 `NativeQualificationV1` contains exact selected profile/source/runtime/hardware
 and two distinct retained attempt-evidence references; its independent host
 authority must authenticate the supporting real runs, selected wheel/install
@@ -186,6 +211,6 @@ configured member archive from the verified snapshot. Lineage/metrics retain
 the exact worker bindings. Finite file/aggregate budgets and public 1 MiB
 stream chunks apply. CPU verification does not rerun the final evaluation.
 
-See `docs/plans/native-desktop-training-api-v1.md` for remaining host assembly,
-review and real-Mac acceptance. The CPU facade tests substitute the ML child;
+See `docs/plans/native-desktop-training-api-v1.md` for remaining review and
+real-Mac acceptance. The CPU facade tests substitute the ML child;
 they are not a hardware result and must never unlock the candidate.
