@@ -213,7 +213,152 @@ def test_isolated_bootstrap_rejects_optional_feature_without_traceback(
     )
 
     assert completed.returncode == 2
-    assert completed.stderr.strip() == "OFFLINE_SFT_WORKER_REJECTED"
+    assert completed.stdout == ""
+    assert completed.stderr == (
+        "OFFLINE_SFT_WORKER_REJECTED phase=ARGUMENTS category=REJECTION\n"
+    )
+
+
+def _run_bootstrap_fixture(tmp_path, setup="", trainer="return {}"):
+    """Real isolated bootstrap and closure; replace only the ML entrypoint."""
+    engine, manifest, document = _stage(tmp_path)
+    code = """
+import os, runpy, sys
+from pathlib import Path
+from types import ModuleType
+worker = runpy.run_path(sys.argv[1], run_name="fixture_bootstrap")
+namespace = worker["main"].__globals__
+sys.argv = [sys.argv[1], "--", "--max-steps", "1", "--no-load-in-4bit"]
+""" + setup + """
+def fixture_trainer(path, *, run_name, init_globals):
+    assert Path(path).name == "train_sft.py"
+    assert run_name == "__main__"
+    mark = init_globals["__packaged_runtime_phase__"]
+""" + "\n".join("    " + line for line in trainer.splitlines()) + """
+runpy.run_path = fixture_trainer
+result = worker["main"]()
+assert not any(name in sys.modules for name in ("torch", "unsloth", "transformers", "trl"))
+raise SystemExit(result)
+"""
+    return subprocess.run(
+        [sys.executable, "-I", "-c", code, str(engine / _WORKER)],
+        env={
+            **os.environ,
+            "SYNAPTIC_ENGINE_ROOT": str(engine),
+            "SYNAPTIC_WORKER_CLOSURE_MANIFEST": str(manifest),
+            "SYNAPTIC_WORKER_CLOSURE_DIGEST": document["closure_digest"],
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONSAFEPATH": "1",
+        },
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30,
+    )
+
+
+@pytest.mark.parametrize(("setup", "trainer", "phase", "category"), [
+    ('sys.argv[1] = "private-delimiter"', "return {}", "BOOTSTRAP", "REJECTION"),
+    ('os.environ["SYNAPTIC_WORKER_CLOSURE_DIGEST"] = "0" * 64',
+     "return {}", "CLOSURE", "REJECTION"),
+    ('namespace["__file__"] = str(Path(os.environ["SYNAPTIC_ENGINE_ROOT"]) / "Trainers/sft/runtime_v1.py")',
+     "return {}", "BOOTSTRAP_ORIGIN", "REJECTION"),
+    ('sys.argv.append("--private-unsupported-flag")', "return {}", "ARGUMENTS", "REJECTION"),
+    ('sys.modules["shared.not_admitted"] = ModuleType("shared.not_admitted")',
+     "return {}", "IMPORT_GUARD", "REJECTION"),
+    ("", 'import shared.not_admitted', "TRAINER", "IMPORT"),
+    ("", 'sys.modules["shared.not_admitted"] = ModuleType("shared.not_admitted")\nreturn {}',
+     "POSTCHECK", "REJECTION"),
+    ("", 'raise OSError("private-path-and-token")', "TRAINER", "OS"),
+    ("", 'raise ValueError("private-input")', "TRAINER", "VALUE"),
+    ("", 'raise RuntimeError("private-library-error")', "TRAINER", "OTHER"),
+    ("", 'raise SystemExit("private-exit-text")', "TRAINER", "SYSTEM_EXIT"),
+    ("", 'raise KeyboardInterrupt("private-interrupt")', "TRAINER", "OTHER"),
+])
+def test_isolated_worker_failures_are_closed(tmp_path, setup, trainer, phase, category):
+    completed = _run_bootstrap_fixture(tmp_path, setup, trainer)
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert completed.stderr == (
+        f"OFFLINE_SFT_WORKER_REJECTED phase={phase} category={category}\n"
+    )
+
+
+@pytest.mark.parametrize("milestone", sorted(offline_sft_worker._TRAINER_MILESTONES))
+def test_trainer_import_failure_retains_only_finite_milestone(tmp_path, milestone):
+    completed = _run_bootstrap_fixture(
+        tmp_path, trainer=f'mark({milestone!r})\nraise ImportError("private-dependency")',
+    )
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert completed.stderr == (
+        "OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=IMPORT"
+        f" milestone={milestone}\n"
+    )
+    assert len(completed.stderr.encode()) < 160
+
+
+def test_invalid_milestone_and_hostile_exception_are_not_rendered(tmp_path):
+    completed = _run_bootstrap_fixture(tmp_path, trainer='''
+class HostileError(ImportError):
+    def __str__(self):
+        raise AssertionError("exception text inspected")
+    def __getattribute__(self, name):
+        raise AssertionError("exception attribute inspected")
+mark("TORCH_IMPORT")
+mark("private-unknown-milestone")
+raise HostileError("private-payload")
+''')
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert completed.stderr == "OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=IMPORT\n"
+
+
+@pytest.mark.parametrize("trainer", ["return {}", "raise SystemExit(0)", "raise SystemExit(None)"])
+def test_successful_fixture_preserves_postcheck_and_silent_success(tmp_path, trainer):
+    completed = _run_bootstrap_fixture(tmp_path, trainer=trainer)
+    assert completed.returncode == 0
+    assert completed.stdout == completed.stderr == ""
+
+
+def test_zero_exit_cannot_skip_owned_origin_postcheck(tmp_path):
+    completed = _run_bootstrap_fixture(tmp_path, trainer='''
+mark("SAVE")
+sys.modules["shared.not_admitted"] = ModuleType("shared.not_admitted")
+raise SystemExit(0)
+''')
+    assert completed.returncode == 2
+    assert completed.stderr == "OFFLINE_SFT_WORKER_REJECTED phase=POSTCHECK category=REJECTION\n"
+
+
+def test_unclassified_main_failure_uses_generic_fallback(monkeypatch, capsys):
+    def reject():
+        raise ValueError("private-unclassified")
+    monkeypatch.setattr(offline_sft_worker, "run_offline_sft_worker", reject)
+    assert offline_sft_worker.main() == 2
+    assert capsys.readouterr().err == "OFFLINE_SFT_WORKER_REJECTED\n"
+
+
+def test_worker_milestones_match_existing_packaged_child():
+    from tuner.runtime.packaged_sft_child import _EXEC_RUNTIME_MILESTONES
+    assert offline_sft_worker._TRAINER_MILESTONES == frozenset(_EXEC_RUNTIME_MILESTONES)
+
+
+@pytest.mark.parametrize("dataset_format", ["raw_text", "messages"])
+def test_runtime_argument_builder_passes_offline_allowlist(dataset_format):
+    from Trainers.sft.runtime_v1 import _append_sft_arguments
+
+    # Same controls as the retained three-step qualification, with no model,
+    # dataset contents, private paths, or training execution required.
+    sft = {
+        "dataset_format": dataset_format, "batch_size": 1,
+        "gradient_accumulation_steps": 1, "learning_rate": "0.0001",
+        "max_steps": 3, "max_seq_length": 2048, "seed": 7, "save_steps": 3,
+        "save_total_limit": 1, "lora_rank": 8, "lora_alpha": 16,
+        "lora_dropout": "0.0", "lora_target_modules": ["q_proj", "v_proj"],
+        "use_dora": False, "use_rslora": False, "init_lora_weights": True,
+        "split_dataset": False,
+    }
+    arguments = []
+    _append_sft_arguments(arguments, sft, {"load_in_4bit": False})
+    offline_sft_worker._validate_trainer_arguments(arguments)
 
 
 _WORKER = "tuner/runtime/offline_sft_worker.py"
