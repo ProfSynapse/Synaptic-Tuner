@@ -1,5 +1,6 @@
 """Private native model preparation contracts; no SDK network or ML imports."""
 
+from contextlib import contextmanager
 from hashlib import sha1
 import io
 import json
@@ -200,6 +201,26 @@ def test_interrupted_transfer_retains_scratch_and_rejects_replay(candidate):
     with pytest.raises(ValueError, match="prior acquisition claim"):
         preparation._acquire(config, api_type=api, download=interrupted)
     assert calls == ["metadata", "download"]
+
+
+def test_real_bounded_transfer_overflow_retains_claim_without_publication(candidate, monkeypatch):
+    config, files, root = candidate
+    api, _, calls = _sdk(config, files)
+
+    @contextmanager
+    def overflow(request_url, **_options):
+        with _Response(b"{}x", request_url) as response:
+            yield response
+
+    monkeypatch.setattr(preparation, "_response", overflow)
+    with pytest.raises(ValueError, match="exceeds admitted bytes"):
+        preparation._acquire(config, api_type=api)
+    assert calls == ["metadata"]
+    assert (root / "scratch/repository/config.json").read_bytes() == b""
+    assert not (root / "model-snapshot").exists()
+    with pytest.raises(ValueError, match="prior acquisition claim"):
+        preparation._acquire(config, api_type=api)
+    assert calls == ["metadata"]
 
 
 def test_real_child_newline_is_accepted_by_parent_readback(candidate, monkeypatch, capsys):

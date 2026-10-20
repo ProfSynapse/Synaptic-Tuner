@@ -16,6 +16,7 @@ import io
 import json
 import os
 from pathlib import Path, PurePosixPath
+import platform
 import re
 import stat
 import sys
@@ -111,8 +112,32 @@ def _lock_packages(raw):
     return result
 
 
+def _compatible_wheel(filename, version):
+    stem = filename[:-4]
+    pieces = stem.rsplit("-", 3)
+    if len(pieces) != 4:
+        return False
+    _, python_tag, abi_tag, platform_tag = pieces
+    if platform_tag == "any":
+        return abi_tag == "none" and python_tag in {"py3", "py2.py3", "py311"}
+    match = re.fullmatch(r"macosx_(\d+)_(\d+)_(arm64|universal2)", platform_tag)
+    if not match or (int(match.group(1)), int(match.group(2))) > version[:2]:
+        return False
+    if python_tag == "cp311":
+        return abi_tag in {"cp311", "abi3"}
+    if python_tag in {"cp38", "cp39", "cp310"}:
+        return abi_tag == "abi3"
+    return python_tag == "py3" and abi_tag == "none"
+
+
+def _host_target():
+    if (platform.system() != "Darwin" or platform.machine() != "arm64"
+            or platform.mac_ver()[0] != "27.0.1"):
+        raise ValueError("native runtime Mac target differs")
+
+
 def _config(value):
-    fields = {"schema", "status", "private_root", "uv_executable", "uv_sha256", "uv_version",
+    fields = {"schema", "status", "private_root", "target", "uv_executable", "uv_sha256", "uv_version",
               "python_archive", "python_install_key", "original_lock_sha256",
               "additions_lock_sha256", "runtime_lock_sha256", "wheel_archive_bytes",
               "maximum_worker_seconds", "maximum_command_output_bytes",
@@ -121,6 +146,8 @@ def _config(value):
     if (type(value) is not dict or set(value) != fields or value["schema"] != _SCHEMA
             or value["status"] != "REVIEW_REQUIRED_NO_EXECUTION_AUTHORITY"):
         raise ValueError("native runtime configuration differs")
+    if value["target"] != {"system": "Darwin", "machine": "arm64", "macos": "27.0.1"}:
+        raise ValueError("native runtime target selection differs")
     private = value["private_root"]
     if (type(private) is not str or not Path(private).is_absolute()
             or private != os.path.normpath(private) or Path(private).name.startswith(".")):
@@ -164,6 +191,7 @@ def _config(value):
         filename = wheel["filename"]
         if (type(filename) is not str or "/" in filename or not filename.endswith(".whl")
                 or not filename.lower().startswith(name.replace("-", "_") + "-" + wheel["version"] + "-")
+                or not _compatible_wheel(filename, (27, 0, 1))
                 or type(wheel["size"]) is not int or not 1 <= wheel["size"] <= 128 * 1024 * 1024
                 or type(wheel["url"]) is not str
                 or not wheel["url"].startswith("https://files.pythonhosted.org/packages/")
@@ -432,6 +460,7 @@ def main(argv=None):
         value = _load(args.config)
         root, packages = _config(value)
         if args.action in {"acquire", "install", "_acquire_worker"}:
+            _host_target()
             with NativeTree(args.config.parent, private=True):
                 pass
         if args.action == "plan":

@@ -106,7 +106,8 @@ The checked-in
 [`native-private-runtime.example.json`](native-private-runtime.example.json)
 declares the exact Astral CPython 3.11.14+20260211 arm64 archive (20,051,753
 bytes, SHA-256 `d5f10f6fdc6f4afb5d251578edb89d8c0ece8f9f56e38b0019e2a94e8f0f4852`),
-uv 0.12.23 executable hash, every selected wheel filename/URL/size/hash and an
+the observed Darwin arm64/macOS 27.0.1 target, uv 0.12.23 executable hash,
+every selected compatible wheel filename/URL/size/hash and an
 owner-private **unused** output root. The 54 wheel archives total 146,218,037
 bytes; all retained download archives total 166,269,790 bytes. These are
 official upstream metadata selections awaiting actual archive readback.

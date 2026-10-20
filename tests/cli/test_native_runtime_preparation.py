@@ -38,6 +38,10 @@ def test_complete_wheel_selection_and_lock_are_exact(proposal, capsys):
     assert root == Path(config["private_root"])
     assert len(packages) == 54
     assert len(config["wheels"]) == 54
+    assert all(preparation._compatible_wheel(item["filename"], (27, 0, 1))
+               for item in config["wheels"])
+    assert not preparation._compatible_wheel("mlx-0.32.2-cp311-cp311-manylinux_x86_64.whl",
+                                             (27, 0, 1))
     assert sum(item["size"] for item in config["wheels"]) == 146218037
     assert config["original_lock_sha256"] == preparation._ORIGINAL_SHA
     assert preparation.main(["plan", str(path)]) == 0
@@ -58,6 +62,14 @@ def test_unreviewed_runtime_selection_rejects_before_claim(proposal, change):
     change(config)
     with pytest.raises(ValueError):
         preparation._config(config)
+    assert not (parent / "new-runtime").exists()
+
+
+def test_effectful_cli_rejects_wrong_host_before_private_claim(proposal, capsys, monkeypatch):
+    _, path, parent = proposal
+    monkeypatch.setattr(preparation.platform, "system", lambda: "Linux")
+    assert preparation.main(["acquire", str(path)]) == 2
+    assert capsys.readouterr().out == '{"diagnostic_code":"native_runtime_preparation_refused"}\n'
     assert not (parent / "new-runtime").exists()
 
 

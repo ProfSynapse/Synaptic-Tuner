@@ -454,5 +454,10 @@
       "url": "https://files.pythonhosted.org/packages/ce/7c/fbb40fe2d53747c40aa36a9e2bd2178a202f942bda0b670f3306d4aefbce/yarl-1.25.1-cp311-cp311-macosx_11_0_arm64.whl"
     }
   ],
-  "maximum_private_tree_bytes": 2147483648
+  "maximum_private_tree_bytes": 2147483648,
+  "target": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "macos": "27.0.1"
+  }
 }
