@@ -248,6 +248,20 @@ private-tree guard runs after each phase. Include narrow
 `source/tuner` and `source/synaptic_tuner`. Do not chmod Homebrew or reuse the
 old venv/capture attempt.
 
+Pinned uv 0.12.23 was observed creating empty owner-owned `uv-python/.lock`
+and `venv/.lock` at mode 0666 despite umask 077 inside the private 0700
+runtime. The checked-in fresh `install` seals only those exact regular,
+zero-byte, single-link files to 0600 after the last uv call and checks the
+installed tree before its result. For the already completed r9 install,
+`seal-uv-locks <same-absolute-config>` is a separate, one-use repair action
+requiring independent review and exact retained source/config/archive/uv/
+install-record admission. It writes a consumed repair claim before either
+descriptor mode change; interruption or identity drift retains the claim and
+partial evidence without automatic replay. It preserves the original install
+claim/result. `verify` rejects incomplete repair records and writable members.
+Do not run static capture until custody passes; the capture must bind the
+final pushed source, including `shared`, and the combined 54-package lock.
+
 The checked-in `examples/training_qualification/native_model_preparation.py`
 is the later reviewed model-acquisition action: `inspect` is local,
 `metadata-candidate` reads at most 2 MiB of the exact Hub metadata response

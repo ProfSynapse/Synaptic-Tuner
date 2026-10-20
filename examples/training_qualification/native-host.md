@@ -160,6 +160,19 @@ tokenizer loadability before wiring them into the host config.
 The following capture/admission/start commands are for a **later reviewed
 stage**. The current source and runtime closure cannot pass capture yet.
 
+The r9 offline install and metadata-only `verify` succeeded with a private
+Python 3.11.14 executable and 54 locked distributions. Full custody review
+found only two empty uv lock files, `uv-python/.lock` and `venv/.lock`, at mode
+0666. The prior install claim/result remain consumed and unchanged. After
+independent review of the final pushed source and the exact retained r9
+records, a single `native_runtime_preparation.py seal-uv-locks
+<absolute-r7-config>` may seal those two held files to 0600 and retain a
+create-only repair claim/result. A failed or interrupted repair cannot be
+replayed automatically. Run checked-in `verify` and inspect exact custody
+afterward. Do not run capture from the stale r5 config: it selects Homebrew,
+omits `shared`, and binds the original 50-package lock. Prepare a fresh
+capture config against the final pushed source and combined 54-package lock.
+
 ```sh
 # From final clean pushed source with the reviewed new private 3.11.14 venv.
 umask 077

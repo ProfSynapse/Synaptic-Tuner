@@ -51,6 +51,12 @@ This repository has a few cloud-training constraints that are easy to relearn th
   durable claims, child lifecycle and native artifact verification host-owned.
   Do not enable native training in Syntunia before those joins and real Mac
   qualification are complete. See `docs/plans/native-desktop-training-api-v1.md`.
+- The private Mac runtime install may leave pinned uv's two exact empty
+  `uv-python/.lock` and `venv/.lock` files mode 0666 despite umask 077. Fresh
+  installs must seal those files before a successful result. An existing
+  consumed install requires the separately reviewed `seal-uv-locks` action;
+  preserve its claim and partial modes on interruption. Never chmod the tree
+  broadly, reset install claims, or capture before custody passes.
 - For Mac qualification preparation, preserve the original 50-package MLX lock
   and use the reviewed four-wheel additive/flat 54-package lock for the current
   host and child import graph. Prepare a new owner-private interpreter/runtime

@@ -2,7 +2,8 @@
 """Prepare an observed private native MLX runtime from exact retained archives.
 
 This workflow never grants native execution authority. `plan` is read-only;
-`acquire` and `install` consume distinct create-only claims. Network acquisition
+`acquire`, `install` and a completed-install uv-lock repair consume distinct
+create-only claims. Network acquisition
 has a hard byte limit before every write. Installation reads only exact local
 archives under an owned, private root and has a finite owned-process deadline.
 """
@@ -10,7 +11,7 @@ archives under an owned, private root and has a finite owned-process deadline.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import hashlib
 import io
 import json
@@ -43,6 +44,7 @@ _EXTRA = frozenset({"jsonschema", "jsonschema-specifications", "referencing", "r
 _CHUNK = 64 * 1024
 _MAX_CONFIG = 64 * 1024
 _MAX_WHEELS = 54
+_UV_LOCK_PARENTS = ("uv-python", "venv")
 
 
 def _canonical(value):
@@ -351,6 +353,154 @@ def _command(argv, root, value):
     return output
 
 
+def _installed_tree_custody(root, maximum):
+    """Check installed entries after uv exits; uv may create writable lock files."""
+    with NativeTree(root, private=True) as tree:
+        count = total = 0
+        for directory, folders, files in os.walk(root, followlinks=False):
+            for name in (*folders, *files):
+                path = Path(directory) / name
+                info = path.lstat()
+                count += 1
+                total += info.st_size
+                if count > 100000 or total > maximum or info.st_uid != os.getuid():
+                    raise ValueError("native runtime installed tree custody differs")
+                if stat.S_ISLNK(info.st_mode):
+                    target = os.readlink(path)
+                    lexical = Path(os.path.normpath(os.path.join(path.parent, target)))
+                    if (not lexical.is_relative_to(root)
+                            or not path.resolve(strict=True).is_relative_to(root)):
+                        raise ValueError("native runtime installed link escapes")
+                elif (not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))
+                      or info.st_mode & 0o022):
+                    raise ValueError("native runtime installed member mode differs")
+        tree.check()
+
+
+def _seal_uv_locks(root, *, repair_claim=None):
+    """Hold both exact uv locks before changing either; interrupted repair stays claimed."""
+    with ExitStack() as stack:
+        root_tree = stack.enter_context(NativeTree(root, private=True))
+        held = []
+        for parent_name in _UV_LOCK_PARENTS:
+            parent = stack.enter_context(NativeTree(root / parent_name, private=True))
+            fd = os.open(".lock", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                         dir_fd=parent.fd)
+            stack.callback(os.close, fd)
+            info = os.fstat(fd)
+            current = os.stat(".lock", dir_fd=parent.fd, follow_symlinks=False)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or info.st_nlink != 1 or info.st_size != 0
+                    or stat.S_IMODE(info.st_mode) not in ({0o666} if repair_claim else {0o600, 0o666})
+                    or file_identity(info) != file_identity(current)):
+                raise ValueError("native runtime uv lock custody differs")
+            held.append((parent, fd, info))
+        if repair_claim is None and len({stat.S_IMODE(info.st_mode) for _, _, info in held}) != 1:
+            raise ValueError("native runtime uv lock modes differ")
+        root_tree.check()
+        if repair_claim is not None:
+            root_tree.write_exclusive("uv-lock-repair-claim.json", _canonical(repair_claim))
+        for parent, fd, before in held:
+            current = os.stat(".lock", dir_fd=parent.fd, follow_symlinks=False)
+            if file_identity(before) != file_identity(os.fstat(fd)) or file_identity(before) != file_identity(current):
+                raise ValueError("native runtime uv lock changed")
+            if stat.S_IMODE(before.st_mode) != 0o600:
+                os.fchmod(fd, 0o600)
+                os.fsync(fd)
+            after = os.fstat(fd)
+            current = os.stat(".lock", dir_fd=parent.fd, follow_symlinks=False)
+            if (file_identity(after) != file_identity(current)
+                    or (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
+                    or not stat.S_ISREG(after.st_mode) or after.st_uid != os.getuid()
+                    or after.st_nlink != 1 or after.st_size != 0
+                    or stat.S_IMODE(after.st_mode) != 0o600):
+                raise ValueError("native runtime sealed uv lock differs")
+            parent.check()
+        root_tree.check()
+
+
+def _repair_uv_locks(value, root, packages):
+    """One-use seal for an already completed exact install; no uv/install replay."""
+    with NativeTree(root, private=True) as tree:
+        for name in ("uv-lock-repair-claim.json", "uv-lock-repair-result.json"):
+            try:
+                os.stat(name, dir_fd=tree.fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            raise ValueError("native runtime uv lock repair slot is consumed")
+    _retained_locks(root)
+    expanded = _archives(value, root)
+    selection = hashlib.sha256(_canonical(value)).hexdigest()
+    archive_bytes = value["python_archive"]["size"] + value["wheel_archive_bytes"]
+    with NativeTree(root, private=True) as tree:
+        archive = json.loads(tree.read("archive-result.json", maximum=4096), object_pairs_hook=_pairs)
+        claim = json.loads(tree.read("install-claim.json", maximum=4096), object_pairs_hook=_pairs)
+        original = tree.read("install-result.json", maximum=4096)
+    if archive != {"schema": "synaptic-native-private-runtime-archives/v1",
+                   "status": "OBSERVED_NOT_ADMITTED", "selection_sha256": selection,
+                   "archive_bytes": archive_bytes, "wheel_count": len(value["wheels"]),
+                   "wheel_unpacked_bytes": expanded,
+                   "runtime_lock_sha256": value["runtime_lock_sha256"]}:
+        raise ValueError("native runtime archive receipt differs")
+    if claim != {"schema": "synaptic-native-runtime-install-claim/v1",
+                 "status": "CONSUMED_UNCERTAIN", "selection_sha256": selection}:
+        raise ValueError("native runtime install claim differs")
+    with NativeTree(root / "tools", private=True) as tools:
+        if hashlib.sha256(tools.read("uv", maximum=64 * 1024 * 1024)).hexdigest() != value["uv_sha256"]:
+            raise ValueError("native runtime private uv differs")
+    installed = _installed(value, root, packages)
+    expected = {**installed, "schema": "synaptic-native-private-runtime-install/v1",
+                "status": "OBSERVED_NOT_ADMITTED", "selection_sha256": selection,
+                "wheel_unpacked_bytes": expanded}
+    if original != _canonical(expected):
+        raise ValueError("native runtime retained install result differs")
+    original_sha = hashlib.sha256(original).hexdigest()
+    repair_claim = {"schema": "synaptic-native-uv-lock-repair-claim/v1",
+                    "status": "CONSUMED_UNCERTAIN", "selection_sha256": selection,
+                    "install_result_sha256": original_sha}
+    _seal_uv_locks(root, repair_claim=repair_claim)
+    _installed_tree_custody(root, value["maximum_private_tree_bytes"])
+    result = {"schema": "synaptic-native-uv-lock-repair/v1",
+              "status": "OBSERVED_NOT_ADMITTED", "selection_sha256": selection,
+              "install_result_sha256": original_sha,
+              "sealed_members": ["uv-python/.lock", "venv/.lock"]}
+    with NativeTree(root, private=True) as tree:
+        tree.write_exclusive("uv-lock-repair-result.json", _canonical(result))
+        if tree.read("install-result.json", maximum=4096) != original:
+            raise ValueError("native runtime prior install result changed")
+    return result
+
+
+def _check_uv_repair_record(root, selection):
+    with NativeTree(root, private=True) as tree:
+        def exists(name):
+            try:
+                os.stat(name, dir_fd=tree.fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return False
+            return True
+
+        claim_exists = exists("uv-lock-repair-claim.json")
+        result_exists = exists("uv-lock-repair-result.json")
+        if bool(claim_exists) != bool(result_exists):
+            raise ValueError("native runtime uv lock repair is uncertain")
+        if claim_exists:
+            claim = json.loads(tree.read("uv-lock-repair-claim.json", maximum=4096), object_pairs_hook=_pairs)
+            result = json.loads(tree.read("uv-lock-repair-result.json", maximum=4096), object_pairs_hook=_pairs)
+            original = tree.read("install-result.json", maximum=4096)
+            digest = hashlib.sha256(original).hexdigest()
+            if (claim != {"schema": "synaptic-native-uv-lock-repair-claim/v1",
+                          "status": "CONSUMED_UNCERTAIN",
+                          "selection_sha256": selection,
+                          "install_result_sha256": digest}
+                    or result != {"schema": "synaptic-native-uv-lock-repair/v1",
+                                  "status": "OBSERVED_NOT_ADMITTED",
+                                  "selection_sha256": selection,
+                                  "install_result_sha256": digest,
+                                  "sealed_members": ["uv-python/.lock", "venv/.lock"]}):
+                raise ValueError("native runtime uv lock repair record differs")
+
+
 def _acquire(value, root):
     _root_layout(root)
     with NativeTree(root, private=True) as tree:
@@ -442,6 +592,8 @@ def _install(value, root, packages):
               str(root / "runtime.lock")], root, value)
     _command([str(uv), "--no-config", "--offline", "pip", "check", "--python",
               str(root / "venv/bin/python")], root, value)
+    _seal_uv_locks(root)
+    _installed_tree_custody(root, value["maximum_private_tree_bytes"])
     result = _installed(value, root, packages)
     result.update({"schema": "synaptic-native-private-runtime-install/v1",
                    "status": "OBSERVED_NOT_ADMITTED", "selection_sha256": hashlib.sha256(_canonical(value)).hexdigest(),
@@ -453,13 +605,14 @@ def _install(value, root, packages):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("plan", "acquire", "install", "verify", "_acquire_worker"))
+    parser.add_argument("action", choices=("plan", "acquire", "install", "verify",
+                                           "seal-uv-locks", "_acquire_worker"))
     parser.add_argument("config", type=Path)
     args = parser.parse_args(argv)
     try:
         value = _load(args.config)
         root, packages = _config(value)
-        if args.action in {"acquire", "install", "_acquire_worker"}:
+        if args.action in {"acquire", "install", "seal-uv-locks", "_acquire_worker"}:
             _host_target()
             with NativeTree(args.config.parent, private=True):
                 pass
@@ -488,10 +641,24 @@ def main(argv=None):
                                       object_pairs_hook=_pairs)
             if retained != result:
                 raise ValueError("native runtime retained install result differs")
+        elif args.action == "seal-uv-locks":
+            result = _repair_uv_locks(value, root, packages)
+            with NativeTree(root, private=True) as tree:
+                if tree.read("uv-lock-repair-result.json", maximum=4096) != _canonical(result):
+                    raise ValueError("native runtime uv lock repair readback differs")
         elif args.action == "verify":
             _retained_locks(root)
-            _archives(value, root)
+            expanded = _archives(value, root)
+            _check_uv_repair_record(root, hashlib.sha256(_canonical(value)).hexdigest())
+            _installed_tree_custody(root, value["maximum_private_tree_bytes"])
             result = _installed(value, root, packages)
+            expected = {**result, "schema": "synaptic-native-private-runtime-install/v1",
+                        "status": "OBSERVED_NOT_ADMITTED",
+                        "selection_sha256": hashlib.sha256(_canonical(value)).hexdigest(),
+                        "wheel_unpacked_bytes": expanded}
+            with NativeTree(root, private=True) as tree:
+                if tree.read("install-result.json", maximum=4096) != _canonical(expected):
+                    raise ValueError("native runtime retained install result differs")
             result["status"] = "OBSERVED_NOT_ADMITTED"
         else:
             status, raw = run_bounded_command(
@@ -511,7 +678,7 @@ def main(argv=None):
                 raise ValueError("native runtime retained result differs")
         print(_canonical(result).decode())
         return 0
-    except Exception:
+    except BaseException:
         print('{"diagnostic_code":"native_runtime_preparation_refused"}')
         return 2
 

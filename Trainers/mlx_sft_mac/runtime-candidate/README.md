@@ -132,6 +132,19 @@ bounded before installation and retained private-tree observations reject over
 quota on uv's transient filesystem use. A failed acquisition or install keeps
 its consumed private state; choose a new reviewed root for another attempt.
 
+Pinned uv 0.12.23 was observed creating empty owner-owned `uv-python/.lock`
+and `venv/.lock` files with mode 0666 despite umask 077. Fresh `install` now
+checks those exact regular, zero-byte, single-link files after the last uv
+call and seals only them to 0600 before publishing `install-result.json`.
+The separate `seal-uv-locks` action is for an already completed exact install:
+it rechecks retained archives, uv bytes, prior claim/result and installed
+inventory, then consumes a create-only repair claim before touching either
+held file descriptor. An interruption retains the claim and any partial modes;
+do not rerun or delete it. `verify` rejects an incomplete repair record or a
+writable installed member. The action changes no archive, package, prior
+claim/result or Homebrew file. The r9 install still needs a separately
+reviewed repair before static capture.
+
 The future static capture must use this new private interpreter and the
 `requirements.runtime.lock` bytes. Its narrow source list must include
 `source/shared` as well as `source/tuner` and `source/synaptic_tuner`; the r5
