@@ -198,6 +198,14 @@ end-to-end provider deadline or public cancellation qualification. The first
 executable candidate requires identical model and tokenizer revisions because
 both consume one verified local snapshot.
 
+The packaged runtime resolves `GRPOConfig` precision before loading the model.
+When the retained model dtype is `null`, it passes the effective FP16 or BF16
+dtype to Unsloth's loader. Pinned Unsloth checks that loaded dtype against
+trainer precision during `GRPOTrainer` construction; allowing the loader to
+auto-select BF16 on BF16-capable hardware while the recipe requests FP16 can
+fail at `TRAINER_SETUP`. A closed `TypeError` marker alone cannot establish
+that this was the historical cause, and it does not authorize replay.
+
 GRPO has a separate fixed 131-member offline inventory and 13-member outer
 closure. Existing SFT inventories remain unchanged. Maintenance uses the
 checked-in command, offline first because the outer closure binds its bytes:
