@@ -1,5 +1,10 @@
 # Minimal consumer: train, retain evidence, chat once
 
+For the normal durable training and fresh-process known-run read path, use the
+[Modal consumer walkthrough](../training_qualification/modal-consumer.md).
+This train/chat example remains a separate same-process composition; its
+persistent attempt journal does not restore its coordinator after a restart.
+
 This example belongs to the consuming-project layer, not the engine runtime.
 It uses `APIHost.training`, `APIHost.runs`, and `open_run_chat` without changing
 EHR, adding a provider-specific engine CLI, or staging model weights locally.

@@ -11,8 +11,11 @@ This is the canonical preparation plan for the first broad stable OSS release.
 The selected scope is public Python API v1 scenarios, environment creation and
 execution, SynthChat generation/judging/improvement/export, dataset validation,
 SFT, GRPO, evaluation/reports/comparison and artifacts, with durable host
-composition, restart recovery, cancellation and reconciliation. SFT parity across
-local Docker, Modal and Hugging Face Jobs is mandatory. GRPO includes one qualified provider first; Modal is the selected initial
+composition, restart recovery, cancellation and reconciliation. The initial
+Syntunia integration targets Modal SFT and GRPO. HF Jobs qualification is
+paused by the owner as of 2026-10-20 and is no longer an immediate integration
+prerequisite. Docker release scope remains under discussion. GRPO includes
+one qualified provider first; Modal is the selected initial
 candidate because its GRPO stack exists, not because that route is qualified.
 Docker/HF GRPO parity is deferred. `321a085f` is the historical planning
 baseline, not current main or the accepted preparation stack. Selecting this
@@ -20,13 +23,46 @@ scope does not establish that its gates have passed.
 No version bump, tag, package publication or provider execution is authorized by
 this document. Live qualifications require reviewed finite scope and authority.
 
-RunPod, DPO/KTO and other additional training methods, Syntunia integration,
+RunPod, DPO/KTO and other additional training methods, Syntunia product implementation,
 browser transport,
 managed multi-tenant serving and training-quality claims are deferred. Evaluation, scenarios, environments and SynthChat are included release families,
 not optional scope merely because they have CLI entrypoints. Ingestion, chat and
 pipeline compositions retain truthful backend status; no facade or CLI alone
 establishes a stable installed operational contract.
 The Python API is a library contract, not a deployed HTTP/MCP service.
+
+## Current priorities — Modal consumer handoff, 2026-10-20
+
+The owner paused HF Jobs work and approved a supported-contract matrix plus a
+durable Modal consumer handoff so Syntunia can start building around API v1.
+Use the [current matrix](api-v1-support-matrix.md) and
+[executable consumer walkthrough](../../examples/training_qualification/modal-consumer.md).
+This decision takes precedence over older three-provider parity requirements
+below. HF remains unqualified; it is not silently promoted. HF model-repository
+publication is a distinct destination and is not automatically deferred.
+
+1. Finish the supported Modal lifecycle: active cancellation and caller-loss
+   reconnection, preserving original authority and one-shot claims. The two-run
+   SFT completion/metrics pair and second-run cold readback are already proven.
+2. Use existing durable storage and retained readers for the consumer handoff;
+   document install/source pins, host ownership, unsupported capabilities and
+   migration limits. Do not rebuild these mechanisms or add a second engine.
+3. Join the initial product journey: prepared dataset, Modal SFT, verified
+   artifact retrieval and separately configured evaluation/report. Individual
+   stage evidence is not proof of the full joined journey or model serving.
+4. Qualify genuine Modal GRPO on the release and Syntunia readiness path, with
+   changed parameters and grouped reward evidence; the owner explicitly kept
+   GRPO required. Docker completion/lifecycle scope remains under discussion.
+   Modal operation does not depend on a Docker host.
+5. Reconcile final source/package evidence, support docs and release review
+   before any stable tag. The broader public release scope must name supported
+   providers explicitly; paused HF cannot be advertised as qualified.
+
+Older checklists and dated snapshots preserve historical scope. Some unchecked
+items already have implementations and scoped evidence in later sections; audit
+that evidence before scheduling duplicate work. Syntunia HTTP/authentication,
+product persistence and multi-tenant operation are host work, not added by this
+handoff. No paid job, runtime change or Syntunia deployment is needed to prepare it.
 
 ## Current release status — 2026-10-20, resumed qualification
 
@@ -67,7 +103,7 @@ No stable tag or release has been published.
   and its records are retained. The cancellation lane remains unused.
 
 The shared trainer, runtime profiles, image and model pins remain unchanged.
-Further HF completion spending needs a reviewed replacement scope; the unused
+HF work is paused by the owner. If resumed, further completion spending needs a reviewed replacement scope; the unused
 cancellation slot is not replacement-job authority. Existing bounded Modal and
 desktop qualification authority remains subject to exact source and attempt
 review. Stable release gates remain open.

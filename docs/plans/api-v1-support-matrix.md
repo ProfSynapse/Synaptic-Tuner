@@ -1,38 +1,41 @@
 ---
 status: release-preparation
 baseline: df166a75
-updated: 2026-10-14
+updated: 2026-10-20
 ---
 
 # API v1 support and qualification matrix
 
-This dated checkpoint records merged main `1603b60b` through
-[#249](https://github.com/ProfSynapse/Synaptic-Tuner/pull/249) and the separately
-reviewed local HF staging/diagnostic and portable CPU fixes on 2026-10-14, not stable release certification.
-PRs #238–#249 passed all 18 checks on their accepted heads; merged trees match
-those heads. The next fixes have installed acceptance: HF #250 is open at `5248e576` with
-171 controls; [#251](https://github.com/ProfSynapse/Synaptic-Tuner/pull/251)
-is open at `58225583be620625febba9c7e175af696bf71a5d`, stacked on #250.
-The portable CPU fix passed 237 controls, with one optional-Torch skip and two
-checkout-only deselections covered by source tests.
-Their exact-head CI/merge and live qualification remain separate. Configured cold HF cancellation
-passed 133 installed HF controls and 163 paired installed Modal controls on
-fresh-wheel source `5c8542f2`. Merged #246 passed 178 installed coordinator/Docker
-and 426 installed native custody controls (one portable SFT control deselected
-in the real-seal Python 3.14 lane); merged #247 at `cf049501` passed 354
-installed evaluation/nontraining controls after nine consumer effort controls,
-using the unchanged `d9e14291` engine wheel. The consumer remains checkout-owned. These are overlapping lane totals, not unique
-additional test counts. Native GRPO publication uses synthetic CPU model files;
-final-source training/publication qualification remains open. Bounded paid Luna
-smoke D completed on consumer `7b8639ea` with the same `d9e14291` engine and
-356 installed controls: two one-row Data operations, two one-case evaluations
-and four measured `FOUND` spend effects. This is a synthetic workflow smoke,
-not a quality ranking or immutable-model attestation.
-`df166a75` in the frontmatter is the historical matrix baseline. The
-[stable release plan](stable-v1-release.md) retains current acceptance and exact
-dated source/wheel evidence. SFT requires Docker, Modal and HF Jobs live parity;
-GRPO selects Modal first, with an actual captured but unqualified candidate.
-DPO/KTO, RunPod, Syntunia and additional GRPO provider parity remain deferred.
+## Current integration baseline — 2026-10-20
+
+The consumer target is **Modal SFT and GRPO through public API v1**, with
+retained known-run reads and verified artifacts. HF Jobs qualification is
+**paused by the owner**; it is not a prerequisite for starting Syntunia's
+integration. The owner explicitly keeps Modal GRPO on the release and Syntunia
+readiness path. Docker scope remains under discussion; it is not required to
+operate the Modal backend. This is an integration baseline, not a published stable
+release or a claim that every lifecycle operation is qualified.
+
+Merged source `eb8a722e8cb640558c0783bb281c29d1ec17a7b2` (PR #258) has the same
+tree as tested candidate `864a9bccbc8bd866c56c021c131f12959f8a8649`. Its two
+separately admitted Modal SFT runs completed, each with five verified native
+artifacts and two numeric records delivered before completion. The second also
+passed fresh-process public observation and retained readback. Evidence binds
+that exact source/fixture; it does not qualify arbitrary recipes or models.
+The accepted distribution was built from `af1cb989`; the later test-only delta
+was checked as excluded from wheel, sdist and runtime inventories.
+
+The [release plan](stable-v1-release.md)
+retains exact runs, source provenance and failure evidence. The Docker root
+preparation correction in PR #259 is separate from that live evidence. Current
+source changes must be reviewed against the relevant package/runtime boundary;
+no documentation update relabels earlier runs.
+
+Use the [durable Modal consumer walkthrough](../../examples/training_qualification/modal-consumer.md)
+for the existing executable path and its Python host boundary. The engine is a
+Python library: Syntunia still owns HTTP/authentication, credential selection,
+storage, admission and product state. No HTTP service or multi-tenant host is
+provided by this baseline.
 
 Status vocabulary:
 
@@ -59,6 +62,11 @@ route is reviewed GitHub wheel/sdist assets, not an unverified PyPI install.
 
 ## Included workflow operations
 
+Installed counts below retain their original source-scoped evidence, detailed in
+the release plan. They are not new tests of every current composition. Pending
+coverage means qualification/review work, not an instruction to reimplement the
+existing APIs. Nontraining smoke results remain bounded synthetic evidence.
+
 | Family / operation | Current accepted support | Backend evidence and stable gap |
 | --- | --- | --- |
 | Scenarios: author/edit/version | Host-owned config-first YAML and immutable captured refs; no scenario CRUD facade | Existing declarative files/schema/loaders feed DataAPI admission. Document and qualify the supported author/validate/version workflow and actual source coverage; do not invent a separate authoring authority merely to replace host file ownership. |
@@ -75,8 +83,8 @@ route is reviewed GitHub wheel/sdist assets, not an unverified PyPI install.
 | Evaluation: judge/usage | Installed named metered paid judge and same-scope response/judge accounting | Local response plus paid judge counts only attributable judge usage; paid response/judge share a meter only for the same account/currency. Missing/wrong-shape/raised usage remains indeterminate and subsequent paid calls stop. Optional finite HTTP transport is implemented; D records four measured paid spend effects under its exact configured scope; broader backend/account qualification and invoice enforcement are not established. |
 | Evaluation: reports/comparison | Installed public retained-report comparison and SQLite readback | Signed run/role bindings and consumed input/scoring/generation controls determine comparability. Missing/external judge/environment provenance remains unverified; comparison does not settle unknown spend. The 356 installed lane includes actual public comparison/renderer/consumer joins. Live D compared two same-alias runs but retained comparison_basis_unverified/comparable=false for its external judge. This is configuration provenance and mechanical score comparison, not remote model or quality attestation. |
 | Evaluation: progress/cancel/restart | Stored lifecycle/progress/cancel state and cold result/report reads | Retained reports read/compare without reopening backends. Interrupted active work remains truthful and non-replayable; no mid-case continuation or forced in-flight HTTP termination is claimed. Advertised real backend cancellation/recovery still needs qualification. |
-| Artifacts: run inventory/verified download | Installed public native verification/stream/download; historical exact-source Modal live proof | Ordinary Docker/HF consumer lanes pass 61/80 controls and the native/local join passes 73. Original role/hash/size plus chunk/EOF bounds are enforced. Historical live five-file proof does not qualify the final source on all providers. |
-| Artifacts: destinations/publish/verify | Optional installed durable local destination/source composition; default registry remains empty | Caller supplies original publication authority and existing stores/spool/registry. Local exclusive files and authenticated marker are implemented; source join uses trusted RunsAPI stored verified manifests and actual public streams. Optional HF SFT model-repository publication passed 115 installed controls with parent CAS and verified native/rendered snapshots; live destination/account qualification remains open. The native GRPO renderer join passed 145 combined installed HF controls, alongside 256 GRPO and 39 source-closure controls (overlapping totals) on `371d4b05`. It uses actual native verification over synthetic CPU files, not a fabricated TrainingAPI success or live/GPU/model-quality proof. |
+| Artifacts: run inventory/verified download | Installed public stream/download plus bounded current Modal live proof | The two `864a9bcc` SFT runs verified five native files each, with independent local hash checks. Original role/hash/size plus chunk/EOF bounds remain enforced. This does not qualify other providers or arbitrary artifact sets. |
+| Artifacts: destinations/publish/verify | Installed durable local composition plus scoped live local publication; default registry remains empty | Live local publication on host `5473f600` with engine `1da0a808` verified five native SFT files and cold lookup without changes; this remains bound to that earlier source.  Caller supplies original publication authority and existing stores/spool/registry. Local exclusive files and authenticated marker are implemented; source join uses trusted RunsAPI stored verified manifests and actual public streams. Optional HF SFT model-repository publication passed 115 installed controls with parent CAS and verified native/rendered snapshots; live destination/account qualification remains open. The native GRPO renderer join passed 145 combined installed HF controls, alongside 256 GRPO and 39 source-closure controls (overlapping totals) on `371d4b05`. It uses actual native verification over synthetic CPU files, not a fabricated TrainingAPI success or live/GPU/model-quality proof. |
 | Artifacts: restart/ambiguous publication | Installed local actual-process marker lookup recovery | Real killed-publisher/first-new-SQLite-opener controls verify original markers without source streams or new writes; incomplete markers stay ambiguous, never absent/retry authority. HF installed process-loss lookup also verifies original signed ownership and exact native/rendered immutable snapshots without another commit. It does not establish an introducing commit or RPC causality after an unknown reply; bucket progress is not final model publication. |
 | Host record/stream storage | Optional caller-owned SQLite plus atomic heads/history and retained catalogs | Data/Evaluation/Pipeline/training stores preserve exact claims/plans/history; local publication adds retained OS ownership. [Host storage](../architecture/reference-host-storage.md) states cold prerequisites. Storage does not recreate credentials, active worker/source lease or remote continuation authority. |
 
@@ -85,16 +93,20 @@ route is reviewed GitHub wheel/sdist assets, not an unverified PyPI install.
 | Route / operation | Current support | Evidence and release requirement |
 | --- | --- | --- |
 | SFT generic plan/preflight/start | Implemented/provider-free public `TrainingAPI` and SFT compiler | Compile exact recipe/input/runtime identities, then host-owned grants and coordinator effects. Not every named recipe/model/hardware combination is qualified. |
-| SFT Docker start/observe/artifacts | Installed explicit durable host and ordinary consumer | Exact declared local Unix endpoint, daemon/image/container/source identity and native five-role streams are exercised with scripted CLI replies. Cold reads retain material/profile/request/keys, image verification inputs, mounts and installed closure. The authorized desktop/idle RTX 3090 and explicit WSL Unix-socket daemon are observed ready; its default npipe context is unsuitable for this POSIX route. Physical VHDX drive free space was 170 GiB; the proposed ≤100 GiB increment/≥60 GiB reserve is planning, not quota. Only the exact public 1644… Linux/amd64 base pull is approved and has started under a 900-second bound; no completed result is recorded here; the reusable checkout preparation CLI remains a design/implementation gap before GPU planning. Live public SFT/GPU conformance remains open. |
+| SFT Docker start/observe/artifacts | Installed durable host/consumer; live completion still open | The latest exact container exited before trainer invocation with runtime code 35. Verified-cache reuse lacked three required writable roots. PR #259 corrects consumer preparation; it requires a distinct live attempt. Keep failed records and existing verified cache/image. This lane does not block initial Modal-backed Syntunia integration. |
 | SFT Docker logs/cancel/reconcile | Profile-selected cancellation and retained known-receipt reconciliation; logs unavailable | Exact-container stop is one-shot; acknowledgment and natural terminal truth remain distinct. Default/unpromoted capability refusals remain enforced. The older same-process composition still rejects cancellation. Final-source live cancellation/recovery parity remains open. |
-| SFT Modal start/observe/verified artifacts | Implemented plus bounded exact-source live qualification | Historical native and restricted GPU pair verify reviewed runs; they do not establish final stable candidate or every recipe. Exact runtime/launcher/profile and source pins remain required. |
-| SFT Modal logs | Conditional implemented gate plus bounded CPU transport qualification | Generic preparation descriptor has logs false. Supported host composition enables logs only with exact matching reader-issued CPU probe proof and durable capture. Historical success/JSON cannot mint new authority. |
+| SFT Modal start/observe/verified artifacts | Live-qualified, bounded on `864a9bcc` | Runs `modal-4bcace8af9a4e37d00805ffd` and `modal-1e3c4eaf107a1411b87f6176` each completed and verified five native artifacts. The second passed fresh-process observe/show. Exact launcher/runtime/profile, input and source pins remain required. This is SFT fixture qualification, not arbitrary model/hardware or quality acceptance. |
+| SFT Modal logs | Conditional implementation; restricted precompletion delivery proved | Both current SFT runs delivered two numeric records before completion. General transport and partial-write qualification remain false. Default logs stay disabled; only the existing exact reader-issued transport proof can enable its capability. A UI must tolerate missing progress and use verified terminal outcomes for completion. |
 | SFT Modal cancel/reconcile/cost quote | Merged public configured lifecycle; default flags remain off | Initial recipe opt-in binds the descriptor before planning; current caller permission and the original authenticated submit/assessment/call target are required. Cancel acknowledgment and provider-input terminal observation are separate. Merged #246 permits known-run observation after an orphaned cancel receipt, preserves its unadvanced intent/history, and refuses cancel/reconcile replay. Neither observation nor acknowledgment proves physical quiescence. Quote/log/capability promotion and real final-source lifecycle parity remain separately gated. |
-| SFT HF Jobs public API v1 | Installed ordinary public host/consumer and source-free known-job reader | Pinned host Hub 1.33/model helper 1.32; exact request/job/mount/secret-ref/native bindings. Initial lane uses prepared v1 ≤2 MiB and exactly five final roles without checkpoints. Warm ACK-only cancellation defaults off. Configured source-free known-job cancellation/reconciliation passed 133 installed HF controls and 163 paired installed Modal controls on `5c8542f2` (overlapping totals); descriptor opt-in must precede the original plan and current permission is checked. The original read-only opener still denies cancel/reconcile/logs/reverify. Unknown submissions are not adopted and missing acknowledgments never become cancellation receipts. Live A remains stage-only indeterminate with no authenticated submit; batch-read evidence does not authorize replay or establish the cause. The local installed legacy show preserves 12 records/four streams without credentials/client/source/grants; the copied installation passed 171 batch/diagnostic controls in #250, while CI/merge and a new admitted training attempt remain pending. Live SFT/cancel/recovery qualification remains open; protected lane stays separate. |
-| GRPO Modal public training route | Installed explicit compiler/preparation, isolated child/native verification, normal runner and known-run reads | Default method registry remains SFT-only; GRPO is explicitly selected. Captured SmolLM candidate retains actual 396-distribution base and passed 256 installed controls. CPU F failed CALL_INPUT_FD with no signed receipt; its claims remain consumed. Existing-helper local portable proof supports a guarded probe repair, not a confirmed remote cause; fresh installed proof passed 237 controls with one optional-Torch skip/two source-covered checkout-only deselections, while a new admitted live CPU receipt is still absent. The augmented image/model/GPU route remains unqualified; native completion and changed/grouped-variation evidence are separate, with inconclusive results preserved. |
-| Training restart/recovery, all providers | Bounded retained known-run/status/artifact recovery and no uncertain replay | Actual process-loss proofs preserve original host keys/material/catalogs and scripted provider inputs. Modal/HF known-job read views avoid original source/preparation; Docker keeps its explicit cold dependencies. Unknown submissions are not adopted. This is not arbitrary checkpoint continuation, and live three-provider recovery/cancellation parity remains open. |
+| SFT HF Jobs public API v1 | Implemented/installed; owner-paused qualification | Job `6ad7403a5275124786e158ba` ended ERROR with closed DISPATCH/23 (nonzero trainer subprocess). Cause remains unknown; retained bucket contains input only. No replay or cancellation occurred. The unused cancellation lane is not replacement-job authority. No new HF work is planned. HF model-repository publication is a separate operation and is not implicitly waived. |
+| GRPO Modal public training route | Implemented/installed candidate; GPU qualification open | Public preparation, isolated child, native verification and retained reads exist. Earlier CPU evidence does not qualify the changed final closure. A genuine bounded GPU run must demonstrate a parameter update and grouped reward variation; constant/unchanged observations stay inconclusive. Required on the release and Syntunia readiness path alongside SFT; not deferred. |
+| Training restart/recovery, all providers | Retained known-run reads; bounded Modal live readback | Fresh-process observe/show passed for the second current Modal SFT run. Active caller-loss/cancellation still needs live qualification. Original private keys, catalogs and bindings remain required. No unknown-job adoption, automatic resubmission, arbitrary checkpoint continuation or restoration of a lost source lease is promised. HF qualification is paused; Docker remains open. |
 
-## Exact historical live evidence
+## Earlier exact live evidence
+
+The current two-run Modal pair is recorded above; these older entries retain
+their original scope and are not current-source capability grants.
+
 
 | Evidence | Exact source and scope | What it does not establish |
 | --- | --- | --- |
@@ -173,9 +185,9 @@ after confirmed child exit. Pre-handoff owner loss, guardian/machine loss and
 unconfirmed cleanup stay outside that guarantee; no durable controller or row
 continuation is reconstructed from a PID.
 
-### Latest local preparation checkpoint
+### Historical local preparation checkpoint — 2026-10-14
 
-The launcher closure now contains 40 exact hashed dependencies; the engine wheel
+The launcher closure at that checkpoint contained 40 exact hashed dependencies; the engine wheel
 makes 41 installed distributions and `pip check` passes. Eleven source dependency
 controls and 163 installed Modal controls are accepted. Actual private attempt C
 on exact `439608b6` used genuine host Git/engine gitlink and the existing four-row
