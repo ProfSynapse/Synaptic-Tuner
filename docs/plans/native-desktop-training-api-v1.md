@@ -101,12 +101,21 @@ separate facts.
 ## Current preparation evidence and remaining limits
 
 The owner-selected Mac is reachable over authenticated SSH and reports Apple M4,
-24 GiB unified memory and arm64. Its Homebrew CPython 3.11.14 currently has no
-MLX training dependencies installed. The existing Mac repository contains local
+24 GiB unified memory and arm64. Its shared Homebrew CPython 3.11.14 had no
+MLX training dependencies installed at initial inspection. The existing Mac repository contains local
 changes and is not an execution source for this qualification; preserve it.
 Use isolated, explicitly selected source and environment paths for later work.
-No Mac model load, dependency installation or GPU training has been performed
-by this preparation.
+The subsequent isolated candidate install used a new private virtual environment;
+the shared interpreter and existing checkout were not changed. All 50 installed
+package versions match the candidate hash lock, and `uv pip check` passed.
+No Mac ML framework import, model load or GPU training has been performed.
+
+The next isolated dependency candidate is retained under
+[`Trainers/mlx_sft_mac/runtime-candidate`](../../Trainers/mlx_sft_mac/runtime-candidate/README.md).
+It pins MLX/MLX-LM and the transitive wheel dependency closure separately from
+the CUDA/Modal environments. It is not yet a native runtime material or model
+profile; worker token semantics, interpreter/native library capture and genuine
+training updates remain unqualified.
 
 The NVIDIA desktop's RTX 3090 and exact pinned Docker image/daemon were observed
 through the configured endpoint. PR #259 passed all 18 checks and merged with a
