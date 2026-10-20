@@ -197,3 +197,134 @@ The checked-in requirements lock and its pins are unchanged.
 CPU contract tests prove projection/control behavior and scalar loss algebra,
 not MLX graph compilation, Metal memory capacity, model compatibility, native
 artifact validity, process lifecycle, or successful training.
+
+## Execution-boundary continuation — 2026-10-20
+
+The next reviewable source increment adds:
+
+- `native_files.py`, `native_macho.py`, `native_mlx_material.py` and the checked-in
+  capture CLI: descriptor-held native file inventory, bounded arm64 Mach-O static
+  dependency parsing, explicit Homebrew alias/OS-shared-cache treatment and
+  comparison against a host-reviewed capture digest. This is observed installed
+  material, not independent wheel-origin or dynamic-loader attestation.
+- `native_mlx_input.py`: retained prepared-lease hash/size/identity verification,
+  shared tokenization over the exact declared rows, and private local tokenizer
+  snapshot binding. Semantic publication provenance remains host-owned.
+- `native_mlx_composition.py` and `native_mlx_artifacts.py`: explicit LoRA and
+  constant-AdamW settings, realized target checks, actual optimizer count,
+  independent native safetensors/delta verification, and saved-final-adapter
+  reload/evaluation. The upstream final in-loop validation is not reused.
+- `native_process.py` and `native_process_guardian.py`: existing host-store
+  claim/spawn/outcome retention, a fresh owned worker group, bounded time/output/
+  file sizes and owner-pipe loss/cancellation. Numeric PIDs remain non-authorizing.
+  Mac environment inspection confirmed that this CPython lacks `os.waitid` but
+  exposes kqueue; the Darwin branch uses process-exit notifications without
+  reaping before group cleanup. See Apple's
+  [kqueue process-filter contract](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/kqueue.2.html).
+
+### Required continuation after independent review
+
+1. Review the new runtime/filesystem/process boundaries and exact native profile
+   before any ML import. Retain the original candidate environment. Reconcile
+   selected wheel archives to the installation evidence; a newly captured file
+   digest alone must not become provenance approval. Exercise the capture CLI
+   on the Mac against an isolated reviewed source checkout.
+2. Independently review the now implemented isolated child/bootstrap and public
+   input recompilation. Review actual imported module roots on Darwin, including
+   the Python framework and static native dependency closure. A caller-provided
+   workload digest or a direct internal call remains non-authorizing.
+3. Review the `native_environment` representation added to existing `RuntimeSpec`
+   and the native `ProviderFamilyV1` described below. The Modal lock maintainer
+   refreshed only the existing `contracts.py` member hash and dependent skill
+   lock digest; inventory/non-hash pins remain unchanged.
+4. Independently review the five native artifact role projections and exact
+   known-run reader. Worker result JSON and process exit alone are not public
+   completion evidence. Public cancellation remains disabled; qualify it
+   separately from the guardian's internal stop/owner-loss behavior.
+5. Root reviews the concrete
+   [bounded qualification proposal](../../Trainers/mlx_sft_mac/runtime-candidate/sft-qualification-proposal.json).
+   The proposed model/tokenizer pin is the repository's exact
+   [73e3e38 revision](https://huggingface.co/mlx-community/Qwen3-0.6B-4bit/tree/73e3e38d981303bc594367cd910ea6eb48349da8);
+   it is a candidate, not qualified MLX-LM 0.32.2 compatibility. Two fresh
+   synthetic attempts allow at most six total optimizer updates and ten minutes
+   of worker time. Root owns model preparation, ML imports and live execution.
+6. Only independent real Mac execution, final adapter/artifact verification and
+   Syntunia public-API readback can open native SFT capability. Native GRPO
+   remains a separate unavailable method.
+
+No native runtime/provider has been globally registered, no Mac training has
+run in this implementation task, and no capability has been promoted.
+
+## Public family and isolated child increment — 2026-10-20
+
+The implementation now contains a candidate path through the existing public
+facades, exercised with a substituted ML child in CPU tests:
+
+1. `native_mlx_compilation.compile_native_sft` projects public `TrainingInputV1`,
+   prepared identity and a declarative profile into `CompiledWorkload`.
+   `parse_native_workload` re-derives every projected field.
+2. `native_mlx_child` runs only under `-I -S -B`, restricts import roots to the
+   captured inventory, verifies loaded origins and recompiles pinned Python
+   source. It joins the exact staged source/snapshots/capture/lock to tokenization
+   and model training. It writes the actual input-binding document and workload.
+3. `native_mlx_planning.NativePlanningV1` provides immutable coordinator context,
+   preflight, preparation and payloads for one host-resolved request/run.
+   `RuntimeSpec` represents native bytes without a container placeholder.
+4. `native_mlx_family.native_mlx_family` builds the existing `ProviderFamilyV1`.
+   It verifies host-authenticated command material, uses `NativeOwnedProcess`
+   for bounded synchronous submission, reconstructs exact retained Foundation
+   evidence on reads, and supplies native observation/verification/streaming.
+   It does not create an engine database or another public training API.
+5. `NativeCommandCatalogV1` retains signed exact command material through the
+   host record port. `NativeMaterialAuthority` and `NativeEvidenceAuthority`
+   reuse the host HMAC implementation with separate purposes. The consumer
+   resolves keys and grants; none enters the child.
+6. `native_mlx_publication` verifies exact output inventory, bound source/
+   tokenizer/workload/runtime, actual update count and numeric saved-adapter
+   delta, finite retained checkpoints and saved-final validation identity.
+   The five public roles contain deterministic MLX adapter/tokenizer archives
+   and exact workload/lineage/metrics. Archives are never labeled PEFT.
+
+Submission is deliberately synchronous within the declared wall-clock bound.
+This preserves caller-thread ownership of host SQLite/record stores; it is not
+an asynchronous desktop job service. An interrupted or unacknowledged submit
+remains consumed and requires diagnosis. Public logs/cancel/reconcile are
+unavailable; no restart-time signal authority comes from a numeric PID.
+
+### Host assembly and remaining acceptance
+
+The family is a library adapter, not an operational Mac consumer or an automatic
+qualification issuer. Root/consumer work must still:
+
+- Bind the actual host-resolved source evidence and prepared publication to
+  the public resolved request, compiled native profile and source capture.
+  Use the existing `ReferenceRequestPortsV1` loader/resolver/run identity.
+  The engine must not fabricate a source attestation or accept a test fixture.
+- Prepare the original pinned candidate and fresh owner-private model/tokenizer
+  snapshots, request root and empty output on the execution machine. Run the
+  checked-in runtime capture CLI and retain independent selected-wheel/install
+  provenance. Add the reusable consumer preparation/qualification workflow
+  before effects; there is no ad hoc operational script exemption.
+- In the host `GrantAuthorityPort.bind` hook, validate source/hardware/admission,
+  construct an exact `NativeInvocation` bound to that Foundation command,
+  issue `NativeCommandMaterialV1`, and publish it through
+  `NativeCommandCatalogV1`. A signature issued without these checks supplies no
+  independent source or hardware evidence.
+- Compose `native_mlx_family` with that catalog, its authority, host records,
+  reader evidence authority, reference Foundation/assessment authenticators and
+  clock; pass it to existing `compose_reference_host`. Test
+  `training.load/resolve/plan/preflight/start`, then `runs.outcome/verify`,
+  authenticated artifact streaming and host reconstruction over the same stores.
+- Complete the bounded root-reviewed hardware attempts and Darwin lifecycle
+  evidence. A `NativeQualificationV1` is a host-authenticated commitment to
+  profile/source/runtime/current hardware and two distinct retained attempts.
+  No accepting authority is shipped. Its authority must independently verify
+  provenance and supporting final-adapter/public-readback evidence; matching
+  hashes alone are insufficient. Candidate preflight and public read/stream
+  capabilities remain closed until that gate is satisfied.
+
+CPU facade coverage proves actual coordinator/Foundation/host-store joins with
+the real native artifact verifier and a substituted ML child. It does not
+prove native imports, Metal execution, memory capacity, Darwin cleanup,
+Syntunia product integration or usable trained-model quality. The two-run
+proposal remains review-required; root owns every Mac effect and live result.

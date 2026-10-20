@@ -318,7 +318,7 @@
     },
     "bootstrap__tuner__runtime__manifests__offline-sft-worker-v1_json": {
       "path": "tuner/runtime/manifests/offline-sft-worker-v1.json",
-      "sha256": "3842689403abc5b42e28d58545b88616b81cd8fc738ee5557e97159df65d00ef"
+      "sha256": "9de89c12761c392e0cd2babbd85351d96ccd994b07d80d8662f261ab107c03b7"
     },
     "bootstrap__tuner__runtime__offline_sft_worker_py": {
       "path": "tuner/runtime/offline_sft_worker.py",
@@ -330,7 +330,7 @@
     },
     "bootstrap__tuner__training__contracts_py": {
       "path": "tuner/training/contracts.py",
-      "sha256": "91c4d66d9810cc0471981c3d4ef4b54feaed5b92eb41a468f31201f8111303b5"
+      "sha256": "ebe52af8ba1c02309d39317694bc04547a6491d110c60229282517dbdab5a417"
     },
     "bootstrap__tuner__training__coordinator_material_py": {
       "path": "tuner/training/coordinator_material.py",

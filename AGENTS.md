@@ -45,12 +45,40 @@ This repository has a few cloud-training constraints that are easy to relearn th
   truncation, or dropped tail batches. Reject unsupported attention layouts and
   failed preprocessing diagnostics before ML imports.
 - The internal `tuner/runtime/native_mlx_sft.py` worker and candidate metadata
-  comparison are not a native provider, public runtime material, or launch
+  comparison alone are not a native provider, public runtime material, or launch
   authority. A finite iteration count is not a wall-clock/process bound. Keep
   model/optimizer preparation, exact runtime/source admission, private paths,
   durable claims, child lifecycle and native artifact verification host-owned.
   Do not enable native training in Syntunia before those joins and real Mac
   qualification are complete. See `docs/plans/native-desktop-training-api-v1.md`.
+- Capture native runtime files and linked libraries, including the Homebrew
+  Python framework, startup files and bytecode. A stub executable hash or package
+  metadata match cannot attest this closure. Treat the OS shared cache as an
+  explicit exact-build trust boundary. Capture observations are not host grants
+  or proof that installed bytes came from selected hash-locked wheel archives.
+- Use actual Darwin filesystem/process interfaces. The qualification Mac's
+  CPython 3.11.14 has kqueue but no `os.waitid`; never assume Linux pidfds, /proc
+  or waitid availability. Retain the live owner handle through process-group
+  cleanup; persisted PIDs never authorize restart-time signals or replay.
+- MLX-LM's final in-loop validation precedes its last update. Verify the actual
+  optimizer update count, saved adapter tensor inventory, finite parameter delta
+  and a separate evaluation after reloading the saved final adapter. Never
+  report upstream's last in-loop loss as final-adapter validation.
+- Native public composition uses `native_mlx_planning.py` and
+  `native_mlx_family.py` through the existing `ProviderFamilyV1` and reference
+  host. Keep its independently authenticated hardware qualification gate closed
+  until real evidence exists; CPU facade tests substitute the ML child.
+  Host grant binding retains exact signed native command material using the
+  existing record port. An uncertain consumed process claim never authorizes
+  replay. Public logs/cancel/reconcile remain disabled. Preserve bounded
+  synchronous submission unless a separately reviewed owned asynchronous
+  lifecycle also preserves thread-affine host stores.
+- Isolated native children use `-I -S -B`, explicit captured import roots and
+  source-byte verification before ML imports. Recompile every public SFT control;
+  reject unsupported controls rather than silently dropping them. Native model
+  roles contain deterministic MLX adapter archives, never mislabeled PEFT.
+  Verify tokenizer bytes, retained finite checkpoints, input binding and saved
+  final-adapter evidence before signing public artifact verification.
 
 ## HF Jobs
 
