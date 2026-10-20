@@ -197,3 +197,63 @@ The checked-in requirements lock and its pins are unchanged.
 CPU contract tests prove projection/control behavior and scalar loss algebra,
 not MLX graph compilation, Metal memory capacity, model compatibility, native
 artifact validity, process lifecycle, or successful training.
+
+## Execution-boundary continuation — 2026-10-20
+
+The next reviewable source increment adds:
+
+- `native_files.py`, `native_macho.py`, `native_mlx_material.py` and the checked-in
+  capture CLI: descriptor-held native file inventory, bounded arm64 Mach-O static
+  dependency parsing, explicit Homebrew alias/OS-shared-cache treatment and
+  comparison against a host-reviewed capture digest. This is observed installed
+  material, not independent wheel-origin or dynamic-loader attestation.
+- `native_mlx_input.py`: retained prepared-lease hash/size/identity verification,
+  shared tokenization over the exact declared rows, and private local tokenizer
+  snapshot binding. Semantic publication provenance remains host-owned.
+- `native_mlx_composition.py` and `native_mlx_artifacts.py`: explicit LoRA and
+  constant-AdamW settings, realized target checks, actual optimizer count,
+  independent native safetensors/delta verification, and saved-final-adapter
+  reload/evaluation. The upstream final in-loop validation is not reused.
+- `native_process.py` and `native_process_guardian.py`: existing host-store
+  claim/spawn/outcome retention, a fresh owned worker group, bounded time/output/
+  file sizes and owner-pipe loss/cancellation. Numeric PIDs remain non-authorizing.
+  Mac environment inspection confirmed that this CPython lacks `os.waitid` but
+  exposes kqueue; the Darwin branch uses process-exit notifications without
+  reaping before group cleanup. See Apple's
+  [kqueue process-filter contract](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/kqueue.2.html).
+
+### Required continuation after independent review
+
+1. Review the new runtime/filesystem/process boundaries and exact native profile
+   before any ML import. Retain the original candidate environment. Reconcile
+   selected wheel archives to the installation evidence; a newly captured file
+   digest alone must not become provenance approval. Exercise the capture CLI
+   on the Mac against an isolated reviewed source checkout.
+2. Build the isolated child request/bootstrap that sets and authenticates its
+   import search path, joins the retained source to an actual compiled workload,
+   binds every profile control and executes these internal components. A
+   caller-provided workload digest or a direct internal call is not authority.
+3. Add the reviewed native material representation to existing `RuntimeSpec`
+   without changing legacy canonical bytes; then implement a native
+   `ProviderFamilyV1` through existing coordinator/Foundation/host ports.
+   `contracts.py` is a Modal-locked member, so that change must use the lock
+   maintainer and preserve inventory/non-hash pins. Never bypass the compiler
+   by returning an invented OCI runtime.
+4. Authenticate the five public artifact roles and exact known-run reader,
+   including tokenizer bytes and native model format. Worker result JSON and
+   process exit are not public completion evidence. Join cancellation requests,
+   confirmed child termination, owner loss and restart uncertainty separately.
+5. Root reviews the concrete
+   [bounded qualification proposal](../../Trainers/mlx_sft_mac/runtime-candidate/sft-qualification-proposal.json).
+   The proposed model/tokenizer pin is the repository's exact
+   [73e3e38 revision](https://huggingface.co/mlx-community/Qwen3-0.6B-4bit/tree/73e3e38d981303bc594367cd910ea6eb48349da8);
+   it is a candidate, not qualified MLX-LM 0.32.2 compatibility. Two fresh
+   synthetic attempts allow at most six total optimizer updates and ten minutes
+   of worker time. Root owns model preparation, ML imports and live execution.
+6. Only independent real Mac execution, final adapter/artifact verification and
+   Syntunia public-API readback can open native SFT capability. Native GRPO
+   remains a separate unavailable method.
+
+These remaining joins are not finished by this source increment. No native
+runtime/provider has been registered, no Mac training has run, and no capability
+has been promoted.

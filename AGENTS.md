@@ -51,6 +51,19 @@ This repository has a few cloud-training constraints that are easy to relearn th
   durable claims, child lifecycle and native artifact verification host-owned.
   Do not enable native training in Syntunia before those joins and real Mac
   qualification are complete. See `docs/plans/native-desktop-training-api-v1.md`.
+- Capture native runtime files and linked libraries, including the Homebrew
+  Python framework, startup files and bytecode. A stub executable hash or package
+  metadata match cannot attest this closure. Treat the OS shared cache as an
+  explicit exact-build trust boundary. Capture observations are not host grants
+  or proof that installed bytes came from selected hash-locked wheel archives.
+- Use actual Darwin filesystem/process interfaces. The qualification Mac's
+  CPython 3.11.14 has kqueue but no `os.waitid`; never assume Linux pidfds, /proc
+  or waitid availability. Retain the live owner handle through process-group
+  cleanup; persisted PIDs never authorize restart-time signals or replay.
+- MLX-LM's final in-loop validation precedes its last update. Verify the actual
+  optimizer update count, saved adapter tensor inventory, finite parameter delta
+  and a separate evaluation after reloading the saved final adapter. Never
+  report upstream's last in-loop loss as final-adapter validation.
 
 ## HF Jobs
 
