@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import stat
 import sys
+from types import SimpleNamespace
 
 ENGINE = Path(__file__).resolve().parents[2]
 if __package__ in {None, ""}:
@@ -214,6 +215,17 @@ def _quote(value):
 
 
 def _runtime(value, *, sdk, client, quote):
+    release, deployment, facts, volumes, key = _runtime_components(value)
+    binding = deployment.client_binding
+    reader = _CurrentPackagedDeploymentReader(sdk=sdk, client=client,
+        binding=binding, facts=facts,
+        names={item.spec.role: item.spec.name for item in deployment.volumes},
+        secret_ids=tuple(sorted((item.spec.name, item.secret_id, item.spec.required_keys)
+            for item in deployment.secrets)))
+    return ModalHostRuntimeV1(release, deployment, facts, quote, volumes, key, reader)
+
+
+def _runtime_components(value):
     release = parse_packaged_runtime_release(value["release"])
     deployment = ModalRuntimeReleaseDeploymentFactsV1.from_dict(value["deployment_facts"])
     facts = ModalPackagedRuntimeFactsV1.from_dict(value["facts"])
@@ -229,12 +241,76 @@ def _runtime(value, *, sdk, client, quote):
     key = bytes.fromhex(value["qualification_key_hex"])
     if len(key) != 32:
         raise ValueError
-    reader = _CurrentPackagedDeploymentReader(sdk=sdk, client=client,
-        binding=binding, facts=facts,
-        names={item.spec.role: item.spec.name for item in deployment.volumes},
-        secret_ids=tuple(sorted((item.spec.name, item.secret_id, item.spec.required_keys)
-            for item in deployment.secrets)))
-    return ModalHostRuntimeV1(release, deployment, facts, quote, volumes, key, reader)
+    return release, deployment, facts, volumes, key
+
+
+def _readback(config, config_digest, root, reviewed, reviewed_capture, reviewed_model):
+    build, build_sha = _document(root / "build-admission.json")
+    if (build.get("schema_version") != "synaptic-private-grpo-constructor-build-admission/v1"
+            or build.get("config_sha256") != config_digest
+            or build.get("diagnostic_attempt_ref") != config["diagnostic_attempt_ref"]
+            or build.get("cpu_attempt_ref") != config["cpu_attempt_ref"]
+            or build.get("model_ref") != config["model_ref"]
+            or build.get("model_revision") != config["model_revision"]
+            or build.get("environment_ref") != config["modal_environment"]):
+        raise ValueError
+    _checked(root / "runtime-capture.json", reviewed_capture)
+    capture, capture_sha = _document(root / "runtime-capture.json")
+    if (capture.get("schema_version") != "synaptic-private-grpo-constructor-runtime-capture/v1"
+            or capture.get("build_admission_sha256") != build_sha
+            or capture.get("cpu_qualification", {}).get("training_executed") is not False):
+        raise ValueError
+    _quote(capture["quote"])
+    release, deployment, facts, volumes, key = _runtime_components(capture["runtime"])
+    if (release.package_digest != capture.get("wheel_sha256")
+            or build.get("account_ref") != facts.account_ref
+            or build.get("workspace_ref") != facts.workspace_ref
+            or build.get("environment_ref") != facts.environment_ref):
+        raise ValueError
+    _checked(root / "execution-admission.json", reviewed)
+    admission, _ = _document(root / "execution-admission.json")
+    model, model_sha = _document(root / "model-manifest.json")
+    validate_model_inventory(model)
+    if reviewed_model != model_sha:
+        raise ValueError
+    expected = {"schema_version": "synaptic-private-grpo-constructor-execution-admission/v1",
+        "capture_sha256": capture_sha, "model_manifest_sha256": model_sha,
+        "attempt_ref": config["diagnostic_attempt_ref"],
+        "source_commit": build["engine_commit"], "host_source_commit": build["host_commit"],
+        "wheel_sha256": capture["wheel_sha256"],
+        "runtime_release_digest": release.manifest_digest,
+        "deployment_facts_digest": deployment.facts_digest, "image_id": deployment.image_id,
+        "snapshot_deployment_facts_digest": build["old_deployment_facts_digest"],
+        "old_model_volume_id": build["old_model_volume_id"],
+        "old_model_volume_name": build["old_model_volume_name"],
+        "quote_digest": capture["quote"]["quote_digest"],
+        "account_ref": "synaptic-labs", "workspace_ref": "synaptic-labs",
+        "environment_ref": config["modal_environment"],
+        "gpu": "L40S", "gpu_count": 1, "cpu": 2, "memory_mib": 8192,
+        "provider_timeout_seconds": 120, "host_deadline_seconds": 240,
+        "cleanup_seconds": 30, "result_limit_bytes": 8192, "block_network": True,
+        "secrets": [], "training_executed": False}
+    if (set(admission) != set(expected) | {"dispatch_sha256"}
+            or any(admission.get(name) != value for name, value in expected.items())
+            or type(admission.get("dispatch_sha256")) is not str
+            or len(admission["dispatch_sha256"]) != 64
+            or any(char not in _HEX for char in admission["dispatch_sha256"])):
+        raise ValueError
+    runtime = SimpleNamespace(release=release, deployment_facts=deployment,
+                              qualification_key=key)
+    with ModalHostStorageV1(root / "journal.sqlite3", "grpo-constructor-diagnostic", create=False) as storage:
+        receipt = read_modal_grpo_constructor_receipt(runtime, storage, config["diagnostic_attempt_ref"])
+    body = receipt["body"]
+    bindings = {"dispatch_sha256": "dispatch_sha256", "source_commit": "source_commit",
+        "host_source_commit": "host_source_commit", "wheel_sha256": "wheel_sha256",
+        "runtime_release_digest": "runtime_release_digest",
+        "deployment_facts_digest": "deployment_facts_digest", "image_id": "image_id",
+        "snapshot_deployment_facts_digest": "snapshot_deployment_facts_digest",
+        "model_cache_volume_id": "old_model_volume_id", "quote_digest": "quote_digest"}
+    if any(body.get(receipt_key) != admission[record_key]
+           for receipt_key, record_key in bindings.items()):
+        raise ValueError
+    return _receipt_summary(receipt)
 
 
 def _client(config):
@@ -312,6 +388,8 @@ def _receipt_summary(receipt):
 def run(command, config_path, reviewed=None, reviewed_capture=None, reviewed_model=None):
     config, config_digest = _config(config_path)
     root = private_directory(_paths(config), create=command in {"plan", "prepare-model"})
+    if command == "readback":
+        return _readback(config, config_digest, root, reviewed, reviewed_capture, reviewed_model)
     if command == "prepare-model":
         model = prepare_pinned_model_manifest(config["model_ref"], config["model_revision"])
         return _write(root / "model-manifest.json", model)
@@ -381,10 +459,6 @@ def run(command, config_path, reviewed=None, reviewed_capture=None, reviewed_mod
     if (capture["build_admission_sha256"] != _document(root / "build-admission.json")[1]
             or capture["wheel_sha256"] != _hash(_read(root / "source-wheel.whl", 256 * 1024 * 1024))):
         raise ValueError
-    if command == "readback":
-        with ModalHostStorageV1(root / "journal.sqlite3", "grpo-constructor-diagnostic", create=False) as storage:
-            receipt = read_modal_grpo_constructor_receipt(runtime, storage, config["diagnostic_attempt_ref"])
-        return _receipt_summary(receipt)
     admission = _admission(config, capture, runtime, snapshot, model)
     record = _admission_record(config, admission, reviewed_capture, model_sha)
     if command == "admit":

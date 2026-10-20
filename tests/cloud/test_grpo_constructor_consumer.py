@@ -185,3 +185,69 @@ def test_admit_then_execute_rederives_exact_reviewed_record(monkeypatch, tmp_pat
                            reviewed_capture=capture_sha, reviewed_model=model_sha)
     assert outcome["primary"] == "INDETERMINATE"
     assert calls == ["admit", "admit", "execute"]
+
+
+def test_readback_restart_uses_only_reviewed_retained_material(monkeypatch, tmp_path):
+    from tuner.training.modal_grpo_constructor_diagnostic import _catalog, _receipt
+    from tuner.training.modal_host_storage import ModalHostStorageV1
+
+    config_path = _configuration(tmp_path)
+    config, config_sha = consumer._config(config_path)
+    root = consumer.private_directory(config["private_root"], create=True)
+    build = {"schema_version": "synaptic-private-grpo-constructor-build-admission/v1",
+        "config_sha256": config_sha, "diagnostic_attempt_ref": config["diagnostic_attempt_ref"],
+        "cpu_attempt_ref": config["cpu_attempt_ref"], "model_ref": config["model_ref"],
+        "model_revision": config["model_revision"], "environment_ref": config["modal_environment"],
+        "account_ref": "synaptic-labs", "workspace_ref": "synaptic-labs",
+        "engine_commit": "a" * 40, "host_commit": "b" * 40,
+        "old_deployment_facts_digest": "c" * 64,
+        "old_model_volume_id": "vo-old", "old_model_volume_name": "old-cache"}
+    build_sha = consumer._write(root / "build-admission.json", build)
+    model_sha = consumer._write(root / "model-manifest.json", {"members": []})
+    wheel_sha = "d" * 64
+    capture = {"schema_version": "synaptic-private-grpo-constructor-runtime-capture/v1",
+        "build_admission_sha256": build_sha, "wheel_sha256": wheel_sha,
+        "cpu_qualification": {"training_executed": False}, "quote": {"quote_digest": "e" * 64},
+        "runtime": {"retained": True}}
+    capture_sha = consumer._write(root / "runtime-capture.json", capture)
+    key = b"k" * 32
+    release = SimpleNamespace(manifest_digest="f" * 64, package_digest=wheel_sha)
+    deployment = SimpleNamespace(facts_digest="1" * 64, image_id="im-new")
+    facts = SimpleNamespace(account_ref="synaptic-labs", workspace_ref="synaptic-labs",
+                            environment_ref="synaptic-smoke-v1")
+    monkeypatch.setattr(consumer, "_quote", lambda value: object())
+    monkeypatch.setattr(consumer, "_runtime_components", lambda value:
+        (release, deployment, facts, (), key))
+    monkeypatch.setattr(consumer, "validate_model_inventory", lambda value: None)
+    admission = SimpleNamespace(attempt_ref=config["diagnostic_attempt_ref"],
+        dispatch_bytes=b"exact-dispatch", source_commit=build["engine_commit"],
+        host_source_commit=build["host_commit"], wheel_sha256=wheel_sha,
+        runtime_release_digest=release.manifest_digest,
+        deployment_facts_digest=deployment.facts_digest, image_id=deployment.image_id,
+        snapshot_deployment_facts_digest=build["old_deployment_facts_digest"],
+        model_cache_volume_id="vo-old", model_cache_volume_name="old-cache",
+        quote_digest=capture["quote"]["quote_digest"])
+    record = consumer._admission_record(config, admission, capture_sha, model_sha)
+    reviewed = consumer._write(root / "execution-admission.json", record)
+    runtime = SimpleNamespace(release=release, deployment_facts=deployment,
+                              qualification_key=key)
+    receipt = _receipt(runtime, admission, sandbox_id="sb-fixed", primary="REJECTED",
+                       cleanup="TERMINAL_CONFIRMED", result=None, terminal=1,
+                       failure_phase="OUTPUT")
+    with ModalHostStorageV1(root / "journal.sqlite3", "grpo-constructor-diagnostic") as storage:
+        _catalog(storage, "modal-grpo-constructor-results").publish_if_absent(
+            config["diagnostic_attempt_ref"], receipt)
+    (tmp_path / "recipe.yaml").write_text("changed recipe")
+    (tmp_path / "engine").mkdir()
+    (tmp_path / "engine" / "dirty").write_text("advanced source")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    for forbidden in ("_plan", "_client", "_admission", "execute_modal_grpo_constructor_once"):
+        monkeypatch.setattr(consumer, forbidden,
+            lambda *args, **kwargs: pytest.fail("readback reached live authority"))
+    result = consumer.run("readback", config_path, reviewed=reviewed,
+                          reviewed_capture=capture_sha, reviewed_model=model_sha)
+    assert result["primary"] == "REJECTED"
+    assert result["cleanup"] == "TERMINAL_CONFIRMED"
+    with pytest.raises(ValueError):
+        consumer.run("readback", config_path, reviewed="0" * 64,
+                     reviewed_capture=capture_sha, reviewed_model=model_sha)
