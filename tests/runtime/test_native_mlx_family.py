@@ -3,12 +3,11 @@
 from dataclasses import asdict, replace
 from datetime import datetime
 import hashlib
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from tests.runtime.test_native_mlx_publication import publication
+from tests.runtime import test_native_mlx_publication as publication_fixtures
 from tests.runtime.test_native_mlx_child import inputs
 from synaptic_tuner.api.v1.execution import ExecutionGrant
 from synaptic_tuner.api.v1.planning import ResolvedTrainingRequest
@@ -29,6 +28,9 @@ from tuner.training.native_mlx_authority import NativeEvidenceAuthority, NativeM
 from tuner.training.native_mlx_compilation import compile_native_sft
 from tuner.training.native_mlx_family import NativeCommandMaterialV1, NativeCommandCatalogV1, native_mlx_family
 from tuner.training.native_mlx_planning import NativePlanningV1, NativeQualificationV1
+
+
+publication = publication_fixtures.publication
 
 
 class Clock:
