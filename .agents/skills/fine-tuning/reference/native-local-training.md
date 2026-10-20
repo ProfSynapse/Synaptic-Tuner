@@ -12,3 +12,10 @@ compatibility, or SFT/GRPO training support. It does not import the ML packages,
 load a model, access credentials, initialize a GPU, install packages, or make
 network calls. `--fix` and `--env-file` are rejected. Existing legacy MLX SFT
 is separate from an API v1 native Mac adapter and training qualification.
+
+Run the same command on Windows and inside WSL separately: each report describes
+the OS running that Python process. Windows AMD64/ARM64 and Linux/WSL metadata
+do not establish NVIDIA hardware, CUDA, WSL GPU passthrough or Docker readiness.
+The Windows desktop qualification path remains WSL2 plus the pinned NVIDIA
+Docker runtime. Installed-base CI exercises this diagnostic on Windows, macOS
+and Linux; those checks remain separate from real GPU training evidence.

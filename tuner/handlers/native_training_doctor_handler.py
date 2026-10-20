@@ -10,7 +10,7 @@ class NativeTrainingDoctorHandler:
         self.args = args
 
     def handle(self) -> int:
-        if getattr(self.args, "doctor_fix", False) or getattr(self.args, "env_file", None):
+        if getattr(self.args, "doctor_fix", False) or getattr(self.args, "env_file", None) is not None:
             error = ("--fix is not supported by doctor native-training." if getattr(self.args, "doctor_fix", False)
                      else "--env-file is not supported by doctor native-training.")
             if getattr(self.args, "json", False):

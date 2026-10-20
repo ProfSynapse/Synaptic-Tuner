@@ -224,21 +224,21 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     try:
+        if (
+            getattr(args, "command", None) == "doctor"
+            and getattr(args, "subcommand", None) == "native-training"
+        ):
+            # Machine metadata does not require project discovery or dotenv.
+            # Route invalid flags to the same read-only handler before either.
+            sys.exit(route_command(args))
+
         # Project discovery intentionally precedes dotenv loading. Existing
         # process environment participates in discovery and always wins over
         # values loaded from the selected project/engine env file.
         context = build_project_context(args)
-        native_doctor = (
-            getattr(args, "command", None) == "doctor"
-            and getattr(args, "subcommand", None) == "native-training"
-        )
-        # This diagnostic observes only stdlib platform and distribution metadata.
-        # Do not inspect or load a selected dotenv file during CLI bootstrap.
-        explicit_env = None if native_doctor else _explicit_env_path(args, context.invocation_cwd)
+        explicit_env = _explicit_env_path(args, context.invocation_cwd)
         protected_hf_command = getattr(args, "command", None) in {"hf-source", "hf-smoke", "hf-training-smoke"}
-        if native_doctor:
-            args._env_loaded = False
-        elif protected_hf_command:
+        if protected_hf_command:
             # These handlers own an effect-aware authorization boundary. Keep
             # the selected file metadata available, but do not place secrets
             # in process state before their explicit claim/provisioning gate.
