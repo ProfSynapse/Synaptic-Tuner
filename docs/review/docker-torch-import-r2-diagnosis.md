@@ -295,3 +295,85 @@ capabilities, writable filesystem or 16-GiB limit, and cannot establish or
 rule out an interaction with them. The cause of r2 remains unproven. This
 consumed diagnostic grants no replay, broader GPU comparison or training
 authority.
+
+## r9 prepared worker import boundary — no live execution
+
+The r8 result leaves the original isolated child invocation and trainer
+preamble untested. The next proposed **single** import-only comparison uses
+the retained r2 workload, source lock, closure and image. This is preparation
+for root review; no new container, device request or probe was started in r9.
+It supersedes the earlier idea of varying incidental host settings one at a
+time.
+
+The retained r2 workload is SHA-256
+`1534308c977c2c1cb2b1d80d9cc5c07e31303db63b336686e1c5ccc2644b1064`.
+Its pinned `runtime_v1.py` and `train_sft.py` are SHA-256
+`460121aaee3eb83764f67d9307cfb57a3b25c117611d987577b9631b6956a1b3`
+and `75c2ab22fbc5dd80b8ddd5e6d0da816d1451cda0cd620c34717336a39a8a7644`.
+The helper verifies all three against independently supplied expected hashes
+before Docker create and again before start, in addition to the existing
+release, daemon, image, source lock, manifest and closure checks. The workload
+file is included in source custody checks. The source mount remains read-only;
+private host custody and no concurrent writer remain necessary during a run.
+
+`--worker-context` derives the child environment from the pinned workload
+using the exact `runtime_v1.py:1479-1497` transform: start from its declared
+variables, remove `PYTHONPATH`, bind the closure and runtime roots, then
+override the workload fingerprint, isolated Python flags, HF/cache/offline
+values and model-snapshot **path**. It starts a separate `-I` interpreter
+with that replacement environment and cwd `/artifacts/run/tmp`. The
+model-snapshot path is a string only; no model weights are mounted or loaded.
+The child evaluates the authenticated worker module without its `__main__`
+entry, loads the closure, verifies origins, installs the owned-module guard
+and inserts the worker's trainer-directory/engine path pair. It then compiles
+the authenticated `train_sft.py` prefix ending with `import torch`, with
+the real trainer `__file__`, `__main__` name and phase callback. The
+`UNSLOTH_IMPORT` marker and every later statement are excluded from the
+compiled prefix. Marker order, exact Torch/Unsloth adjacency, source hashes
+and the last AST statement fail closed on drift. The child returns only
+closed category/stage and SHA-256 digests of its preamble environment, cwd,
+trainer file path and `sys.path`; the helper checks the environment digest
+against its own reconstruction. No raw environment, argv, path, exception or
+traceback enters the report.
+
+The proposed host stays within 2 CPUs, 4 GiB and a 120-second execution
+deadline plus bounded owned cleanup. It keeps r8's UID/GID of the staged
+source owner, dropped capabilities, read-only root, network `none`, and
+device-0 request; it adds only a 64-MiB `/artifacts` tmpfs for private
+runtime roots and no model mount. The separately launched child's cwd
+matches r2; the outer container still uses `/tmp`. This is closer to r2
+at the child import boundary, but root/default capabilities, 16-GiB memory,
+writable root, actual model cache, and the full parent admission/preparation
+remain different. The original child environment was not captured, so this
+is a source-and-plan reconstruction rather than a historical byte capture.
+Even a changed import outcome would narrow a hypothesis, not prove r2's
+cause or authorize training.
+
+The exact **unexecuted** proposal for root review is:
+
+```sh
+python3 -I scripts/diagnose_docker_torch_import.py \
+  --docker /usr/bin/docker \
+  --docker-config /home/profsynapse/.local/share/synaptic-qualification/docker-sft-stable-image-c/docker-config \
+  --release /home/profsynapse/.local/share/synaptic-qualification/docker-sft-stable-image-c/evidence/runtime-release.json \
+  --expected-release-sha256 5f65824ceb5e250a58314da0233b9c07f1d63f1b0a39892d9b36af694938bfe6 \
+  --daemon-id 24805003-b125-469b-8080-9da4daacd364 \
+  --source-root /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-0d515-20261020/attempt-r2/source/engine \
+  --source-lock /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-0d515-20261020/attempt-r2/material/source-lock.json \
+  --expected-source-lock-sha256 d19aecb2d3ca1b7b6fa32a2445c45251e59d8cac2332293c68b73a61cbff4665 \
+  --expected-manifest-sha256 3842689403abc5b42e28d58545b88616b81cd8fc738ee5557e97159df65d00ef \
+  --expected-closure-digest 8465ff2b7cedb352337e7cedc5bb17cc169892c2eedae0b280569f4a0cde5002 \
+  --worker-context \
+  --expected-workload-sha256 1534308c977c2c1cb2b1d80d9cc5c07e31303db63b336686e1c5ccc2644b1064 \
+  --expected-runtime-sha256 460121aaee3eb83764f67d9307cfb57a3b25c117611d987577b9631b6956a1b3 \
+  --expected-trainer-sha256 75c2ab22fbc5dd80b8ddd5e6d0da816d1451cda0cd620c34717336a39a8a7644 \
+  --gpu-device 0 \
+  --output-dir /home/profsynapse/.local/share/synaptic-qualification/torch-import-r9-20261020/worker-context-gpu0-1
+```
+
+The output parent must first be created privately at mode 0700 and the named
+child must be absent. Root review must confirm a clean pushed helper/verifier,
+the exact remote identities and source custody, no active device-0 compute
+job, the proposed UID/caps/tmpfs/readonly filesystem and bounds, then save
+and read back a fresh one-use admission before any start. A collision or drift
+rejects without renaming or retrying; r2/r4/r6/r8 claims remain consumed.

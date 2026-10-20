@@ -4,6 +4,7 @@ import hashlib
 import json
 import shutil
 import sys
+import ast
 from pathlib import Path
 
 import pytest
@@ -116,6 +117,121 @@ def _stage_source(root: Path):
         "expected_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
         "expected_closure_digest": document["closure_digest"]}
     return flags, document, manifest
+
+
+def _stage_worker_context(root: Path):
+    flags, _document, _manifest = _stage_source(root)
+    engine = flags["source_root"]
+    variables = {name: "1" for name in diagnostic._R2_ENV_KEYS}
+    variables.update({diagnostic._ROOT_ENV[name]: value
+                      for name, value in diagnostic._R2_ROOTS.items()})
+    variables.update({"PYTHONPATH": "/source/engine",
+        "PATH": "/opt/unsloth-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "HF_HOME": "/artifacts/run/cache/huggingface",
+        "TRANSFORMERS_CACHE": "/artifacts/run/cache/transformers",
+        "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
+    workload = {"execution_source": {"runtime": {
+        "roots": diagnostic._R2_ROOTS,
+        "environment": {"clear_inherited": True, "variables": variables},
+        "interpreter": {"executable": "/opt/unsloth-venv/bin/python3"}}},
+        "configuration": {"document": {"model": {
+            "ref": "Example/Model", "revision": "a" * 40}}}}
+    path = engine.parent / "control/workload.json"
+    path.write_text(json.dumps(workload, sort_keys=True, separators=(",", ":")))
+    flags.update({"worker_context": True,
+        "expected_workload_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "expected_runtime_sha256": hashlib.sha256(
+            (engine / "Trainers/sft/runtime_v1.py").read_bytes()).hexdigest(),
+        "expected_trainer_sha256": hashlib.sha256(
+            (engine / "Trainers/sft/train_sft.py").read_bytes()).hexdigest()})
+    return flags, path
+
+
+def test_worker_prefix_excludes_unsloth_and_all_trainer_calls() -> None:
+    raw = (ROOT / "Trainers/sft/train_sft.py").read_bytes()
+    boundary = diagnostic._trainer_prefix_boundary(raw)
+    prefix = "".join(raw.decode().splitlines(keepends=True)[:boundary])
+    tree = ast.parse(prefix)
+    assert isinstance(tree.body[-1], ast.Import)
+    assert [alias.name for alias in tree.body[-1].names] == ["torch"]
+    assert "UNSLOTH_IMPORT" not in prefix
+    assert "from unsloth import" not in prefix
+    assert "TRAIN_CALL" not in prefix
+    assert "MODEL_SNAPSHOT" not in prefix
+    assert "if __name__" not in prefix
+    for old, new in (('"TORCH_IMPORT"', '"UNSLOTH_IMPORT"'),
+                     ('import torch  # noqa: E402', 'from unsloth import x')):
+        with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+            diagnostic._trainer_prefix_boundary(raw.replace(old.encode(), new.encode(), 1))
+
+
+def test_worker_context_source_and_workload_drift_reject_before_effect(tmp_path: Path,
+                                                                      monkeypatch) -> None:
+    flags, workload = _stage_worker_context(tmp_path)
+    docker, config, state = _fake_docker(tmp_path)
+    monkeypatch.setattr(diagnostic, "_run", lambda *args, **kwargs: pytest.fail("Docker touched"))
+    workload.write_bytes(workload.read_bytes() + b" ")
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, **flags)
+    assert json.loads(state.read_text())["status"] == "absent"
+    assert not (tmp_path / "out").exists()
+
+
+def test_worker_context_program_is_isolated_and_excludes_trainer_main(tmp_path: Path) -> None:
+    flags, _workload = _stage_worker_context(tmp_path)
+    identity = diagnostic._worker_context_identity(
+        flags["source_root"], flags["expected_workload_sha256"],
+        flags["expected_runtime_sha256"], flags["expected_trainer_sha256"],
+        flags["expected_closure_digest"])
+    probe = diagnostic._worker_probe(identity, flags["expected_closure_digest"])
+    ast.parse(probe)
+    ast.parse(diagnostic._WORKER_PREFIX_CHILD.replace(
+        "EXPECTED_TRAINER_SHA256", flags["expected_trainer_sha256"]))
+    assert "EXPECTED_" not in probe
+    assert "CHILD_SOURCE_B64" not in probe
+    assert "process=subprocess.Popen([sys.executable,'-I','-c'" in probe
+    assert "runpy.run_path(str(root/'tuner/runtime/offline_sft_worker.py')" in diagnostic._WORKER_PREFIX_CHILD
+    assert "runpy.run_path(str(trainer)" not in diagnostic._WORKER_PREFIX_CHILD
+    assert "exec(compile(tree,str(trainer),'exec'),namespace)" in diagnostic._WORKER_PREFIX_CHILD
+    assert "lines[:positions[2]]" in diagnostic._WORKER_PREFIX_CHILD
+    assert identity["child_env_sha256"] != hashlib.sha256(b"").hexdigest()
+
+
+def test_worker_context_requires_independent_r2_hashes_before_docker(tmp_path: Path,
+                                                                      monkeypatch) -> None:
+    flags, _workload = _stage_worker_context(tmp_path)
+    flags.pop("expected_workload_sha256")
+    docker, config, state = _fake_docker(tmp_path)
+    monkeypatch.setattr(diagnostic, "_run", lambda *args, **kwargs: pytest.fail("Docker touched"))
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, **flags)
+    assert json.loads(state.read_text())["status"] == "absent"
+    assert not (tmp_path / "out").exists()
+
+
+def test_worker_context_rechecks_drift_after_create_without_start(tmp_path: Path,
+                                                                   monkeypatch) -> None:
+    flags, workload = _stage_worker_context(tmp_path)
+    docker, config, state = _fake_docker(tmp_path)
+    original = diagnostic._inspect_owned
+    changed = False
+
+    def inspect(*args, **kwargs):
+        nonlocal changed
+        result = original(*args, **kwargs)
+        if not changed and result[0] == "created":
+            workload.write_bytes(workload.read_bytes() + b" ")
+            changed = True
+        return result
+
+    monkeypatch.setattr(diagnostic, "_inspect_owned", inspect)
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, **flags)
+    assert json.loads(state.read_text())["status"] == "created"
+    assert (tmp_path / "out/claim.json").exists()
+    assert not (tmp_path / "out/result.json").exists()
+    with pytest.raises(ValueError, match="OUTPUT_INVALID"):
+        _call(tmp_path, docker, config, **flags)
 
 
 def test_real_cli_output_budget_and_timeout(tmp_path: Path) -> None:

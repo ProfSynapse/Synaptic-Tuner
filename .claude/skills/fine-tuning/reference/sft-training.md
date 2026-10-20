@@ -534,6 +534,20 @@ nor loads a model; a PASS or failure cannot retrospectively diagnose an
 earlier trainer attempt. See the exact proposed command and remaining
 environment/user/filesystem gaps in the r2 diagnosis note.
 
+The optional `--worker-context` mode requires independently reviewed
+`--expected-workload-sha256`, `--expected-runtime-sha256`, and
+`--expected-trainer-sha256` alongside guarded source commitments. It
+reconstructs the pinned workload's isolated child environment, launches a
+separate `-I` child, loads the authenticated worker closure and guard, and
+executes only the authenticated trainer prefix through `import torch`.
+The prefix excludes the `UNSLOTH_IMPORT` marker and all later trainer/model
+code. It records closed environment, path, file and cwd digests and keeps the
+existing claim, output budget, deadline and owned cleanup. Its writable
+`/artifacts` is a small private tmpfs with no model weights. Review the exact
+workload/source hashes, device scope, host user, caps and filesystem before
+each fresh use. A reconstructed child environment is a source-and-plan
+deduction; it is not a historical capture of the failed child.
+
 After an intentional worker source change, check and refresh existing
 manifests with the checked-in maintainers in dependency order:
 `regenerate_offline_sft_worker_closure.py`,

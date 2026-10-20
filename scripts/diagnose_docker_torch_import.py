@@ -7,6 +7,8 @@ the new container and writes only closed results to a fresh private directory.
 from __future__ import annotations
 
 import argparse
+import ast
+import base64
 import hashlib
 import json
 import os
@@ -34,6 +36,17 @@ _REASONS = frozenset({"DAEMON_ID_INVALID", "INPUT_INVALID", "DOCKER_INVALID",
 _CLI_BUDGET = 8192
 _RUN_SECONDS = 120
 _HIDDEN_GPU_ENV = ",'CUDA_VISIBLE_DEVICES':'','NVIDIA_VISIBLE_DEVICES':'void'"
+_R2_ROOTS = {"engine": "/source/engine", "project": "/source/project",
+    "artifacts": "/artifacts/run/artifacts", "state": "/artifacts/run/state",
+    "tracking": "/artifacts/run/tracking", "cache": "/artifacts/run/cache",
+    "tmp": "/artifacts/run/tmp"}
+_R2_ENV_KEYS = frozenset({"PATH", "PYTHONPATH", "PYTHONNOUSERSITE",
+    "PYTHONSAFEPATH", "HF_HOME", "HF_HUB_OFFLINE", "TRANSFORMERS_CACHE",
+    "TRANSFORMERS_OFFLINE", "WANDB_DISABLED", "SYNAPTIC_ENGINE_ROOT",
+    "SYNAPTIC_PROJECT_ROOT", "SYNAPTIC_ARTIFACT_ROOT", "SYNAPTIC_STATE_ROOT",
+    "SYNAPTIC_TRACKING_ROOT", "SYNAPTIC_CACHE_ROOT", "SYNAPTIC_TMP_ROOT"})
+_ROOT_ENV = {name: "SYNAPTIC_" + name.upper() + "_ROOT" for name in _R2_ROOTS}
+_ROOT_ENV["artifacts"] = "SYNAPTIC_ARTIFACT_ROOT"
 _INSPECT = "{{json .Id}}\n{{json .Name}}\n{{json .Image}}\n{{json .Config.Labels}}\n{{json .State.Status}}\n{{json .State.ExitCode}}"
 
 # This fixed program never formats an exception, inspects its attributes, or
@@ -101,6 +114,149 @@ except RuntimeError:
 except BaseException:
  category='OTHER'
 os.write(report_fd,(json.dumps({'schema_version':'synaptic-docker-torch-import-child/v1','category':category,'stage':stage},sort_keys=True,separators=(',',':'))+'\\n').encode('ascii'))
+os.close(report_fd)
+"""
+
+# A second -I interpreter receives the reconstructed offline child environment.
+# Only the authenticated trainer prefix is compiled.  Its final statement is
+# import torch; the UNSLOTH_IMPORT marker and every later byte are excluded.
+_WORKER_PREFIX_CHILD = """import hashlib,json,os,sys
+report_fd=os.dup(1)
+null_fd=os.open('/dev/null',os.O_WRONLY)
+os.dup2(null_fd,1);os.dup2(null_fd,2);os.close(null_fd)
+from pathlib import Path
+stage='WORKER_IMPORT'
+category='OTHER'
+context={}
+try:
+ if sys.flags.isolated!=1 or sys.flags.no_user_site!=1 or not sys.flags.safe_path:
+  raise ValueError()
+ if os.environ.get('PYTHONNOUSERSITE')!='1' or os.environ.get('PYTHONSAFEPATH')!='1':
+  raise ValueError()
+ root=Path('/source/engine')
+ import runpy
+ worker=runpy.run_path(str(root/'tuner/runtime/offline_sft_worker.py'),run_name='__worker_diagnostic__')
+ stage='WORKER_CLOSURE'
+ closure=worker['load_offline_sft_worker_environment'](os.environ,engine_root=root)
+ stage='WORKER_GUARD'
+ worker['verify_loaded_owned_module_origins'](closure,engine_root=root)
+ worker['install_owned_module_guard'](closure,engine_root=root)
+ trainer=root/'Trainers/sft/train_sft.py'
+ sys.path[:0]=[str(trainer.parent),str(root)]
+ stage='TRAINER_PREFIX'
+ with trainer.open('rb') as stream:
+  source=stream.read(1024*1024+1)
+ if len(source)>1024*1024:
+  raise ValueError()
+ if hashlib.sha256(source).hexdigest()!='EXPECTED_TRAINER_SHA256':
+  raise ValueError()
+ lines=source.decode('utf-8').splitlines(keepends=True)
+ markers=('_mark_packaged_runtime_phase("BOOTSTRAP_ENV")','_mark_packaged_runtime_phase("TORCH_IMPORT")','_mark_packaged_runtime_phase("UNSLOTH_IMPORT")')
+ positions=[next((i for i,line in enumerate(lines) if line.strip()==marker),-1) for marker in markers]
+ if positions[0]<0 or not positions[0]<positions[1]<positions[2] or any(sum(line.strip()==marker for line in lines)!=1 for marker in markers):
+  raise ValueError()
+ if lines[positions[1]+1].strip()!='import torch  # noqa: E402' or lines[positions[2]+1].strip()!='from unsloth import is_bfloat16_supported  # noqa: E402':
+  raise ValueError()
+ prefix=''.join(lines[:positions[2]])
+ import ast
+ tree=ast.parse(prefix,filename=str(trainer))
+ if not isinstance(tree.body[-1],ast.Import) or [alias.name for alias in tree.body[-1].names]!=['torch']:
+  raise ValueError()
+ if any(isinstance(node,(ast.Import,ast.ImportFrom)) and any(alias.name.split('.')[0] in ('unsloth','transformers','trl') for alias in node.names) for node in ast.walk(tree)):
+  raise ValueError()
+ context['environment_sha256']=hashlib.sha256(json.dumps(dict(os.environ),sort_keys=True,separators=(',',':')).encode()).hexdigest()
+ context['python_isolated']=True
+ context['cwd_sha256']=hashlib.sha256(os.getcwd().encode()).hexdigest()
+ context['file_sha256']=hashlib.sha256(str(trainer).encode()).hexdigest()
+ def mark(value):
+  global stage
+  if value not in ('BOOTSTRAP_ENV','TORCH_IMPORT'):
+   raise ValueError()
+  stage=value
+  if value=='TORCH_IMPORT':
+   context['sys_path_sha256']=hashlib.sha256(json.dumps(sys.path,separators=(',',':')).encode()).hexdigest()
+ namespace={'__name__':'__main__','__file__':str(trainer),'__package__':'','__spec__':None,'__cached__':None,'__loader__':None,'__packaged_runtime_phase__':mark}
+ sys.argv=[str(trainer)]
+ exec(compile(tree,str(trainer),'exec'),namespace)
+ if stage!='TORCH_IMPORT':
+  raise ValueError()
+ category='PASS'
+except ModuleNotFoundError:
+ category='MODULE_NOT_FOUND'
+except ImportError:
+ category='IMPORT'
+except OSError:
+ category='OS'
+except RuntimeError:
+ category='RUNTIME'
+except BaseException:
+ category='OTHER'
+if category!='PASS':
+ context={}
+os.write(report_fd,(json.dumps({'schema_version':'synaptic-docker-torch-import-child/v1','category':category,'stage':stage,'context':context,'boundary':'BEFORE_UNSLOTH'},sort_keys=True,separators=(',',':'))+'\\n').encode('ascii'))
+os.close(report_fd)
+"""
+
+_WORKER_CONTEXT_PROBE = """import base64,hashlib,json,os,sys,subprocess
+report_fd=os.dup(1)
+null_fd=os.open('/dev/null',os.O_WRONLY)
+os.dup2(null_fd,1);os.dup2(null_fd,2);os.close(null_fd)
+from pathlib import Path
+stage='READ_WORKLOAD'
+category='OTHER'
+context={}
+try:
+ with Path('/source/control/workload.json').open('rb') as stream:
+  raw=stream.read(1024*1024+1)
+ if len(raw)>1024*1024:
+  raise ValueError()
+ if hashlib.sha256(raw).hexdigest()!='EXPECTED_WORKLOAD_SHA256':
+  raise ValueError()
+ workload=json.loads(raw)
+ runtime=workload['execution_source']['runtime']
+ roots=runtime['roots']
+ if roots!=EXPECTED_ROOTS or runtime['environment']['clear_inherited'] is not True:
+  raise ValueError()
+ planned=runtime['environment']['variables']
+ if set(planned)!=set(EXPECTED_ENV_KEYS) or any(type(v) is not str for v in planned.values()):
+  raise ValueError()
+ environment=dict(planned)
+ environment.pop('PYTHONPATH')
+ environment.update({'SYNAPTIC_WORKER_CLOSURE_MANIFEST':'/source/control/offline-sft-worker-v1.json','SYNAPTIC_WORKER_CLOSURE_DIGEST':'EXPECTED_CLOSURE_DIGEST'})
+ environment.update({key:value for key,value in ROOT_BINDINGS.items()})
+ model=workload['configuration']['document']['model']
+ ref=model['ref']; revision=model['revision']
+ if not isinstance(ref,str) or not isinstance(revision,str) or not __import__('re').fullmatch('[0-9a-f]{40}(?:[0-9a-f]{24})?',revision) or any(not __import__('re').fullmatch('[A-Za-z0-9][A-Za-z0-9._-]*',part) for part in ref.split('/')) or len(ref.split('/')) not in (1,2):
+  raise ValueError()
+ snapshot=roots['cache']+'/model/models--'+'--'.join(ref.split('/'))+'/snapshots/'+revision
+ environment.update({'SYNAPTIC_WORKLOAD_FINGERPRINT':hashlib.sha256(b'synaptic-training-workload/v1\\0'+raw).hexdigest(),'PYTHONNOUSERSITE':'1','PYTHONSAFEPATH':'1','HF_HOME':roots['cache']+'/huggingface','TRANSFORMERS_CACHE':roots['cache']+'/transformers','HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1','SYNAPTIC_MODEL_SNAPSHOT':snapshot,'WANDB_DISABLED':'true'})
+ os.umask(0o077)
+ Path('/artifacts/run').mkdir(mode=0o700)
+ for name in ('artifacts','state','tracking','cache','tmp'):
+  Path(roots[name]).mkdir(mode=0o700)
+ for name in ('huggingface','transformers'):
+  (Path(roots['cache'])/name).mkdir(mode=0o700,exist_ok=True)
+ stage='ISOLATED_CHILD'
+ child=base64.b64decode('CHILD_SOURCE_B64')
+ process=subprocess.Popen([sys.executable,'-I','-c',child.decode('utf-8')],cwd=roots['tmp'],env=environment,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+ payload=process.stdout.read(4097)
+ if len(payload)>4096:
+  process.kill();process.wait()
+  raise ValueError()
+ if process.wait()!=0:
+  raise ValueError()
+ result=json.loads(payload)
+ if set(result)!={'schema_version','category','stage','context','boundary'} or result['schema_version']!='synaptic-docker-torch-import-child/v1' or result['boundary']!='BEFORE_UNSLOTH' or result['category'] not in ('PASS','MODULE_NOT_FOUND','IMPORT','OS','RUNTIME','OTHER') or result['stage'] not in ('WORKER_IMPORT','WORKER_CLOSURE','WORKER_GUARD','TRAINER_PREFIX','BOOTSTRAP_ENV','TORCH_IMPORT') or not isinstance(result['context'],dict):
+  raise ValueError()
+ if result['category']=='PASS':
+  if result['stage']!='TORCH_IMPORT' or set(result['context'])!={'environment_sha256','python_isolated','cwd_sha256','file_sha256','sys_path_sha256'} or result['context']['python_isolated'] is not True or any(not isinstance(value,str) or not __import__('re').fullmatch('[0-9a-f]{64}',value) for key,value in result['context'].items() if key.endswith('_sha256')):
+   raise ValueError()
+ elif result['context']!={}:
+  raise ValueError()
+ category=result['category'];stage=result['stage'];context=result['context']
+except BaseException:
+ context={}
+os.write(report_fd,(json.dumps({'schema_version':'synaptic-docker-torch-import-child/v1','category':category,'stage':stage,'context':context,'boundary':'BEFORE_UNSLOTH'},sort_keys=True,separators=(',',':'))+'\\n').encode('ascii'))
 os.close(report_fd)
 """
 
@@ -230,6 +386,111 @@ def _source_identity(source_root: Path, source_lock: Path, expected_lock: str,
             "engine_commit": "0d515ae1ae235d0858802228ce4af8dba8fccd03"}
 
 
+def _trainer_prefix_boundary(raw: bytes) -> int:
+    """Validate the fixed marker sequence and return the first excluded line."""
+    lines = raw.decode("utf-8").splitlines(keepends=True)
+    markers = tuple(f'_mark_packaged_runtime_phase("{name}")' for name in
+                    ("BOOTSTRAP_ENV", "TORCH_IMPORT", "UNSLOTH_IMPORT"))
+    positions = []
+    for marker in markers:
+        matches = [i for i, line in enumerate(lines) if line.strip() == marker]
+        if len(matches) != 1:
+            raise ValueError("SOURCE_IDENTITY_INVALID")
+        positions.append(matches[0])
+    if (not positions[0] < positions[1] < positions[2]
+            or lines[positions[1] + 1].strip() != "import torch  # noqa: E402"
+            or lines[positions[2] + 1].strip() !=
+            "from unsloth import is_bfloat16_supported  # noqa: E402"):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    prefix = "".join(lines[:positions[2]])
+    tree = ast.parse(prefix)
+    if (not isinstance(tree.body[-1], ast.Import)
+            or [alias.name for alias in tree.body[-1].names] != ["torch"]
+            or any(isinstance(node, ast.ImportFrom) and node.module is not None and
+                   node.module.split(".")[0] in {"unsloth", "transformers", "trl"}
+                   for node in ast.walk(tree))
+            or any(isinstance(node, ast.Import) and
+                   any(alias.name.split(".")[0] in {"unsloth", "transformers", "trl"}
+                       for alias in node.names) for node in ast.walk(tree))):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    return positions[2]
+
+
+def _worker_context_identity(source_root: Path, expected_workload: str,
+                             expected_runtime: str, expected_trainer: str,
+                             expected_closure: str) -> dict[str, str]:
+    if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in
+           (expected_workload, expected_runtime, expected_trainer, expected_closure)):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    workload_raw = _read(source_root.parent / "control/workload.json", 1024 * 1024)
+    runtime_raw = _read(source_root / "Trainers/sft/runtime_v1.py", 1024 * 1024)
+    trainer_raw = _read(source_root / "Trainers/sft/train_sft.py", 1024 * 1024)
+    if (hashlib.sha256(workload_raw).hexdigest() != expected_workload
+            or hashlib.sha256(runtime_raw).hexdigest() != expected_runtime
+            or hashlib.sha256(trainer_raw).hexdigest() != expected_trainer):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    workload = json.loads(workload_raw)
+    runtime = workload["execution_source"]["runtime"]
+    planned = runtime["environment"]["variables"]
+    if (runtime["roots"] != _R2_ROOTS
+            or runtime["environment"]["clear_inherited"] is not True
+            or set(planned) != _R2_ENV_KEYS
+            or any(type(value) is not str for value in planned.values())
+            or any(planned[_ROOT_ENV[name]] != path for name, path in _R2_ROOTS.items())
+            or planned["PYTHONPATH"] != _R2_ROOTS["engine"]
+            or planned["HF_HUB_OFFLINE"] != "1"
+            or planned["TRANSFORMERS_OFFLINE"] != "1"
+            or runtime["interpreter"]["executable"] != "/opt/unsloth-venv/bin/python3"):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    _trainer_prefix_boundary(trainer_raw)
+    model = workload["configuration"]["document"]["model"]
+    ref, revision = model["ref"], model["revision"]
+    if (type(ref) is not str or type(revision) is not str
+            or len(ref.split("/")) not in (1, 2)
+            or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", part)
+                   for part in ref.split("/"))
+            or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", revision)):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    child_env = dict(planned)
+    child_env.pop("PYTHONPATH")
+    child_env.update({"SYNAPTIC_WORKER_CLOSURE_MANIFEST":
+                      "/source/control/offline-sft-worker-v1.json"})
+    child_env["SYNAPTIC_WORKER_CLOSURE_DIGEST"] = expected_closure
+    child_env.update({_ROOT_ENV[name]: value for name, value in _R2_ROOTS.items()})
+    child_env.update({"SYNAPTIC_WORKLOAD_FINGERPRINT": hashlib.sha256(
+        b"synaptic-training-workload/v1\0" + workload_raw).hexdigest(),
+        "PYTHONNOUSERSITE": "1", "PYTHONSAFEPATH": "1",
+        "HF_HOME": _R2_ROOTS["cache"] + "/huggingface",
+        "TRANSFORMERS_CACHE": _R2_ROOTS["cache"] + "/transformers",
+        "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+        "SYNAPTIC_MODEL_SNAPSHOT": _R2_ROOTS["cache"] + "/model/models--" +
+        "--".join(ref.split("/")) + "/snapshots/" + revision,
+        "WANDB_DISABLED": "true"})
+    return {"workload_sha256": expected_workload,
+            "runtime_sha256": expected_runtime,
+            "trainer_sha256": expected_trainer,
+            "child_env_sha256": hashlib.sha256(json.dumps(
+                child_env, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+
+
+def _worker_probe(identity: dict[str, str], closure: str) -> str:
+    child = _WORKER_PREFIX_CHILD.replace("EXPECTED_TRAINER_SHA256",
+                                         identity["trainer_sha256"])
+    probe = _WORKER_CONTEXT_PROBE
+    replacements = {"EXPECTED_WORKLOAD_SHA256": identity["workload_sha256"],
+                    "EXPECTED_CLOSURE_DIGEST": closure,
+                    "EXPECTED_ROOTS": repr(_R2_ROOTS),
+                    "EXPECTED_ENV_KEYS": repr(sorted(_R2_ENV_KEYS)),
+                    "ROOT_BINDINGS": repr({_ROOT_ENV[name]: value
+                                          for name, value in _R2_ROOTS.items()}),
+                    "CHILD_SOURCE_B64": base64.b64encode(child.encode()).decode()}
+    for key, value in replacements.items():
+        if probe.count(key) != 1:
+            raise ValueError("SOURCE_IDENTITY_INVALID")
+        probe = probe.replace(key, value)
+    return probe
+
+
 def _path_custody(path: Path) -> tuple[tuple[int, int, int], ...]:
     if not path.is_absolute():
         raise ValueError("SOURCE_IDENTITY_INVALID")
@@ -336,7 +597,15 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
              expected_source_lock_sha256: str | None = None,
              expected_manifest_sha256: str | None = None,
              expected_closure_digest: str | None = None,
-             gpu_device: str | None = None) -> dict[str, object]:
+             gpu_device: str | None = None, worker_context: bool = False,
+             expected_workload_sha256: str | None = None,
+             expected_runtime_sha256: str | None = None,
+             expected_trainer_sha256: str | None = None) -> dict[str, object]:
+    worker_values = (expected_workload_sha256, expected_runtime_sha256,
+                     expected_trainer_sha256)
+    if ((worker_context and (source_root is None or any(value is None for value in worker_values)))
+            or (not worker_context and any(value is not None for value in worker_values))):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
     if gpu_device not in (None, "0") or (gpu_device is not None and source_root is None):
         raise ValueError("GPU_SCOPE_INVALID")
     if not re.fullmatch(r"[0-9a-f-]{36}", daemon_id):
@@ -374,8 +643,11 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     source_identity = ({} if source_root is None else _source_identity(
         source_root, source_lock, expected_source_lock_sha256,
         expected_manifest_sha256, expected_closure_digest))
+    context_identity = ({} if not worker_context else _worker_context_identity(
+        source_root, *worker_values, expected_closure_digest))
     custody = (() if source_root is None else tuple(_path_custody(path) for path in
-        (source_root, source_root.parent / "control/offline-sft-worker-v1.json", source_lock)))
+        (source_root, source_root.parent / "control/offline-sft-worker-v1.json", source_lock,
+         *((source_root.parent / "control/workload.json",) if worker_context else ()))))
     authority = _authority(docker, docker_config)
     info = _run(authority, ("info", "--format", "{{.ID}}"))
     if info.stderr or _one_line(info.stdout) != daemon_id:
@@ -386,17 +658,21 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     output_dir.mkdir(mode=0o700)
     nonce = secrets.token_hex(16)
     name = "synaptic-torch-import-" + nonce
-    probe = _PROBE if source_root is None else _GUARDED_PROBE.replace(
-        "EXPECTED_CLOSURE_DIGEST", expected_closure_digest)
+    probe = (_worker_probe(context_identity, expected_closure_digest)
+             if worker_context else (_PROBE if source_root is None else
+             _GUARDED_PROBE.replace("EXPECTED_CLOSURE_DIGEST", expected_closure_digest)))
     if gpu_device is not None:
-        if probe.count(_HIDDEN_GPU_ENV) != 1:
+        if not worker_context and probe.count(_HIDDEN_GPU_ENV) != 1:
             raise ValueError("GPU_SCOPE_INVALID")
         # The r2 isolated child did not inherit either visibility variable.
         # The host device request is separately inspected before start.
-        probe = probe.replace(_HIDDEN_GPU_ENV, "")
+        if not worker_context:
+            probe = probe.replace(_HIDDEN_GPU_ENV, "")
     claim = {"schema_version": SCHEMA, "daemon_id": daemon_id, "image_id": image,
              "release_sha256": expected_release_sha256, "source_identity": source_identity,
-             "name": name, "scope": "bare" if source_root is None else "guarded",
+             "context_identity": context_identity,
+             "name": name, "scope": "worker_context" if worker_context else
+             ("bare" if source_root is None else "guarded"),
              "helper_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
              "probe_sha256": hashlib.sha256(probe.encode("utf-8")).hexdigest(),
              "docker_file_identity": list(authority[2]),
@@ -416,6 +692,8 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
             ("--user", f"{source_root.stat().st_uid}:{source_root.stat().st_gid}"))
     visibility = (("--env=NVIDIA_VISIBLE_DEVICES=void", "--env=CUDA_VISIBLE_DEVICES=")
                   if gpu_device is None else ("--gpus", "device=0"))
+    artifact_tmpfs = (("--tmpfs", "/artifacts:rw,nosuid,nodev,size=64m,mode=1777")
+                      if worker_context else ())
     command = (
         "container", "create", "--name", name, "--label", "ai.synapticlabs.torch-import.claim=" + label,
         "--pull=never", "--network=none", "--log-driver", "json-file",
@@ -423,6 +701,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
         "--read-only", "--cap-drop=ALL", "--runtime=runc",
         "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=4g",
         "--cpus=2", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
+        *artifact_tmpfs,
         *mount, *user,
         *visibility,
         "--workdir=/tmp", "--entrypoint", python,
@@ -430,7 +709,8 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     )
     if source_root is not None and tuple(_path_custody(path) for path in
             (source_root, source_root.parent / "control/offline-sft-worker-v1.json",
-             source_lock)) != custody:
+             source_lock, *((source_root.parent / "control/workload.json",)
+                           if worker_context else ()))) != custody:
         raise ValueError("SOURCE_IDENTITY_INVALID")
     _require_daemon(authority, daemon_id)
     try:
@@ -456,9 +736,13 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
             expected_source_lock_sha256, expected_manifest_sha256,
             expected_closure_digest) != source_identity:
         raise ValueError("SOURCE_IDENTITY_INVALID")
+    if worker_context and _worker_context_identity(
+            source_root, *worker_values, expected_closure_digest) != context_identity:
+        raise ValueError("SOURCE_IDENTITY_INVALID")
     if source_root is not None and tuple(_path_custody(path) for path in
             (source_root, source_root.parent / "control/offline-sft-worker-v1.json",
-             source_lock)) != custody:
+             source_lock, *((source_root.parent / "control/workload.json",)
+                           if worker_context else ()))) != custody:
         raise ValueError("SOURCE_IDENTITY_INVALID")
     deadline = time.monotonic() + _RUN_SECONDS
     _append(output_dir, {"phase": "START_CLAIMED", "container_id": cid})
@@ -507,12 +791,30 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     if result.stderr:
         raise ValueError("CHILD_OUTPUT_INVALID")
     child = json.loads(_one_line(result.stdout))
-    fields = {"schema_version", "category"} if source_root is None else {"schema_version", "category", "stage"}
+    fields = ({"schema_version", "category", "stage", "context", "boundary"}
+              if worker_context else ({"schema_version", "category"} if source_root is None
+              else {"schema_version", "category", "stage"}))
     if (type(child) is not dict or set(child) != fields
             or child["schema_version"] != "synaptic-docker-torch-import-child/v1"
             or child["category"] not in _CATEGORIES
-            or (source_root is not None and child["stage"] not in {"IMPORT_WORKER", "READ_MANIFEST",
+            or (worker_context and (child["boundary"] != "BEFORE_UNSLOTH"
+                or child["stage"] not in {"READ_WORKLOAD", "ISOLATED_CHILD",
+                    "WORKER_IMPORT", "WORKER_CLOSURE", "WORKER_GUARD",
+                    "TRAINER_PREFIX", "BOOTSTRAP_ENV", "TORCH_IMPORT"}
+                or type(child["context"]) is not dict
+                or (child["category"] == "PASS" and
+                    (child["stage"] != "TORCH_IMPORT" or
+                     set(child["context"]) != {"environment_sha256", "python_isolated",
+                        "cwd_sha256", "file_sha256", "sys_path_sha256"}
+                     or child["context"]["python_isolated"] is not True))
+                or (child["category"] != "PASS" and child["context"] != {})
+                or any(type(value) is not str or not re.fullmatch(r"[0-9a-f]{64}", value)
+                       for key, value in child["context"].items() if key.endswith("_sha256"))))
+            or (source_root is not None and not worker_context and child["stage"] not in {"IMPORT_WORKER", "READ_MANIFEST",
                 "LOAD_CLOSURE", "VERIFY_ORIGINS", "INSTALL_GUARD", "BOOTSTRAP_ENV", "TORCH_IMPORT"})):
+        raise ValueError("CHILD_OUTPUT_INVALID")
+    if (worker_context and child["category"] == "PASS"
+            and child["context"]["environment_sha256"] != context_identity["child_env_sha256"]):
         raise ValueError("CHILD_OUTPUT_INVALID")
     if _inspect_owned(authority, cid, name=name, label=label, image=image,
                       daemon_id=daemon_id)[0] not in {"exited", "dead"}:
@@ -524,11 +826,16 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
               "container_id": cid, "image_id": image, "daemon_id": daemon_id,
               "runtime_release_digest": digest,
               "training_executed": False, "gpu_used": None if gpu_device is not None else False,
-              "scope": "bare" if source_root is None else "guarded",
+              "scope": "worker_context" if worker_context else
+              ("bare" if source_root is None else "guarded"),
               "claim_sha256": label, "source_identity": source_identity,
+              "context_identity": context_identity,
               "terminal_observed": True}
     if source_root is not None:
         report["stage"] = child["stage"]
+    if worker_context:
+        report["context"] = child["context"]
+        report["boundary"] = child["boundary"]
     if gpu_device is not None:
         report["gpu_device"] = gpu_device
     with (output_dir / "result.json").open("x", encoding="ascii") as stream:
@@ -549,6 +856,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-manifest-sha256")
     parser.add_argument("--expected-closure-digest")
     parser.add_argument("--gpu-device")
+    parser.add_argument("--worker-context", action="store_true")
+    parser.add_argument("--expected-workload-sha256")
+    parser.add_argument("--expected-runtime-sha256")
+    parser.add_argument("--expected-trainer-sha256")
     args = parser.parse_args(argv)
     try:
         report = diagnose(docker=args.docker, docker_config=args.docker_config,
@@ -559,7 +870,10 @@ def main(argv: list[str] | None = None) -> int:
                           expected_source_lock_sha256=args.expected_source_lock_sha256,
                           expected_manifest_sha256=args.expected_manifest_sha256,
                           expected_closure_digest=args.expected_closure_digest,
-                          gpu_device=args.gpu_device)
+                          gpu_device=args.gpu_device, worker_context=args.worker_context,
+                          expected_workload_sha256=args.expected_workload_sha256,
+                          expected_runtime_sha256=args.expected_runtime_sha256,
+                          expected_trainer_sha256=args.expected_trainer_sha256)
     except BaseException as error:
         reason = error.args[0] if type(error) is ValueError and len(error.args) == 1 else None
         if type(reason) is not str or reason not in _REASONS:
