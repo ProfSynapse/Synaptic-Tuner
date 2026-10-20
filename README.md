@@ -2,7 +2,7 @@
 
 This dedicated host branch reuses the genuine archived smoke topology. It is not
 an engine development branch and must not be merged into engine main. The engine
-gitlink selects exact `0d515ae1ae235d0858802228ce4af8dba8fccd03`.
+gitlink selects exact `ba228d6c0e8859288b246c4b140774fa29c567a3`.
 
 `configuration/grpo.yaml` selects the checked-in unqualified SmolLM135 candidate,
 three steps/four generations and deterministic blue regex reward. `data/rows.jsonl`
@@ -23,4 +23,8 @@ reviewed exact CI, current scope and bounded fresh-attempt requirements. Existin
 explicit bounded session authorization remains applicable; the fixture and
 configuration alone are not effect authority.
 
-Fresh final source fixture; normal local plan/preparation only. No CPU image, GPU/model/update/reward qualification receipt is claimed. Earlier consumed 1da and d494 work remain preserved.
+Fresh ordinary GRPO source fixture; normal local plan/preparation only. No CPU
+image, GPU/model/update/reward qualification receipt is claimed. The consumed
+0d515 attempt and all earlier resources remain preserved. Any live attempt needs
+fresh create-only Volume, Secret, app and attempt names plus separate reviewed
+build/CPU and GPU admissions.
