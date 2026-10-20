@@ -5,11 +5,12 @@ with SYNAPTIC_COMPAT_CHECKOUT and SYNAPTIC_COMPAT_EXPECTATIONS. Ordinary source
 collection skips these installed-only assertions. The base consumer needs no
 pytest or optional SDK/ML/UI dependencies.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 import hashlib
 import importlib
 import importlib.resources
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -21,7 +22,7 @@ import textwrap
 
 _OPTIONAL = ('modal', 'huggingface_hub', 'docker', 'torch', 'transformers',
              'unsloth', 'vllm', 'sentence_transformers', 'numpy', 'pandas',
-             'sklearn', 'rich', 'e2b', 'e2b_code_interpreter')
+             'sklearn', 'rich', 'e2b', 'e2b_code_interpreter', 'mlx', 'mlx_lm')
 
 
 def _context():
@@ -139,6 +140,29 @@ def test_help_has_no_optional_import_or_process_network_effect():
         assert 'usage:' in result.stdout.lower(), module
 
 
+def test_native_diagnostic_has_no_project_or_compute_effects():
+    checkout, _ = _context()
+    from tuner.cli.main import main
+    _installed(importlib.import_module('tuner.handlers.native_training_observation'), checkout)
+    output = io.StringIO()
+    with _no_effects(), redirect_stdout(output):
+        try:
+            main(['doctor', 'native-training', '--json',
+                  '--manifest', 'nonexistent-native-doctor/synaptic.yaml'])
+        except SystemExit as error:
+            assert error.code == 0
+        else:
+            raise AssertionError('diagnostic did not exit')
+    report = json.loads(output.getvalue())
+    assert report['status'] == 'DIAGNOSTIC_ONLY'
+    assert report['platform']['system']['status'] == 'observed'
+    assert report['native_apple_candidate'] == (
+        report['platform']['system'].get('value') == 'Darwin'
+        and report['platform']['architecture'].get('value', '').lower() == 'arm64'
+    )
+    assert not any(name.partition('.')[0] in _OPTIONAL for name in sys.modules)
+
+
 def test_installed_console_and_project_manifest():
     _context()
     from tuner.project.manifest import load_project_manifest
@@ -169,6 +193,7 @@ if __name__ == '__main__':
     for check in (test_formal_exports_and_base_origins, test_installed_schemas_and_catalog_bytes,
                   test_real_installed_configuration_loaders,
                   test_help_has_no_optional_import_or_process_network_effect,
+                  test_native_diagnostic_has_no_project_or_compute_effects,
                   test_installed_console_and_project_manifest):
         check()
     print('Installed base compatibility checks passed')

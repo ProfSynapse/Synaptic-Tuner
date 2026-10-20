@@ -97,6 +97,11 @@ nor success on one platform qualifies the other. Cross-backend model/adapter
 formats and any conversion need explicit compatibility evidence. Preserve the
 same host ownership, source/input lineage and no-uncertain-replay rules.
 
+The [native desktop implementation plan](native-desktop-training-api-v1.md)
+records the completed legacy Mac audit, reusable boundaries and remaining
+runtime/provider work. `synaptic doctor native-training --json` provides a
+read-only candidate report; it does not qualify a native training runtime.
+
 ## Current release status — 2026-10-20, resumed qualification
 
 [#258](https://github.com/ProfSynapse/Synaptic-Tuner/pull/258) merged after all

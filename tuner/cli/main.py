@@ -224,6 +224,14 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     try:
+        if (
+            getattr(args, "command", None) == "doctor"
+            and getattr(args, "subcommand", None) == "native-training"
+        ):
+            # Machine metadata does not require project discovery or dotenv.
+            # Route invalid flags to the same read-only handler before either.
+            sys.exit(route_command(args))
+
         # Project discovery intentionally precedes dotenv loading. Existing
         # process environment participates in discovery and always wins over
         # values loaded from the selected project/engine env file.

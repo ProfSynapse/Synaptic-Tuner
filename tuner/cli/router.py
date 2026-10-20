@@ -220,6 +220,7 @@ COMMAND_ROUTES: dict[str, Route] = {
 # `doctor <subcommand>` routes (dispatched by _run_doctor).
 DOCTOR_SUBCOMMAND_ROUTES: dict[str, Route] = {
     "sft-mask": Route(_H + "sft_mask_doctor_handler:SFTMaskDoctorHandler", _run_with_context),
+    "native-training": Route(_H + "native_training_doctor_handler:NativeTrainingDoctorHandler", _run_with_context),
 }
 
 # `train --job-config` is a managed-provider job, not the interactive trainer.
@@ -277,10 +278,14 @@ def route_command(args: Namespace, context: ProjectContext | None = None) -> int
         >>> exit_code = route_command(parser.parse_args(['doctor', '--fix']))
         >>> exit_code = route_command(parser.parse_args(['list', 'datasets']))
     """
-    context = context or _default_context()
-
     json_mode = getattr(args, 'json', False)
     command = getattr(args, 'command', None)
+
+    if command == "doctor" and getattr(args, "subcommand", None) == "native-training":
+        route = DOCTOR_SUBCOMMAND_ROUTES["native-training"]
+        return _run_target(route.target, route.run, args, None, json_mode)
+
+    context = context or _default_context()
 
     if not command:
         # JSON mode without a command is an error (the interactive menu needs input).
