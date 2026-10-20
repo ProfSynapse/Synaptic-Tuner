@@ -205,10 +205,17 @@ def test_observed_exact_cdn_is_allowed_for_bounded_member_bytes(candidate):
     initial = Request("https://huggingface.co/reviewed/model/resolve/" + "a" * 40 + "/model.safetensors")
     handler = preparation._RestrictedRedirect(preparation._REDIRECT_HOSTS, 2)
     assert handler.redirect_request(initial, None, 302, "", {}, cdn).full_url == cdn
+    assert preparation._origin_class(cdn) == "official_cdn_aws_us"
+    preparation._url_host(cdn, preparation._REDIRECT_HOSTS)
     for rejected in ("https://us.aws.cdn.hf.co.evil.test/file",
-                     "http://us.aws.cdn.hf.co/file"):
+                     "http://us.aws.cdn.hf.co/file",
+                     "https://@us.aws.cdn.hf.co/file",
+                     "https://:@us.aws.cdn.hf.co/file",
+                     "https://user@us.aws.cdn.hf.co/file",
+                     "https://user:pass@us.aws.cdn.hf.co/file"):
         with pytest.raises(ValueError, match="HTTPS destination"):
             preparation._url_host(rejected, preparation._REDIRECT_HOSTS)
+        assert preparation._origin_class(rejected) != "official_cdn_aws_us"
     with pytest.raises(ValueError, match="HTTPS destination"):
         handler.redirect_request(initial, None, 302, "", {}, "https://unreviewed.example/file")
 

@@ -205,7 +205,8 @@ class _NoRedirect(HTTPRedirectHandler):
 def _origin_class(url):
     try:
         parsed = urlsplit(url)
-        if (parsed.scheme != "https" or parsed.username or parsed.password
+        if (parsed.scheme != "https" or parsed.username is not None
+                or parsed.password is not None
                 or parsed.port not in (None, 443) or parsed.fragment):
             return "invalid_origin"
         return _OFFICIAL_ORIGIN_CLASSES.get(parsed.hostname, "unrecognized_origin")
@@ -305,7 +306,8 @@ def _upstream(member, raw):
 def _url_host(url, allowed):
     parsed = urlsplit(url)
     if (parsed.scheme != "https" or parsed.hostname not in allowed
-            or parsed.port not in (None, 443) or parsed.username or parsed.password
+            or parsed.port not in (None, 443) or parsed.username is not None
+            or parsed.password is not None
             or parsed.fragment):
         raise ValueError("model HTTPS destination differs")
 
