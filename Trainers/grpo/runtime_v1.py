@@ -468,10 +468,16 @@ def run_grpo(*, config, dataset_bytes, reward_documents, reward_schema,
     args = build_grpo_config(config, output_root / 'checkpoints',
                            config_class=deps['config_class'], bf16_supported=deps['bf16_supported'])
     helper = deps['model_loader']
+    # Unsloth's patched GRPOTrainer checks the loaded model dtype against the
+    # effective GRPOConfig precision. Its loader otherwise chooses BF16 on a
+    # BF16-capable GPU even when the retained recipe requested FP16 training.
+    model_dtype = config['model'].get('dtype')
+    if model_dtype is None:
+        model_dtype = 'bfloat16' if args.bf16 else 'float16' if args.fp16 else None
     mark("MODEL_LIBRARY_LOAD")
     model, tokenizer, is_vl = helper.load_model_and_tokenizer(
         str(model_snapshot), max_seq_length=config['model']['max_seq_length'],
-        dtype=config['model'].get('dtype'), load_in_4bit=config['model'].get('load_in_4bit', True),
+        dtype=model_dtype, load_in_4bit=config['model'].get('load_in_4bit', True),
         offline=True)
     if is_vl:
         raise ValueError("retained GRPO requires text model")
