@@ -14,7 +14,8 @@ SFT, GRPO, evaluation/reports/comparison and artifacts, with durable host
 composition, restart recovery, cancellation and reconciliation. The initial
 Syntunia integration targets Modal SFT and GRPO. HF Jobs qualification is
 paused by the owner as of 2026-10-20 and is no longer an immediate integration
-prerequisite. Docker release scope remains under discussion. GRPO includes
+prerequisite. Desktop local training on NVIDIA and Apple silicon is required;
+Docker/CUDA covers the NVIDIA lane, with a separate native macOS GPU lane. GRPO includes
 one qualified provider first; Modal is the selected initial
 candidate because its GRPO stack exists, not because that route is qualified.
 Docker/HF GRPO parity is deferred. `321a085f` is the historical planning
@@ -52,8 +53,11 @@ publication is a distinct destination and is not automatically deferred.
    stage evidence is not proof of the full joined journey or model serving.
 4. Qualify genuine Modal GRPO on the release and Syntunia readiness path, with
    changed parameters and grouped reward evidence; the owner explicitly kept
-   GRPO required. Docker completion/lifecycle scope remains under discussion.
-   Modal operation does not depend on a Docker host.
+   GRPO required. Also qualify required desktop local training: NVIDIA through
+   Docker/CUDA and Apple silicon through a native macOS GPU runtime. Audit and
+   reuse the existing MLX SFT trainer before adding another implementation.
+   Method parity must be explicit; neither legacy MLX SFT nor Modal GRPO
+   establishes GRPO support on a local backend.
 5. Reconcile final source/package evidence, support docs and release review
    before any stable tag. The broader public release scope must name supported
    providers explicitly; paused HF cannot be advertised as qualified.
@@ -63,6 +67,35 @@ items already have implementations and scoped evidence in later sections; audit
 that evidence before scheduling duplicate work. Syntunia HTTP/authentication,
 product persistence and multi-tenant operation are host work, not added by this
 handoff. No paid job, runtime change or Syntunia deployment is needed to prepare it.
+
+### Required desktop hardware coverage — owner decision, 2026-10-20
+
+Local training is a core desktop feature. Keep Docker and its pending NVIDIA
+qualification on the path; Apple-silicon GPU training is an additional required
+runtime lane, not evidence supplied by the existing CUDA container.
+
+[Docker's documentation](https://docs.docker.com/desktop/features/gpu/) scopes
+Linux-container GPU passthrough in Docker Desktop to Windows/WSL2 NVIDIA GPUs;
+GPU-accelerated inference products are distinct. Apple documents native
+[PyTorch/Metal training](https://developer.apple.com/metal/pytorch/), and
+[MLX-LM](https://github.com/ml-explore/mlx-lm) supports Apple-silicon fine-tuning.
+The engineering direction is therefore a shared public API with separate
+qualified execution runtimes, not one universal GPU image.
+
+The repo already contains `Trainers/mlx_sft_mac` and
+`tuner/backends/training/mac_backend.py`. Audit their reusable training code,
+configuration, data/tokenizer handling and artifact outputs before implementing
+an API v1 adapter. Existing broad dependency ranges and legacy CLI routing are
+not a locked, durable v1 runtime. Do not select a replacement framework without
+this audit or weaken the CUDA runtime's existing pins to make it appear portable.
+
+Acceptance must enumerate OS/architecture, GPU and memory requirements, pinned
+runtime/model/tokenizer, SFT and GRPO method availability, real training updates,
+progress limitations, cancellation, fresh-process known-run reads and verified
+artifacts. Test on real NVIDIA and Apple hardware; neither CPU/macOS import CI
+nor success on one platform qualifies the other. Cross-backend model/adapter
+formats and any conversion need explicit compatibility evidence. Preserve the
+same host ownership, source/input lineage and no-uncertain-replay rules.
 
 ## Current release status — 2026-10-20, resumed qualification
 

@@ -35,7 +35,9 @@ For a Modal-backed application, start with the
 [durable consumer walkthrough](examples/training_qualification/modal-consumer.md).
 It covers the existing installed training and retained-run path, the public
 Python boundary, and the storage/authority Syntunia must own. HF Jobs
-qualification is paused; Modal GRPO remains required and Docker scope is under review.
+qualification is paused; Modal GRPO and desktop local training on NVIDIA and
+Apple silicon remain required. Docker/CUDA and native macOS GPU execution need
+separate qualification.
 
 Download a reviewed wheel from its GitHub release, then install that exact file
 and inspect the packaged CLI:

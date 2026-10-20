@@ -13,8 +13,9 @@ implemented behavior from live qualification. Two bounded SFT runs on
 `864a9bcc` passed completion and native artifact verification; the second passed
 fresh-process observation/readback. Active cancellation, caller-loss recovery
 and a joined training-to-evaluation product workflow remain qualification work.
-HF Jobs is paused. Docker scope is under discussion; Modal execution does not
-depend on a Docker host.
+HF Jobs is paused. Desktop local training on NVIDIA and Apple silicon is also
+required: Docker/CUDA and a native macOS GPU runtime need separate qualification.
+This Modal walkthrough does not qualify either local backend.
 
 ## 1. Prepare the consumer and installation
 
