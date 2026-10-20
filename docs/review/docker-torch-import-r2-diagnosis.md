@@ -415,3 +415,68 @@ Root must review the pushed commit and exact command, repeat the current
 identity/custody/device preflight, and save/read a fresh one-use admission
 before any container start. No r10 container, GPU request, ML import or
 training effect occurred.
+
+## r11 single worker-context import result
+
+Root accepted the r10 repair and authorized exactly one run of the unchanged
+r9 command above. Before Docker effects, the fresh private mode-0700 remote
+parent `torch-import-r9-20261020` had no `worker-context-gpu0-1` child.
+Its clean detached checkout matched pushed
+`4b56cdcdb6c4d5f35d5e7af2a03e322f39c50622`; helper SHA-256 was
+`c7543b50c4aa41b91ed8293474b4f1719c69342550515a8d367b06dd3f1fd229`
+and trusted closure verifier SHA-256 was
+`2304eeb00667954510c34cc4aacaa818532a301fbeabf04c2fb165d6cd1d70b5`.
+The exact release, source lock, manifest, closure, workload, runtime and trainer
+hashes in the command matched read-only remote validation. The explicit
+Docker daemon and image IDs matched. Source files and ancestors had private
+owner/root custody, no symlink or group/world write; a process/descriptor
+scan found no matching active preparer or open writer. This does not
+atomically freeze host files, so private custody remains a scope assumption.
+Windows and WSL reported no active compute-process rows for device 0
+(`GPU-ac4398bb-fc15-d722-b39c-2790b4b5f9cc`, RTX 3090). The exact
+command and preflight were saved and read back in the Nexus one-use state
+`Docker Torch r11 worker-context one-use admission — 2026-10-20` before
+start. An immediate checkout/source/output/GPU recheck passed.
+
+The single helper invocation returned closed `PASS` at `TORCH_IMPORT` with
+`boundary=BEFORE_UNSLOTH`, `scope=worker_context`,
+`training_executed=false` and `gpu_used=null` (actual device use was not
+measured). The supplied child environment SHA-256 was
+`1bb0e06d9708dd6fd637f59eaf134dcbe8165f43e120a0b94daad6c79a63699c`.
+The observed preamble environment SHA-256 was
+`a1eeabbf01741b374ca4e410d62119cf8d882b97d33da962257ec7570bdcb08c`,
+with the only accepted startup delta `LC_CTYPE_C_UTF8`. The reported
+cwd, trainer `__file__` and `sys.path` digests were respectively
+`55846bb91af8c8ccb1548b812885d0ca9d413863279b9030c6a6a1b2327d00a6`,
+`4863bf5f38bf9e9cf9b2c8d44473326e77b6aa2c55d9fe039fd20092bb68ad9a`,
+and `fbb8a8e665063c6fa0c114cb5edc272b4ecdbbab8c521dac9653a2803c1c0a0d`.
+No raw environment, argv or exception text was published.
+
+Container
+`d829fc00a2f9a48437bae1ccfd562d7846b97228b4c526759928fe98c9a618cd`
+is retained with exact claim label
+`db3afc2a9434fadb65ecaf38d97f26b7e1f7039ea66265554ab5615071209bc4`.
+Independent Docker inspection confirmed image/daemon ownership, the single
+GPU device-0 request, 2 CPUs, 4 GiB, 64 pids, network `none`, read-only root,
+all capabilities dropped, UID/GID 1000, a read-only `/source` mount, private
+64-MiB `/artifacts` tmpfs, and no model mount. It started at
+`2026-10-20T15:58:15.445432531Z` and finished at
+`2026-10-20T15:58:19.681177983Z`, independently observed `exited` with
+code 0. Events contain one `CREATE_CLAIMED`, `CREATED`,
+`START_CLAIMED`, `STARTED` and `TERMINAL_OBSERVED`; no stop or deletion
+was needed. The private `worker-context-gpu0-1` evidence has SHA-256:
+
+| File | SHA-256 |
+| --- | --- |
+| `claim.json` | `e65eed000fa69e18d387d18484b0055eff1cf4a9dbb349d645e311a25b5fe99a` |
+| `events.jsonl` | `e5a7460c94e94b90f1c3142ed505e34c5bf2c8854447c26ad74b0b840b9bddb1` |
+| `result.json` | `1d4e4a9d2e2d9f43a2250b6634c63c270852e0b2babd027d61779f30306e054d` |
+
+Read-only inspection still found the earlier r2/r4/r6/r8 containers retained
+in their previous terminal states. The r11 claim is consumed; no second probe
+or training followed. This PASS establishes Torch import through the
+authenticated, source-derived child environment and trainer prefix under the
+specified reduced host context. It is not a capture of r2's historical child
+and leaves root/default capabilities, 16-GiB memory, writable root, actual
+model cache and full parent preparation different. The r2 failure cause
+remains unproven.
