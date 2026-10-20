@@ -200,6 +200,8 @@ mount's `run/cache`. Optional `model_seed_root` points to an independently held,
 private read-only repository cache; each present member is copied into fresh roots
 and checked against current pinned Git/LFS metadata. A corrupt, redirected or
 changed seed member rejects; absent members use the normal cold download path.
+An absent entire pinned revision under an otherwise private seed is also a
+cold miss; an existing redirected revision or member rejects.
 The seed's old claim and bytes stay untouched and never become new authority.
 The native snapshot validator checks the resulting offline path and a complete
 bounded file inventory is retained in `model-preparation.json`.
@@ -207,7 +209,12 @@ bounded file inventory is retained in `model-preparation.json`.
 `prepare` first rechecks that receipt and actual model bytes against its declared
 configuration, then authenticates fresh pushed source and compiles material. Its
 consumer binds the exact receipt bytes; public `start` rechecks the model inventory
-before Docker effects. The source mount remains absent until the source stage.
+before Docker effects. Public start retains its own committed receipt copy.
+Public `plan` authenticates receipt identity but does not attest current model
+bytes; `start` performs that live check.
+Later cold observe/cancel/reconcile/verify/download authenticate that retained
+receipt, configuration and run identity without reopening weights or depending
+on the preparation root. The source mount remains absent until the source stage.
 Writable runtime directories are private and disjoint; the exact prepared-input
 slot is never adopted. Each model and source root is one-use. A failed or uncertain
 model preparation cannot be replayed under the same claim.

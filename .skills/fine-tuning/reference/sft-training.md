@@ -456,7 +456,10 @@ then authenticates fresh source and existing immutable v1 input before publishin
 canonical material. A private read-only seed cache may reduce downloads only
 after pinned upstream metadata and every reused Git/LFS member are verified.
 The old seed claim is never adopted. `prepare` binds the complete model receipt;
-public start rechecks its bytes before Docker effects. See `examples/training_qualification/README.md`
+public start rechecks its bytes before Docker effects. A missing pinned revision
+in an otherwise private seed takes the normal cold path; redirects reject.
+Cold public reads use the receipt retained with the attempt and do not require
+current model weights or the original preparation root. See `examples/training_qualification/README.md`
 for the template and exact commands. Full public preflight remains deferred
 until host composition; missing image/runtime/model qualification still refuses.
 The CPU `probe-filesystem` command measures actual native writer modes and host

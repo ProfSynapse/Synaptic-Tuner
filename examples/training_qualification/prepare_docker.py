@@ -530,7 +530,9 @@ def prepare_model(
             # Copy a private repository seed into this attempt's fresh cache.
             # The unchanged shared preparer authenticates every reused member
             # against pinned upstream Git/LFS metadata before destination use.
-            for row in docker_host.model_inventory(seed, seed / relative):
+            for row in docker_host.model_inventory(
+                seed, seed / relative, missing_ok=True
+            ):
                 name = Path(row["path"])
                 copied = copy_regular(
                     seed, seed / relative / name, persistent,

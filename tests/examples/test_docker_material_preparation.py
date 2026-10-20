@@ -4,9 +4,11 @@
 import importlib.util
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
+from contextlib import contextmanager
 import pytest
 
 from tests.examples.test_hf_material_preparation import configured as source_configured  # noqa: F401
@@ -232,8 +234,9 @@ def test_model_first_claim_precedes_source_and_receipt_binds_fresh_prepare(confi
     assert "model_preparation_file" in consumer["docker"]
     assert not source.exists()
     member.write_text("changed")
+    assert helper.docker_host.preview(consumer)["run"]
     with pytest.raises(ValueError):
-        helper.docker_host.preview(consumer)
+        helper.docker_host._components(consumer, live_model_bytes=True)
 
 
 def test_model_first_failure_consumes_only_fresh_model_claim(configured):
@@ -273,7 +276,10 @@ def test_model_first_rejects_source_created_during_expensive_preparation(configu
     assert not (Path(c["model_output_root"]) / "model-preparation.json").exists()
 
 
-@pytest.mark.parametrize("seed_state", ["verified", "corrupt", "symlink", "mutated", "cold"])
+@pytest.mark.parametrize("seed_state", [
+    "verified", "corrupt", "symlink", "revision_symlink", "mutated",
+    "absent_revision", "cold",
+])
 def test_model_first_seed_is_independently_verified(configured, monkeypatch, seed_state):
     c, _, _, _, _ = configured
     c["model_output_root"] = str(Path(c["output_root"]).parent / "model-attempt")
@@ -287,13 +293,17 @@ def test_model_first_seed_is_independently_verified(configured, monkeypatch, see
         seed.mkdir(mode=0o700)
         (seed / "old-attempt-claim.json").write_bytes(b"retained claim")
         member = seed / relative
-        member.mkdir(parents=True, mode=0o700)
-        (member / name).write_bytes(content)
-        if seed_state == "corrupt":
-            (member / name).write_bytes(b"wrong fixture")
-        elif seed_state == "symlink":
-            (member / name).unlink()
-            (member / name).symlink_to(Path(c["resolved_config"]))
+        if seed_state == "revision_symlink":
+            member.parent.mkdir(parents=True, mode=0o700)
+            member.symlink_to(Path(c["resolved_config"]), target_is_directory=True)
+        elif seed_state != "absent_revision":
+            member.mkdir(parents=True, mode=0o700)
+            (member / name).write_bytes(content)
+            if seed_state == "corrupt":
+                (member / name).write_bytes(b"wrong fixture")
+            elif seed_state == "symlink":
+                (member / name).unlink()
+                (member / name).symlink_to(Path(c["resolved_config"]))
         c["model_seed_root"] = str(seed)
     calls = []
 
@@ -331,7 +341,7 @@ def test_model_first_seed_is_independently_verified(configured, monkeypatch, see
             return result
 
         monkeypatch.setattr(helper, "copy_regular", mutate_after_copy)
-    if seed_state in {"corrupt", "symlink", "mutated"}:
+    if seed_state in {"corrupt", "symlink", "revision_symlink", "mutated"}:
         with pytest.raises((ValueError, ModelSnapshotPreparationError)):
             helper.prepare_model(
                 c, model_preparer=prepare_model_snapshot, sdk_preflight=lambda: None,
@@ -346,12 +356,51 @@ def test_model_first_seed_is_independently_verified(configured, monkeypatch, see
             "path": name, "size_bytes": len(content),
             "sha256": hashlib.sha256(content).hexdigest(),
         }]
-        assert ("download" in calls) == (seed_state == "cold")
+        assert ("download" in calls) == (seed_state in {"cold", "absent_revision"})
         if seed_state == "verified":
             assert (seed / relative / name).read_bytes() == content
     if seed_state != "cold":
         assert (seed / "old-attempt-claim.json").read_bytes() == b"retained claim"
     assert Path(c["model_output_root"]).exists()
+
+
+def test_model_inventory_hashes_held_scan_during_transient_ancestor_swap(
+    tmp_path, monkeypatch
+):
+    root, alternate, held = (tmp_path / name for name in ("model", "alternate", "held"))
+    for directory, content in ((root, b"trusted"), (alternate, b"hostile")):
+        directory.mkdir(mode=0o700)
+        snapshot = directory / "snapshot"
+        snapshot.mkdir(mode=0o700)
+        (snapshot / "member.bin").write_bytes(content)
+    original_scandir = os.scandir
+    swapped = False
+
+    @contextmanager
+    def swap_while_scanning(directory_fd):
+        nonlocal swapped
+        with original_scandir(directory_fd) as entries:
+            if not swapped:
+                swapped = True
+                os.rename(root, held)
+                os.rename(alternate, root)
+                try:
+                    yield entries
+                finally:
+                    os.rename(root, alternate)
+                    os.rename(held, root)
+            else:
+                yield entries
+
+    monkeypatch.setattr(helper.docker_host.os, "scandir", swap_while_scanning)
+    rows = helper.docker_host.model_inventory(root, root / "snapshot")
+    assert swapped
+    assert rows == [{
+        "path": "member.bin", "size_bytes": len(b"trusted"),
+        "sha256": hashlib.sha256(b"trusted").hexdigest(),
+    }]
+    assert (root / "snapshot/member.bin").read_bytes() == b"trusted"
+    assert (alternate / "snapshot/member.bin").read_bytes() == b"hostile"
 
 
 @pytest.mark.parametrize("kind", ["source_member", "artifact_symlink", "artifact_mode"])

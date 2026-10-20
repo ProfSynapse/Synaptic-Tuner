@@ -664,3 +664,18 @@ release and image C pins, daemon/device, source and model custody, prepared
 input publication, fresh names, and the original 3-step full-precision SFT
 recipe with 900-second/2-CPU/16-GiB/GPU-0/network-none bounds. Do not run a
 model request, container or training job on this implementation evidence alone.
+
+The r16 independent review found that cold known-run operations had inherited
+the live model-byte check, an absent seeded revision was rejected instead of
+treated as a cold miss, and inventory hashing reopened the root pathname after
+acquiring a scan descriptor. The r17 host-only repair retains the exact model
+receipt inside the public attempt. Start still validates current model bytes
+before its sole create; cold known-run operations check the committed receipt,
+configuration and run identity without reading weights or the old preparation
+root. A missing seed revision now downloads through the unchanged pinned
+preparer, while existing redirects and mutated members reject. Inventory hashes
+leaves through their held scan-parent descriptors and compares identities before
+and after reading. Tiny CPU public-start and transient-ancestor-swap fixtures
+exercise these boundaries; they do not qualify the desktop model or diagnose r2.
+Public plan authenticates the receipt commitment without reading weights; the
+sole live-byte recheck in the public consumer occurs on start before effects.

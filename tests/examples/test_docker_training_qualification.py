@@ -304,6 +304,100 @@ def test_shared_preview_public_start_native_five_and_cold_retained(
     assert run.to_dict() == preview["run"]
 
 
+def bind_tiny_model_receipt(config, kwargs):
+    _, rich, _, _, _ = docker_host._components(config)
+    model = rich.resolved_config.to_dict()["model"]
+    artifact = kwargs["artifact_root"]
+    snapshot = (artifact / "run/cache/model"
+                / ("models--" + model["ref"].replace("/", "--"))
+                / "snapshots" / model["revision"])
+    current = artifact
+    for part in snapshot.relative_to(artifact).parts:
+        current /= part
+        current.mkdir(mode=0o700)
+    member = snapshot / "synthetic-config.json"
+    member.write_bytes(b'{"fixture":true}')
+    receipt = {
+        "schema_version": "synaptic-docker-model-preparation/v1",
+        "model": model,
+        "configuration_sha256": hashlib.sha256(
+            rich.resolved_config.canonical_json.encode()
+        ).hexdigest(),
+        "runtime_declaration_sha256": hashlib.sha256(
+            rich.execution_context.canonical_json.encode()
+        ).hexdigest(),
+        "artifact_host_root": str(artifact),
+        "snapshot": str(snapshot),
+        "files": docker_host.model_inventory(artifact, snapshot),
+    }
+    receipt_path = artifact.parent / "model-preparation.json"
+    raw = json.dumps(receipt, sort_keys=True).encode()
+    config["docker"]["model_preparation_file"] = committed(receipt_path, raw)
+    return artifact, snapshot, member, receipt_path, raw
+
+
+def test_model_first_public_start_rejects_changed_bytes_before_create(configured):
+    config, kwargs, commands, _, _, options = configured
+    _, _, member, _, _ = bind_tiny_model_receipt(config, kwargs)
+    member.write_bytes(b"changed bytes")
+    assert launch.preview(config)["run"]
+    with pytest.raises(ValueError):
+        launch.launch(config, adapter_options=options)
+    assert not [c for c in commands if c[:2] == ("container", "create")]
+    assert Path(config["state_root"]).exists()
+    with pytest.raises(FileExistsError):
+        launch.launch(config, adapter_options=options)
+
+
+def test_model_first_public_start_and_cold_reads_without_weights(
+    configured, monkeypatch
+):
+    config, kwargs, commands, state, roles, options = configured
+    artifact, snapshot, member, receipt_path, raw = bind_tiny_model_receipt(config, kwargs)
+    assert launch.preview(config)["run"]
+    receipt_path.write_bytes(b"changed receipt")
+    with pytest.raises(ValueError):
+        launch.launch(config, adapter_options=options)
+    assert not [c for c in commands if c[:2] == ("container", "create")]
+    assert not Path(config["state_root"]).exists()
+    receipt_path.write_bytes(raw)
+    result = launch.launch(config, adapter_options=options)
+    assert result["start"]["accepted"]
+    assert len([c for c in commands if c[:2] == ("container", "create")]) == 1
+    retained = launch.load_config(Path(config["state_root"]) / "config.json")
+    retained_receipt = Path(retained["docker"]["model_preparation_file"]["path"])
+    assert retained_receipt != receipt_path and retained_receipt.read_bytes() == raw
+    receipt_path.unlink()
+    member.unlink()
+    snapshot.rmdir()
+    assert launch.preview(retained)["run"] == result["start"]["run"]
+    assert launch.known(retained, "observe", adapter_options=options)["state"] == "running"
+    state["status"] = "exited"
+    (artifact / "native").mkdir(mode=0o700)
+    values = native_values(kwargs, monkeypatch)
+    for role, relative in roles.items():
+        (artifact / relative).write_bytes(values[role])
+    assert launch.known(retained, "observe", adapter_options=options)["state"] == "succeeded"
+    assert launch.known(retained, "verify", adapter_options=options)["verified"]
+    output = Path(config["state_root"]) / "downloads"
+    downloaded = launch.known(
+        retained, "download", destination=output, adapter_options=options
+    )
+    assert len(downloaded["paths"]) == 5
+    for role in roles:
+        assert (output / (role + ".artifact")).read_bytes() == values[role]
+    wrong_run = json.loads(json.dumps(retained))
+    wrong_run["run"]["run_id"] = "another-run"
+    with pytest.raises(ValueError):
+        launch.known(wrong_run, "observe", adapter_options=options)
+    retained_receipt.write_bytes(b"changed receipt")
+    with pytest.raises(ValueError):
+        launch.known(retained, "observe", adapter_options=options)
+    with pytest.raises(ValueError):
+        launch.preview(retained)
+    assert len([c for c in commands if c[:2] == ("container", "create")]) == 1
+
+
 def test_unknown_submit_and_existing_attempt_never_create_again(configured):
     config, _, commands, state, _, options = configured
     state["unknown_create"] = True
