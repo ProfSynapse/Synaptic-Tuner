@@ -2,8 +2,11 @@
 """Genuine Git/publication/compiler and no-daemon Docker preparation controls."""
 
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 import pytest
 
 from tests.examples.test_hf_material_preparation import configured as source_configured  # noqa: F401
@@ -11,6 +14,9 @@ from tests.execution.providers.docker_provider_v1.conftest import profile  # noq
 from tests.runtime.test_packaged_runtime_releases import _release
 from tuner.training.coordinator_material import CoordinatorResolvedMaterial
 from tuner.training import default_recipe_registry
+from tuner.execution.providers.modal.model_snapshot import (
+    ModelSnapshotPreparationError, prepare_model_snapshot,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location(
@@ -181,6 +187,171 @@ def test_pinned_model_preparation_disjoint_cache_and_one_attempt(configured):
     with pytest.raises(FileExistsError):
         helper.prepare_model(c, model_preparer=model_preparer, sdk_preflight=lambda: None)
     assert len(calls) == 1
+
+
+def test_model_first_claim_precedes_source_and_receipt_binds_fresh_prepare(configured):
+    c, verifier, auth, clock, _ = configured
+    c["model_output_root"] = str(Path(c["output_root"]).parent / "model-attempt")
+    selected = c["consumer"]["docker"]
+    source = Path(selected["source_host_root"])
+    artifact = Path(selected["artifact_host_root"])
+    calls = []
+
+    def model_preparer(**kwargs):
+        assert not source.exists()
+        assert not Path(c["output_root"]).exists()
+        assert (Path(c["model_output_root"]) / "model-preparation-attempt.json").exists()
+        calls.append(kwargs)
+        target = (kwargs["destination_root"] / "model"
+                  / ("models--" + kwargs["model_ref"].replace("/", "--"))
+                  / "snapshots" / kwargs["revision"])
+        target.mkdir(parents=True, mode=0o700)
+        (target / "synthetic-config.json").write_text('{"fixture":true}')
+        return target
+
+    receipt = helper.prepare_model(
+        c, model_preparer=model_preparer, sdk_preflight=lambda: None,
+    )
+    assert receipt["schema_version"] == "synaptic-docker-model-preparation/v1"
+    assert not source.exists()
+    assert len(calls) == 1
+    with pytest.raises(ValueError):
+        helper.prepare_model(c, model_preparer=model_preparer, sdk_preflight=lambda: None)
+    assert len(calls) == 1
+    member = (artifact / "run/cache/model"
+              / ("models--" + calls[0]["model_ref"].replace("/", "--"))
+              / "snapshots" / calls[0]["revision"] / "synthetic-config.json")
+    original = member.read_bytes()
+    member.write_bytes(b"changed before source")
+    with pytest.raises(ValueError):
+        helper.prepare(c, pushed_sources=verifier, authenticator=auth, clock=clock)
+    assert not Path(c["output_root"]).exists()
+    member.write_bytes(original)
+    helper.prepare(c, pushed_sources=verifier, authenticator=auth, clock=clock)
+    consumer = helper.launch.load_config(Path(c["output_root"]) / "consumer.json")
+    assert "model_preparation_file" in consumer["docker"]
+    assert not source.exists()
+    member.write_text("changed")
+    with pytest.raises(ValueError):
+        helper.docker_host.preview(consumer)
+
+
+def test_model_first_failure_consumes_only_fresh_model_claim(configured):
+    c, _, _, _, _ = configured
+    c["model_output_root"] = str(Path(c["output_root"]).parent / "model-attempt")
+    selected = c["consumer"]["docker"]
+
+    def fail(**kwargs):
+        assert (Path(c["model_output_root"]) / "model-preparation-attempt.json").exists()
+        raise RuntimeError("private fixture failure")
+
+    with pytest.raises(RuntimeError):
+        helper.prepare_model(c, model_preparer=fail, sdk_preflight=lambda: None)
+    assert not Path(c["output_root"]).exists()
+    assert not Path(selected["source_host_root"]).exists()
+    with pytest.raises(ValueError):
+        helper.prepare_model(c, model_preparer=fail, sdk_preflight=lambda: None)
+
+
+def test_model_first_rejects_source_created_during_expensive_preparation(configured):
+    c, _, _, _, _ = configured
+    c["model_output_root"] = str(Path(c["output_root"]).parent / "model-attempt")
+    source = Path(c["consumer"]["docker"]["source_host_root"])
+
+    def drift(**kwargs):
+        source.mkdir(mode=0o700)
+        target = (kwargs["destination_root"] / "model"
+                  / ("models--" + kwargs["model_ref"].replace("/", "--"))
+                  / "snapshots" / kwargs["revision"])
+        target.mkdir(parents=True, mode=0o700)
+        (target / "synthetic-config.json").write_text('{"fixture":true}')
+        return target
+
+    with pytest.raises(ValueError, match="docker_source_changed"):
+        helper.prepare_model(c, model_preparer=drift, sdk_preflight=lambda: None)
+    assert (Path(c["model_output_root"]) / "model-preparation-attempt.json").exists()
+    assert not (Path(c["model_output_root"]) / "model-preparation.json").exists()
+
+
+@pytest.mark.parametrize("seed_state", ["verified", "corrupt", "symlink", "mutated", "cold"])
+def test_model_first_seed_is_independently_verified(configured, monkeypatch, seed_state):
+    c, _, _, _, _ = configured
+    c["model_output_root"] = str(Path(c["output_root"]).parent / "model-attempt")
+    model = json.loads(Path(c["resolved_config"]).read_bytes())["model"]
+    content = b'{"fixture":true}'
+    name = "synthetic-config.json"
+    seed = Path(c["output_root"]).parent / "retained-cache"
+    relative = (Path("models--" + model["ref"].replace("/", "--"))
+                / "snapshots" / model["revision"])
+    if seed_state != "cold":
+        seed.mkdir(mode=0o700)
+        (seed / "old-attempt-claim.json").write_bytes(b"retained claim")
+        member = seed / relative
+        member.mkdir(parents=True, mode=0o700)
+        (member / name).write_bytes(content)
+        if seed_state == "corrupt":
+            (member / name).write_bytes(b"wrong fixture")
+        elif seed_state == "symlink":
+            (member / name).unlink()
+            (member / name).symlink_to(Path(c["resolved_config"]))
+        c["model_seed_root"] = str(seed)
+    calls = []
+
+    class API:
+        def __init__(self, *, endpoint, token):
+            pass
+
+        def model_info(self, repo_id, *, revision, files_metadata, token):
+            assert (repo_id, revision) == (model["ref"], model["revision"])
+            calls.append("metadata")
+            return SimpleNamespace(
+                sha=revision,
+                siblings=[SimpleNamespace(
+                    rfilename=name, size=len(content), lfs=None,
+                    blob_id=hashlib.sha1(
+                        f"blob {len(content)}\0".encode() + content
+                    ).hexdigest(),
+                )],
+            )
+
+    def download(**kwargs):
+        calls.append("download")
+        (kwargs["local_dir"] / name).write_bytes(content)
+        return str(kwargs["local_dir"])
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(
+        HfApi=API, snapshot_download=download,
+    ))
+    if seed_state == "mutated":
+        original_copy = helper.copy_regular
+
+        def mutate_after_copy(*args, **kwargs):
+            result = original_copy(*args, **kwargs)
+            (seed / relative / name).write_bytes(b"x" * len(content))
+            return result
+
+        monkeypatch.setattr(helper, "copy_regular", mutate_after_copy)
+    if seed_state in {"corrupt", "symlink", "mutated"}:
+        with pytest.raises((ValueError, ModelSnapshotPreparationError)):
+            helper.prepare_model(
+                c, model_preparer=prepare_model_snapshot, sdk_preflight=lambda: None,
+            )
+        assert "download" not in calls
+        assert not Path(c["output_root"]).exists()
+    else:
+        receipt = helper.prepare_model(
+            c, model_preparer=prepare_model_snapshot, sdk_preflight=lambda: None,
+        )
+        assert receipt["files"] == [{
+            "path": name, "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }]
+        assert ("download" in calls) == (seed_state == "cold")
+        if seed_state == "verified":
+            assert (seed / relative / name).read_bytes() == content
+    if seed_state != "cold":
+        assert (seed / "old-attempt-claim.json").read_bytes() == b"retained claim"
+    assert Path(c["model_output_root"]).exists()
 
 
 @pytest.mark.parametrize("kind", ["source_member", "artifact_symlink", "artifact_mode"])

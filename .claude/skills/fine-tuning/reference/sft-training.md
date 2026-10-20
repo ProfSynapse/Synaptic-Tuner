@@ -450,10 +450,13 @@ See the checked-in example README for commands and exact fixture coverage.
 
 The checkout-owned `examples/training_qualification/prepare_docker.py` closes
 material setup for the public Docker consumer. With an installed engine,
-`plan` validates declared release/model/layout, `prepare` authenticates genuine
-sources and existing immutable v1 input before publishing canonical material,
-and `prepare-model` explicitly downloads the pinned public snapshot into the
-private artifact-mount cache. See `examples/training_qualification/README.md`
+`plan` validates declared release/model/layout, `prepare-model` first prepares
+the pinned public snapshot into a fresh private artifact cache, and `prepare`
+then authenticates fresh source and existing immutable v1 input before publishing
+canonical material. A private read-only seed cache may reduce downloads only
+after pinned upstream metadata and every reused Git/LFS member are verified.
+The old seed claim is never adopted. `prepare` binds the complete model receipt;
+public start rechecks its bytes before Docker effects. See `examples/training_qualification/README.md`
 for the template and exact commands. Full public preflight remains deferred
 until host composition; missing image/runtime/model qualification still refuses.
 The CPU `probe-filesystem` command measures actual native writer modes and host

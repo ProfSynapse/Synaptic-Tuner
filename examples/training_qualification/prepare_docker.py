@@ -128,6 +128,7 @@ from tuner.execution.providers.modal.model_snapshot import (
     _bind_hub_api,
     prepare_model_snapshot,
 )
+from tuner.execution.providers.modal.mounted_io import copy_regular, hash_regular
 from tuner.project.context import ProjectContext
 from tuner.project.git_verification import (
     GitCliLocalSourceInspector,
@@ -242,6 +243,16 @@ def prepare(config, *, pushed_sources, authenticator, clock):
     normalized = common._document(config["resolved_config"])
     if normalized.to_dict().get("dataset") != identity.to_dict():
         raise ValueError("docker_prepared_configuration_mismatch")
+    model_receipt_path = None
+    if "model_output_root" in config:
+        model_receipt_path = Path(config["model_output_root"]) / "model-preparation.json"
+        docker_host.verify_model_receipt(
+            common.stable_read(model_receipt_path, 2 << 20),
+            selected=config["consumer"]["docker"],
+            model=normalized.to_dict()["model"],
+            configuration_sha256=sha(normalized.canonical_json.encode()),
+            runtime_declaration_sha256=sha(runtime.canonical_json.encode()),
+        )
     context = ProjectContext.host(
         project_root=Path(config["project"]["root"]),
         engine_root=Path(config["project"]["engine_root"]),
@@ -364,6 +375,12 @@ def prepare(config, *, pushed_sources, authenticator, clock):
     consumer["docker"]["material_file"] = spec("material.json")
     consumer["docker"]["profile_file"] = spec("docker-profile.json")
     consumer["docker"]["prepared_publication"] = config["prepared_publication"]
+    if model_receipt_path is not None:
+        data = common.stable_read(model_receipt_path, 2 << 20)
+        consumer["docker"]["model_preparation_file"] = {
+            "path": str(model_receipt_path), "sha256": sha(data),
+            "size_bytes": len(data),
+        }
     launch._write(root / "consumer-candidate.json", consumer)
     consumer = launch.load_config(root / "consumer-candidate.json")
     preview = docker_host.preview(consumer)
@@ -399,34 +416,87 @@ def prepare_model(
     from Trainers.sft.runtime_v1 import RuntimeRoots, _require_local_model_snapshot
 
     sdk_preflight()
-    output = Path(config["output_root"])
-    launch._private(output)
-    consumer = launch.load_config(output / "consumer.json")
-    _, rich, _, _, _ = docker_host._components(consumer)
-    if rich.execution_context != declaration(config):
-        raise ValueError("docker_model_configuration_changed")
-    model = rich.resolved_config.to_dict()["model"]
-    selected = consumer["docker"]
+    model_first = "model_output_root" in config
+    runtime = declaration(config)
+    if model_first:
+        output = Path(config["model_output_root"])
+        if (not output.is_absolute() or output.exists() or output.is_symlink()
+                or output == Path(config["output_root"])):
+            raise ValueError("docker_model_output_used_or_invalid")
+        launch._private(output.parent)
+        if Path(config["output_root"]).exists() or Path(config["output_root"]).is_symlink():
+            raise ValueError("docker_source_preparation_already_claimed")
+        selected = config["consumer"]["docker"]
+        normalized = common._document(config["resolved_config"])
+        model = normalized.to_dict()["model"]
+        roots = runtime.to_dict()["roots"]
+    else:
+        output = Path(config["output_root"])
+        launch._private(output)
+        consumer = launch.load_config(output / "consumer.json")
+        _, rich, _, _, _ = docker_host._components(consumer)
+        if rich.execution_context != runtime:
+            raise ValueError("docker_model_configuration_changed")
+        normalized = rich.resolved_config
+        model = normalized.to_dict()["model"]
+        selected = consumer["docker"]
+        roots = rich.execution_source.roots
     source, artifact = (
         Path(selected["source_host_root"]),
         Path(selected["artifact_host_root"]),
     )
-    for root in (source, artifact):
+    if (not source.is_absolute() or not artifact.is_absolute()
+            or source == artifact or source in artifact.parents
+            or artifact in source.parents):
+        raise ValueError("docker_model_roots_invalid")
+    if model_first and (output in {source, artifact} or output in source.parents
+                        or output in artifact.parents or source in output.parents
+                        or artifact in output.parents):
+        raise ValueError("docker_model_output_overlaps_mount")
+    if model_first and (source.exists() or source.is_symlink()
+                        or artifact.exists() or artifact.is_symlink()):
+        raise ValueError("docker_model_fresh_roots_required")
+    seed = config.get("model_seed_root") if model_first else None
+    if seed is not None:
+        seed = Path(seed)
+        if (not seed.is_absolute() or seed in {output, source, artifact}
+                or seed in output.parents or seed in artifact.parents
+                or output in seed.parents or artifact in seed.parents
+                or source in seed.parents or seed in source.parents):
+            raise ValueError("docker_model_seed_invalid")
+        launch._private(seed)
+    if model_first:
+        # Consume the exact one-use model claim before creating any model bytes.
+        output.mkdir(mode=0o700)
+        launch._private(output)
+        launch._write(
+            output / "model-preparation-attempt.json",
+            {"model": model, "destination": str(artifact / "run/cache"),
+             "source_mutation": False, "seed_root": None if seed is None else str(seed)},
+        )
+    for root in ((artifact,) if model_first else (source, artifact)):
         if not root.exists():
             launch._private(root.parent)
             root.mkdir(mode=0o700)
         launch._private(root)
     with ExitStack() as held:
         guards = []
-        for root in (source, artifact):
+        for root in ((artifact,) if model_first else (source, artifact)):
             guard = _Root(root)
             held.callback(guard.stack.close)
             guards.append(guard)
             guard.check()
-        if any(source.iterdir()):
+        if model_first and (source.exists() or source.is_symlink()):
+            raise ValueError("docker_source_changed")
+        if source.exists() and any(source.iterdir()):
             raise ValueError("docker_source_not_empty")
+        seed_guard = None
+        if seed is not None:
+            seed_guard = _Root(seed)
+            held.callback(seed_guard.stack.close)
+            seed_guard.check()
         mapped = {}
-        for name, raw in rich.execution_source.roots.items():
+        for name, raw in roots.items():
             path = PurePosixPath(raw)
             if path.is_relative_to("/source"):
                 mapped[name] = source.joinpath(*path.relative_to("/source").parts)
@@ -446,17 +516,32 @@ def prepare_model(
                 path.mkdir(mode=0o700)
             launch._private(path)
         persistent, scratch = output / "model-persistent", output / "model-scratch"
-        launch._write(
-            output / "model-preparation-attempt.json",
-            {
-                "model": model,
-                "destination": str(mapped["cache"]),
-                "source_mutation": False,
-            },
-        )
+        if not model_first:
+            launch._write(
+                output / "model-preparation-attempt.json",
+                {"model": model, "destination": str(mapped["cache"]),
+                 "source_mutation": False},
+            )
         for path in (persistent, scratch):
             path.mkdir(mode=0o700)
-        snapshot = model_preparer(
+        if seed is not None:
+            relative = (Path("models--" + model["ref"].replace("/", "--"))
+                        / "snapshots" / model["revision"])
+            # Copy a private repository seed into this attempt's fresh cache.
+            # The unchanged shared preparer authenticates every reused member
+            # against pinned upstream Git/LFS metadata before destination use.
+            for row in docker_host.model_inventory(seed, seed / relative):
+                name = Path(row["path"])
+                copied = copy_regular(
+                    seed, seed / relative / name, persistent,
+                    persistent / relative / name, maximum=row["size_bytes"],
+                )
+                if copied != (row["size_bytes"], row["sha256"]):
+                    raise ValueError("docker_model_seed_changed")
+                if hash_regular(seed, seed / relative / name, row["size_bytes"]) != copied:
+                    raise ValueError("docker_model_seed_changed")
+                seed_guard.check()
+        options = dict(
             model_ref=model["ref"],
             revision=model["revision"],
             token=False,
@@ -464,6 +549,7 @@ def prepare_model(
             destination_root=mapped["cache"],
             scratch_root=scratch,
         )
+        snapshot = model_preparer(**options)
         expected = (
             mapped["cache"]
             / "model"
@@ -484,9 +570,13 @@ def prepare_model(
         )
         for guard in guards:
             guard.check()
-        for root in (source, artifact):
+        if seed_guard is not None:
+            seed_guard.check()
+        for root in ((artifact,) if model_first else (source, artifact)):
             launch._private(root)
-        if any(source.iterdir()):
+        if model_first and (source.exists() or source.is_symlink()):
+            raise ValueError("docker_source_changed")
+        if source.exists() and any(source.iterdir()):
             raise ValueError("docker_source_changed")
         result = {
             "snapshot": str(checked),
@@ -495,6 +585,16 @@ def prepare_model(
             "source_mutation": False,
             "provider_qualified": False,
         }
+        if model_first:
+            result = {
+                "schema_version": "synaptic-docker-model-preparation/v1",
+                "model": model,
+                "configuration_sha256": sha(normalized.canonical_json.encode()),
+                "runtime_declaration_sha256": sha(runtime.canonical_json.encode()),
+                "artifact_host_root": str(artifact),
+                "snapshot": str(checked),
+                "files": docker_host.model_inventory(artifact, checked),
+            }
         launch._write(output / "model-preparation.json", result)
         return result
 

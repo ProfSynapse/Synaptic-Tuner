@@ -627,3 +627,40 @@ dataset bytes remain material differences from r2's direct `-I` worker script
 entry. The successful r13 import therefore narrows the observed boundary but
 does **not** reproduce r2 or establish the cause of its exit 23. It grants no
 additional probe, model, or training authority.
+
+### r15 public SFT model-first preparation (2026-10-20)
+
+The retained r14 public-consumer planning root and its r3 configuration are
+historical preparation only. No r14 training was submitted. The r2 worker's
+exit 23 remains unexplained; the successful reduced import probes do not
+establish a runtime fix. The r14 flow exposed an ordering problem: the
+short-lived pushed-source proof was minted before a 9.3-GB model staging step.
+
+The Docker example now accepts a separate, fresh `model_output_root` and an
+optional private `model_seed_root`. `prepare-model` consumes its own one-use
+claim, copies seed members into a fresh private cache through bounded regular
+file reads, and uses the unchanged shared model preparer to verify every reused
+member against current pinned Hub Git/LFS metadata. Missing members take the
+normal cold download path. Corrupt, redirected or changed seed members reject;
+old cache bytes and claims remain untouched. The model receipt records the
+declared model/configuration/runtime and a complete bounded destination file
+inventory. `prepare` checks that receipt and bytes **before** source
+authentication, then compiles a fresh public consumer that binds the receipt.
+The existing public `start` composition rechecks the receipt and actual bytes
+before Docker effects. This adds no image, package, trainer or runtime change;
+the Modal/HF closures and runtime locks remain current without refresh.
+
+For review, the proposed next attempt must use a new pushed host commit with
+the exact new engine gitlink, a fresh private plan/config/model/source/artifact
+root, and a new execution attempt claim. The prior r14 host/gitlink/config and
+every earlier model/source/start claim remain consumed or historical; they
+cannot be reinterpreted as fresh authority. The ordered commands are the
+checked-in example's `plan`, `model-preflight`, `prepare-model`, `prepare`,
+public `launch.py plan`, then one separately admitted public `launch.py start`.
+The model stage has no hard SDK download deadline; only the subsequent source
+proof uses its 600-second validity window. Before any live step, independently
+review exact pushed source and genuine host gitlink, wheel/consumer closure,
+release and image C pins, daemon/device, source and model custody, prepared
+input publication, fresh names, and the original 3-step full-precision SFT
+recipe with 900-second/2-CPU/16-GiB/GPU-0/network-none bounds. Do not run a
+model request, container or training job on this implementation evidence alone.
