@@ -108,6 +108,15 @@ before any new effect remains required. No successor container has been
 launched. Review the exact command in this branch before a fresh CPU import
 diagnostic; a GPU-exposed probe needs separate scope review.
 
+The cleanup path attempts its single authenticated stop even if evidence
+appends fail, then inspects terminal state independently even if the stop CLI
+acknowledgement fails. Failed evidence writes retain an uncertain result; an
+in-memory observation does not establish durable proof. Source verification
+and a read-only container mount do not freeze files on the host. Before this
+probe, verify private ownership/permissions of the retained source and its
+ancestors, and ensure that no preparation or other writer is using that source.
+This probe assumes that private host custody remains in force during execution.
+
 Proposed guarded CPU command for root review **only**. Run from a clean WSL
 checkout of this successor commit after confirming that its helper and trusted
 closure verifier match the reviewed source. First create the parent

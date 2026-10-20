@@ -272,24 +272,40 @@ def _inspect_owned(authority, identifier: str, *, name: str, label: str, image: 
 def _stop_once(authority, identifier: str, *, name: str, label: str,
                image: str, daemon_id: str, output_dir: Path) -> bool:
     """One stop request; only a separate exact inspection can prove terminal state."""
+    evidence_retained = True
+
+    def record(phase: str) -> None:
+        nonlocal evidence_retained
+        try:
+            _append(output_dir, {"phase": phase, "container_id": identifier})
+        except Exception:
+            # Storage failure cannot suppress cleanup of the already claimed
+            # container. It does prevent claiming durable terminal evidence.
+            evidence_retained = False
+
     try:
         status, _ = _inspect_owned(authority, identifier, name=name, label=label,
                                    image=image, daemon_id=daemon_id)
         if status in {"exited", "dead"}:
-            _append(output_dir, {"phase": "TERMINAL_OBSERVED", "container_id": identifier})
-            return True
+            record("TERMINAL_OBSERVED")
+            return evidence_retained
         if status != "running":
             return False
-        _append(output_dir, {"phase": "STOP_CLAIMED", "container_id": identifier})
-        _run(authority, ("container", "stop", "--timeout", "2", identifier), timeout=10)
+        record("STOP_CLAIMED")
+        try:
+            _run(authority, ("container", "stop", "--timeout", "2", identifier), timeout=10)
+        except Exception:
+            # A lost CLI acknowledgement does not establish daemon state.
+            # Inspect independently without issuing a second stop.
+            pass
         status, _ = _inspect_owned(authority, identifier, name=name, label=label,
                                    image=image, daemon_id=daemon_id)
         if status in {"exited", "dead"}:
-            _append(output_dir, {"phase": "TERMINAL_OBSERVED", "container_id": identifier})
-            return True
+            record("TERMINAL_OBSERVED")
+            return evidence_retained
     except Exception:
         pass
-    _append(output_dir, {"phase": "STOP_UNCONFIRMED", "container_id": identifier})
+    record("STOP_UNCONFIRMED")
     return False
 
 

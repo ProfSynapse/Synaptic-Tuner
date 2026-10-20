@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -228,6 +227,55 @@ def test_interrupt_after_start_stops_only_owned_container_once(tmp_path: Path, m
         _call(tmp_path, docker, config)
     actual = json.loads(state.read_text())
     assert actual["stops"] == 1 and actual["status"] == "exited"
+
+
+def test_storage_failure_after_start_still_stops_owned_container(tmp_path: Path, monkeypatch) -> None:
+    docker, config, state = _fake_docker(tmp_path)
+    original_append = diagnostic._append
+    storage_failed = False
+
+    def append(output_dir, event):
+        nonlocal storage_failed
+        if event["phase"] == "STARTED":
+            storage_failed = True
+        if storage_failed:
+            raise OSError("simulated full evidence filesystem")
+        original_append(output_dir, event)
+
+    monkeypatch.setattr(diagnostic, "_append", append)
+    with pytest.raises(ValueError, match="DEADLINE_UNCERTAIN"):
+        _call(tmp_path, docker, config)
+    actual = json.loads(state.read_text())
+    assert actual["stops"] == 1 and actual["status"] == "exited"
+    assert (tmp_path / "out/claim.json").exists()
+    assert not (tmp_path / "out/result.json").exists()
+
+
+def test_uncertain_stop_acknowledgement_is_independently_inspected(tmp_path: Path, monkeypatch) -> None:
+    docker, config, state = _fake_docker(tmp_path)
+    original_run = diagnostic._run
+    inspected_after_stop = []
+    stop_sent = False
+
+    def run(authority, args, *, timeout=15):
+        nonlocal stop_sent
+        result = original_run(authority, args, timeout=timeout)
+        if args[:2] == ("container", "stop"):
+            stop_sent = True
+            raise ValueError("DOCKER_COMMAND_REJECTED")
+        if stop_sent and args[:2] == ("container", "inspect"):
+            inspected_after_stop.append(args[-1])
+        return result
+
+    monkeypatch.setattr(diagnostic, "_run", run)
+    monkeypatch.setattr(diagnostic, "_RUN_SECONDS", 0.1)
+    with pytest.raises(ValueError, match="DEADLINE_STOPPED"):
+        _call(tmp_path, docker, config)
+    actual = json.loads(state.read_text())
+    assert actual["stops"] == 1 and actual["status"] == "exited"
+    assert inspected_after_stop == [CID]
+    events = [json.loads(line) for line in (tmp_path / "out/events.jsonl").read_text().splitlines()]
+    assert events[-1]["phase"] == "TERMINAL_OBSERVED"
 
 
 def test_wrong_self_consistent_source_rejected_before_docker(tmp_path: Path, monkeypatch) -> None:
