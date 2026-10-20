@@ -157,6 +157,43 @@ def test_host_command_flood_kills_owned_session(tmp_path):
         os.kill(pid, 0)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="native host requires POSIX process groups")
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_host_command_interruption_reaps_owned_child(monkeypatch, interruption):
+    from examples.training_qualification import bounded_command
+
+    children = []
+    real_popen = bounded_command.subprocess.Popen
+    selector_class = bounded_command.selectors.DefaultSelector
+
+    def popen(*args, **kwargs):
+        child = real_popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    class InterruptingSelector(selector_class):
+        def select(self, timeout=None):
+            raise interruption()
+
+    monkeypatch.setattr(bounded_command.subprocess, "Popen", popen)
+    monkeypatch.setattr(bounded_command.selectors, "DefaultSelector", InterruptingSelector)
+    try:
+        with pytest.raises(interruption):
+            run_bounded_command(
+                [sys.executable, "-I", "-c", "import time; time.sleep(30)"],
+                maximum=4096, timeout=3,
+            )
+        assert len(children) == 1 and children[0].returncode is not None
+        with pytest.raises(ProcessLookupError):
+            os.kill(children[0].pid, 0)
+    finally:
+        # A failed regression must not leave the test's child behind.
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=2)
+
+
 @pytest.fixture
 def host_case(publication, monkeypatch):
     """Real host composition/store with only Mac metadata and ML child substituted."""

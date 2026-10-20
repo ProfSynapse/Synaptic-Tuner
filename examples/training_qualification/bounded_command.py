@@ -71,7 +71,7 @@ def run_bounded_command(argv, *, cwd=None, environment=None, input_bytes=b"",
         if remaining <= 0:
             raise BoundedCommandError("bounded_command_deadline")
         return process.wait(timeout=remaining), b"".join(stdout)
-    except Exception:
+    except BaseException as error:
         if process is not None:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -81,6 +81,8 @@ def run_bounded_command(argv, *, cwd=None, environment=None, input_bytes=b"",
                 process.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 pass
+        if not isinstance(error, Exception):
+            raise
         raise BoundedCommandError("bounded_command_failed") from None
     finally:
         selector.close()
