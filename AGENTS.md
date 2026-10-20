@@ -14,6 +14,7 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - If the capability does not exist, the next step is not an ad hoc workaround. Update the relevant skill and add the proper checked-in script/CLI workflow so the new capability is reusable.
 - Prefer repo CLIs and checked-in scripts over manual bucket/API probing whenever those surfaces exist.
 - Diagnose failures from the exact attempt's retained records, logs, pinned SDK source, and provider documentation. Use relevant issue/forum reports to form hypotheses, then run a targeted experiment before calling a hypothesis the cause. A closed failure phase locates a boundary; it does not establish the cause.
+- Offline SFT worker diagnostics may emit only closed phase/category/milestone labels, never exception text, paths, argv, environment values or traceback frames. Preserve the consumed attempt; a historical generic rejection cannot be assigned a later diagnostic stage. Refresh all affected SFT/GRPO closures and Modal training/inference locks before fresh qualification.
 - Keep the training workflow proportional to the supported use case. Remove redundant operations when documented behavior and experiments show they add no useful guarantee;
   retain source/model pins, credential isolation, artifact verification, and protection against replaying an uncertain submission. Test doubles must model the provider's documented behavior, not merely repeat our implementation.
 - For prompt/completion training, explicitly review the generation scaffold at the target boundary and keep model-specific chat-template arguments in recipe configuration, consistent with serving. Preserve legacy canonical documents when optional arguments are absent. An explicit null output budget means no request-level token ceiling, not unlimited context, time, or transport size. A completed-text smoke must check natural completion and must not be reported as a writing-quality evaluation.
@@ -35,6 +36,21 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - When using environment-backed validation during generation, environment/runtime errors must be surfaced into the judge/improver inputs as structured context so the model can correct the response. Do not rely on ad hoc parser/executor repairs as the primary fix path.
 - If a process requirement is important enough to affect how generation/eval work is done repeatedly, encode it in `AGENTS.md`, the canonical skill under `.skills/`, and the relevant checked-in config/docs before continuing.
 - For new unsteered local batch generation, prefer `batch-generate --engine vllm`. Set `VLLM_BATCH_INVARIANT=1` before process startup and pin the exact vLLM version, documented minimum CUDA compute capability, model and tokenizer revisions, dtype, tensor parallel size, scheduler limits, structured-output backend, model context limit, multimodal limits, decode settings, and JSON Schema when formatting is incidental. Keep generated rows and token artifacts in the consuming project's private output directory.
+
+## Native MLX candidate
+
+- Native SFT consumes the shared preprocessor's exact token IDs and per-token
+  labels with host-declared split/row identities. Never route prepared rows
+  through MLX-LM text/chat loaders, a single-offset loss mask, implicit split,
+  truncation, or dropped tail batches. Reject unsupported attention layouts and
+  failed preprocessing diagnostics before ML imports.
+- The internal `tuner/runtime/native_mlx_sft.py` worker and candidate metadata
+  comparison are not a native provider, public runtime material, or launch
+  authority. A finite iteration count is not a wall-clock/process bound. Keep
+  model/optimizer preparation, exact runtime/source admission, private paths,
+  durable claims, child lifecycle and native artifact verification host-owned.
+  Do not enable native training in Syntunia before those joins and real Mac
+  qualification are complete. See `docs/plans/native-desktop-training-api-v1.md`.
 
 ## HF Jobs
 

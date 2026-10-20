@@ -177,6 +177,7 @@ Run from a neutral directory with the installed engine interpreter:
 
 ```sh
 python -I /absolute/checkout/examples/training_qualification/prepare_docker.py plan /private/prepare.json
+python -I /absolute/checkout/examples/training_qualification/prepare_docker.py model-preflight /private/prepare.json
 python -I /absolute/checkout/examples/training_qualification/prepare_docker.py prepare /private/prepare.json
 python -I /absolute/checkout/examples/training_qualification/prepare_docker.py prepare-model /private/prepare.json
 python -I /absolute/checkout/examples/training_qualification/launch.py start /private/prepared/consumer.json
@@ -201,6 +202,22 @@ are private and disjoint; the exact prepared-input slot is never adopted. A
 create-only local attempt prevents automatic repeat after an uncertain download.
 Vendor download behavior is not a hard job deadline or bill cap. No manual weight
 upload, source inventory widening or restored training authority is involved.
+
+Run `model-preflight` with the exact interpreter intended for `prepare-model`
+before issuing short-lived source material. It checks the existing Hub SDK
+signature contract without constructing a client, downloading, or creating
+directories/claims. A base consumer installation can lack this optional SDK;
+select an independently verified model-helper environment rather than upgrading
+the pinned trainer or silently installing packages. `prepare-model` repeats
+this check before its one-use claim. Compatibility is not package provenance,
+an inventory lock, network readiness, or model/training qualification.
+
+Create the selected source/artifact roots' necessary private parents before
+preparation; the preparer validates them and creates only its own leaf roots.
+An existing model-preparation claim is consumed even if no receipt was produced.
+Do not replay it. Failures now retain the model preparer's existing closed
+`model_preparation_stage` when available, without exception messages or paths;
+historical generic failures cannot be retrospectively assigned a stage.
 
 Docker staging creates only the authenticated empty project directory plus its
 necessary parents, retaining their descriptors through submit checks. Extra files,

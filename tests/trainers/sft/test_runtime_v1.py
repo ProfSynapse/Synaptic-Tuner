@@ -452,8 +452,9 @@ import os, runpy, sys
 from pathlib import Path
 assert sys.dont_write_bytecode is False
 bootstrap = runpy.run_path(sys.argv[1], run_name="fixture_bootstrap")
-def fixture_trainer(path, *, run_name):
+def fixture_trainer(path, *, run_name, init_globals):
     assert Path(path).name == "train_sft.py"
+    assert callable(init_globals["__packaged_runtime_phase__"])
     import shared.env_bootstrap
     return {}
 runpy.run_path = fixture_trainer
