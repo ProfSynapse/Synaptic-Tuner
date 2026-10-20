@@ -567,3 +567,63 @@ fresh bounded GPU-0 import-only diagnostic container, including the synthetic
 sealed descriptor and real worker/runpy entry. This preparation grants none
 of that live authority; all r2/r4/r6/r8/r11 claims and containers remain
 consumed and preserved.
+
+### r13 execution of the admitted worker-entry probe (2026-10-20)
+
+Root subsequently accepted the exact r12 command at clean, pushed
+`14f44a3ef389c9c04225b058626bb3cfbba61d45` for **one** fresh diagnostic
+container. The operator read back the root admission, then checked the remote
+clean checkout and pushed ref, helper and trusted verifier SHA-256 above, exact
+release/daemon/image/source-lock/manifest/closure/workload/runtime/trainer
+commitments, private source/ancestor custody, and absence of a visible active
+source writer. The fresh parent was mode 0700 and the named output child was
+absent. Windows and WSL reported GPU 0
+`GPU-ac4398bb-fc15-d722-b39c-2790b4b5f9cc` with no active compute process.
+The one-use current-preflight/command admission was saved and read back in
+Nexus as `Windows r13 worker-entry one-use pre-start admission — 2026-10-20`
+before Docker effects. These are point-in-time host observations; a read-only
+bind does not freeze the retained host tree.
+
+The command above ran **once**, from the remote clean checkout, with no retry.
+The retained output is
+`/home/profsynapse/.local/share/synaptic-qualification/torch-import-r12-20261020/worker-entry-gpu0-1`.
+It returned closed `PASS` at `TORCH_IMPORT`, boundary `BEFORE_UNSLOTH`, with
+`python_isolated=true`, `runpy_main_bound=true`, `training_executed=false`,
+and no import barrier activation. The separately supplied environment digest
+was `1bb0e06d9708dd6fd637f59eaf134dcbe8165f43e120a0b94daad6c79a63699c`;
+the observed startup digest was
+`a1eeabbf01741b374ca4e410d62119cf8d882b97d33da962257ec7570bdcb08c`,
+with the explicitly admitted `LC_CTYPE_C_UTF8` interpreter addition. The
+before- and after-Torch environment digests both were
+`712d7eee6b813d815b996f2d3db8266c691dcd5d9f02ea5b9b09073409bd2efc`.
+These are reconstructed source/plan context digests, not measurements of r2's
+historical child environment. `gpu_used` remains unknown: device exposure is
+verified, but this diagnostic does not establish CUDA use.
+
+The single retained container is
+`d9f8c6dda19ce32a4e3326762cc3ecf929451ef011162ba595b1dd9b12a8636f`.
+The durable event sequence is exactly `CREATE_CLAIMED`, `CREATED`,
+`START_CLAIMED`, `STARTED`, `TERMINAL_OBSERVED`; the independent daemon
+inspection found it `exited` with code 0. It started at
+`2026-10-20T16:27:48.793457215Z` and finished at
+`2026-10-20T16:27:54.515077872Z`. Inspection confirmed the expected daemon,
+image, claim label and name; device request `0`; 2 CPU, 4 GiB, network none,
+read-only root, all capabilities dropped, read-only `/source` bind, and
+64-MiB `/tmp` and `/artifacts` tmpfs. The container and all prior diagnostic
+containers and claims remain retained. The claim digest (over canonical claim
+bytes without its final newline) is
+`9f22951917cf0eb35ce4e2084c64046087ff4777ce7339bde8039ec04cee6e50`.
+Retained file SHA-256 values are:
+
+| File | SHA-256 |
+| --- | --- |
+| `claim.json` | `86e6202f20064fb12087e532f26debcef6e4047b5d6dcea8bdf3c81ac4648031` |
+| `events.jsonl` | `47dd59c98b9da7c15250859f5ee7ccaf3f110070d5a1e73785754e188373953f` |
+| `result.json` | `90d84bf65199e6b4aa3d1fd9f88a4bb7d79677902c085d684987ae921bb3f7e5` |
+
+The wrapper, trace/import barrier, `-I -c` entry, synthetic sealed descriptor,
+reduced privilege/filesystem/memory settings, and absent historical model and
+dataset bytes remain material differences from r2's direct `-I` worker script
+entry. The successful r13 import therefore narrows the observed boundary but
+does **not** reproduce r2 or establish the cause of its exit 23. It grants no
+additional probe, model, or training authority.
