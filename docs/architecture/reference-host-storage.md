@@ -1,5 +1,10 @@
 # Reference host storage
 
+The [Modal consumer walkthrough](../../examples/training_qualification/modal-consumer.md)
+joins the existing installed training and retained-run commands with the host
+ownership requirements below. It distinguishes that durable known-run path from
+the separate same-process train/chat example.
+
 `SQLiteDurableStoreV1` is an optional implementation of API v1's record and
 stream storage ports. The consuming host chooses the database path and owns
 its lifetime. Importing the public API does not open a database or import
@@ -92,7 +97,10 @@ avoid provider polling. They cannot restore keys that older runs never retained,
 renew a submit claim, discover an unknown call, reconstruct an input lease or
 continue interrupted training. Original catalogs, scope and signing keys remain
 required. Default/unsupported capabilities remain refused; real provider lifecycle
-qualification is separate. See the [current operation matrix](../plans/api-v1-support-matrix.md).
+qualification is separate. The 2026-10-20 SFT pair includes a bounded live
+fresh-process observe/show result for its second run; it does not close active
+caller-loss or cancellation qualification. See the
+[current operation matrix](../plans/api-v1-support-matrix.md).
 
 ## Transactions and compatibility
 
