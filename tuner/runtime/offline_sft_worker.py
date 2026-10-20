@@ -136,6 +136,57 @@ class OfflineSFTWorkerError(RuntimeError):
     """Fail-closed offline worker closure or bootstrap rejection."""
 
 
+_FAILURE_PHASES = frozenset({
+    "BOOTSTRAP", "CLOSURE", "BOOTSTRAP_ORIGIN", "ARGUMENTS",
+    "IMPORT_GUARD", "TRAINER", "POSTCHECK",
+})
+_FAILURE_CATEGORIES = frozenset({
+    "REJECTION", "IMPORT", "OS", "VALUE", "SYSTEM_EXIT", "OTHER",
+})
+# Keep this bootstrap stdlib-only and within its existing closure. These are
+# the same finite hooks already emitted for the packaged SFT child.
+_TRAINER_MILESTONES = frozenset({
+    "CONFIG", "MODEL_SNAPSHOT", "MODEL_LIBRARY_LOAD", "MODEL_SOURCE",
+    "TOKENIZER_SOURCE", "MODEL_FINALIZE", "LOSS_GUARD", "DATA_PREP",
+    "LORA_ATTACH", "TRAINER_SETUP", "TRAIN_CALL", "SAVE", "POST_SAVE",
+    "BOOTSTRAP_ENV", "TORCH_IMPORT", "UNSLOTH_IMPORT", "TRAINER_IMPORT",
+})
+
+
+class _WorkerFailure(OfflineSFTWorkerError):
+    """Closed diagnostic metadata; never carries the original exception."""
+
+    def __init__(self, phase: str, category: str, milestone: str | None) -> None:
+        self.phase = phase if type(phase) is str and phase in _FAILURE_PHASES else None
+        self.category = (
+            category if type(category) is str and category in _FAILURE_CATEGORIES else None
+        )
+        self.milestone = (
+            milestone if self.phase == "TRAINER" and type(milestone) is str
+            and milestone in _TRAINER_MILESTONES else None
+        )
+        super().__init__("OFFLINE_SFT_WORKER_REJECTED")
+
+
+def _failure_category(error: BaseException) -> str:
+    # Do not inspect error text, attributes, names or traceback frames. Like the
+    # packaged child, classify only builtin/owned identities in the type's MRO.
+    bases = type.__getattribute__(type(error), "__mro__")
+    for kind, category in (
+        (OfflineSFTWorkerError, "REJECTION"), (ImportError, "IMPORT"),
+        (OSError, "OS"), (ValueError, "VALUE"), (SystemExit, "SYSTEM_EXIT"),
+    ):
+        if any(base is kind for base in bases):
+            return category
+    return "OTHER"
+
+
+def _zero_exit(error: BaseException) -> bool:
+    return type(error) is SystemExit and (
+        error.code is None or (type(error.code) is int and error.code == 0)
+    )
+
+
 def _reject_constant(value: str) -> None:
     raise ValueError(f"non-finite JSON number is prohibited: {value}")
 
@@ -771,45 +822,84 @@ def _validate_trainer_arguments(arguments: Sequence[str]) -> None:
 
 
 def run_offline_sft_worker(argv: Sequence[str] | None = None) -> int:
-    arguments = list(sys.argv[1:] if argv is None else argv)
-    if not arguments or arguments.pop(0) != "--":
-        raise OfflineSFTWorkerError("offline SFT bootstrap delimiter is missing")
-    if (
-        sys.flags.isolated != 1
-        or sys.flags.no_user_site != 1
-        or getattr(sys.flags, "safe_path", False) is not True
-        or os.environ.get("PYTHONNOUSERSITE") != "1"
-        or os.environ.get("PYTHONSAFEPATH") != "1"
-    ):
-        raise OfflineSFTWorkerError("offline SFT bootstrap is not isolated")
-    engine_text = os.environ.get("SYNAPTIC_ENGINE_ROOT")
-    if not isinstance(engine_text, str) or not engine_text:
-        raise OfflineSFTWorkerError("offline SFT engine root is unavailable")
-    engine_root = Path(engine_text)
-    closure = load_offline_sft_worker_environment(os.environ, engine_root=engine_root)
-    bootstrap = engine_root.joinpath(*PurePosixPath(OFFLINE_SFT_BOOTSTRAP).parts)
-    if Path(__file__).resolve(strict=True) != bootstrap.resolve(strict=True):
-        raise OfflineSFTWorkerError("offline SFT bootstrap origin is invalid")
-    _validate_trainer_arguments(arguments)
-    verify_loaded_owned_module_origins(closure, engine_root=engine_root)
-    install_owned_module_guard(closure, engine_root=engine_root)
-    trainer_directory = engine_root / "Trainers" / "sft"
-    sys.path[:0] = [str(trainer_directory), str(engine_root)]
-    trainer = engine_root.joinpath(
-        *PurePosixPath(OFFLINE_SFT_TRAINER_ENTRYPOINT).parts
-    )
-    sys.argv = [str(trainer), *arguments]
-    runpy.run_path(str(trainer), run_name="__main__")
-    verify_loaded_owned_module_origins(closure, engine_root=engine_root)
+    phase = "BOOTSTRAP"
+    milestone = None
+
+    def mark_trainer_milestone(value: object) -> None:
+        nonlocal milestone
+        milestone = value if type(value) is str and value in _TRAINER_MILESTONES else None
+
+    try:
+        arguments = list(sys.argv[1:] if argv is None else argv)
+        if not arguments or arguments.pop(0) != "--":
+            raise OfflineSFTWorkerError("offline SFT bootstrap delimiter is missing")
+        if (
+            sys.flags.isolated != 1
+            or sys.flags.no_user_site != 1
+            or getattr(sys.flags, "safe_path", False) is not True
+            or os.environ.get("PYTHONNOUSERSITE") != "1"
+            or os.environ.get("PYTHONSAFEPATH") != "1"
+        ):
+            raise OfflineSFTWorkerError("offline SFT bootstrap is not isolated")
+        engine_text = os.environ.get("SYNAPTIC_ENGINE_ROOT")
+        if not isinstance(engine_text, str) or not engine_text:
+            raise OfflineSFTWorkerError("offline SFT engine root is unavailable")
+        engine_root = Path(engine_text)
+        phase = "CLOSURE"
+        closure = load_offline_sft_worker_environment(os.environ, engine_root=engine_root)
+        phase = "BOOTSTRAP_ORIGIN"
+        bootstrap = engine_root.joinpath(*PurePosixPath(OFFLINE_SFT_BOOTSTRAP).parts)
+        if Path(__file__).resolve(strict=True) != bootstrap.resolve(strict=True):
+            raise OfflineSFTWorkerError("offline SFT bootstrap origin is invalid")
+        phase = "ARGUMENTS"
+        _validate_trainer_arguments(arguments)
+        phase = "IMPORT_GUARD"
+        verify_loaded_owned_module_origins(closure, engine_root=engine_root)
+        install_owned_module_guard(closure, engine_root=engine_root)
+        trainer_directory = engine_root / "Trainers" / "sft"
+        sys.path[:0] = [str(trainer_directory), str(engine_root)]
+        trainer = engine_root.joinpath(
+            *PurePosixPath(OFFLINE_SFT_TRAINER_ENTRYPOINT).parts
+        )
+        sys.argv = [str(trainer), *arguments]
+        phase = "TRAINER"
+        try:
+            runpy.run_path(
+                str(trainer), run_name="__main__",
+                init_globals={"__packaged_runtime_phase__": mark_trainer_milestone},
+            )
+        except SystemExit as error:
+            if not _zero_exit(error):
+                raise
+        phase = "POSTCHECK"
+        verify_loaded_owned_module_origins(closure, engine_root=engine_root)
+    except BaseException as error:
+        raise _WorkerFailure(phase, _failure_category(error), milestone) from None
     return 0
 
 
 def main() -> int:
     try:
         return run_offline_sft_worker()
-    except (OfflineSFTWorkerError, ImportError):
-        print("OFFLINE_SFT_WORKER_REJECTED", file=sys.stderr)
-        return 2
+    except _WorkerFailure as error:
+        # Validate again at the output boundary. Diagnostic metadata is never
+        # authority to retry a consumed run or to relax closure validation.
+        if (type(error) is _WorkerFailure
+                and type(error.phase) is str and error.phase in _FAILURE_PHASES
+                and type(error.category) is str and error.category in _FAILURE_CATEGORIES):
+            message = (
+                "OFFLINE_SFT_WORKER_REJECTED"
+                f" phase={error.phase} category={error.category}"
+            )
+            if (error.phase == "TRAINER" and type(error.milestone) is str
+                    and error.milestone in _TRAINER_MILESTONES):
+                message += f" milestone={error.milestone}"
+            print(message, file=sys.stderr)
+            return 2
+    except BaseException:
+        pass
+    print("OFFLINE_SFT_WORKER_REJECTED", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":

@@ -470,3 +470,35 @@ Create and verify necessary private source/artifact parent directories first.
 Preserve any consumed model-preparation claim after failure. New failures retain
 the existing allowlisted `model_preparation_stage`; never infer that stage or a
 cause for an older generic diagnostic, or replay an uncertain attempt.
+
+### Offline SFT worker rejection
+
+The isolated source worker retains exit code 2 on failure and emits one bounded
+diagnostic line to the existing `tracking/trainer.stderr.log`:
+`OFFLINE_SFT_WORKER_REJECTED phase=<closed> category=<closed>`.
+The phases are `BOOTSTRAP`, `CLOSURE`, `BOOTSTRAP_ORIGIN`, `ARGUMENTS`,
+`IMPORT_GUARD`, `TRAINER`, and `POSTCHECK`. Categories are `REJECTION`, `IMPORT`,
+`OS`, `VALUE`, `SYSTEM_EXIT`, and `OTHER`. During `TRAINER`, the last valid
+existing packaged-trainer hook may append `milestone=<closed>` (for example
+`TORCH_IMPORT` or `MODEL_LIBRARY_LOAD`). Unknown hooks clear that milestone.
+The fallback remains the bare rejection marker. This diagnostic does not print
+exception text, arguments, paths, environment values, or traceback frames;
+library-generated stdout/stderr is a separate surface.
+
+Use the labels to choose the next targeted reproduction. An import category
+does not identify the missing library, and a model-load milestone does not
+establish OOM. Do not interpret an older bare marker retrospectively. Preserve
+the consumed claim, roots, container and retained logs; the diagnostics never
+authorize replay. See `docs/review/offline-sft-worker-diagnostics.md` for the
+October 20 evidence boundary, CPU regressions and fresh-run prerequisites.
+
+After an intentional worker source change, check and refresh existing
+manifests with the checked-in maintainers in dependency order:
+`regenerate_offline_sft_worker_closure.py`,
+`regenerate_packaged_training_worker_closure.py`,
+`regenerate_grpo_worker_closures.py --kind offline`, then `--kind outer`,
+`regenerate_hf_parent_closure.py`, `regenerate_modal_runtime_lock.py`, and
+`regenerate_modal_inference_lock.py` (all under `scripts/`). Run each read-only
+check first, review its drift, use `--write` only for intentional hash refresh,
+then recheck. Preserve inventories and non-hash pins. Sync canonical skills
+with `.skills/scripts/sync_skill_trees.py` and verify its `--check`.
