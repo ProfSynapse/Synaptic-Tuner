@@ -209,7 +209,8 @@ def test_actual_run_grpo_constructor_only_preserves_reward_callbacks_and_stops(t
         def apply_lora_adapters(**kwargs):
             calls.append(("lora", kwargs))
             return object()
-    monkeypatch.setattr(runtime, "build_grpo_config", lambda *args, **kwargs: object())
+    monkeypatch.setattr(runtime, "build_grpo_config", lambda *args, **kwargs:
+                        SimpleNamespace(bf16=False, fp16=True))
     monkeypatch.setattr(runtime, "_QualificationMeasurements", lambda *args, **kwargs:
         SimpleNamespace(reward_wrapper=lambda reward: reward, begin=lambda *a: None,
                         end=lambda *a: None, log=lambda *a: None))
@@ -234,6 +235,7 @@ def test_actual_run_grpo_constructor_only_preserves_reward_callbacks_and_stops(t
             calls.append(("observer", tuple(kwargs))))
     assert isinstance(trainer, Trainer)
     assert [name for name, _ in calls] == ["model", "lora", "observer", "constructor"]
+    assert calls[0][1]["dtype"] == "float16"
     kwargs = calls[-1][1]
     assert len(kwargs["callbacks"]) == 2
     assert all(isinstance(value, Callback) for value in kwargs["callbacks"])
