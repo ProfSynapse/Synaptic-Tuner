@@ -222,8 +222,23 @@ def selected_runner(endpoint, runner=subprocess_runner):
     return run
 
 
+def _require_runtime_root_platform():
+    if (
+        os.name != "posix"
+        or not hasattr(os, "O_NOFOLLOW")
+        or not hasattr(os, "O_DIRECTORY")
+        or any(
+            function not in os.supports_dir_fd
+            for function in (os.open, os.mkdir, os.stat)
+        )
+        or os.stat not in os.supports_follow_symlinks
+    ):
+        raise ValueError("docker_runtime_roots_platform_unavailable")
+
+
 def _prepare_writable_roots(execution_source, artifact_root, artifact_mount):
     """Complete the locked writable layout while preserving a verified cache."""
+    _require_runtime_root_platform()
     names = ("artifacts", "state", "tracking", "cache", "tmp")
     locked = execution_source.roots
     mount = PurePosixPath(artifact_mount)
@@ -300,6 +315,8 @@ def open_host(
     """Cold Docker still needs original qualification assets and local mount roots."""
     if mode not in {"start", "read"}:
         raise ValueError("host mode invalid")
+    if mode == "start":
+        _require_runtime_root_platform()
     selected = config["docker"]
     profile, rich, material, recipes, basis = _components(config)
     run = TrainingRunRef(material.run_id, basis.project_ref)

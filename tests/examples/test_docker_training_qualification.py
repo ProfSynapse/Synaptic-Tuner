@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -87,6 +88,38 @@ def test_cached_model_root_preparation_rejects_unmapped_root(tmp_path):
     with pytest.raises(ValueError, match="docker_runtime_roots_invalid"):
         docker_host._prepare_writable_roots(source, artifact, "/artifacts")
     assert not list(artifact.iterdir())
+
+
+def test_cached_model_root_preparation_rejects_overlap(tmp_path):
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    source = _locked_roots()
+    source.roots["tracking"] = "/artifacts/run/cache/nested"
+
+    with pytest.raises(ValueError, match="docker_runtime_roots_invalid"):
+        docker_host._prepare_writable_roots(source, artifact, "/artifacts")
+    assert not list(artifact.iterdir())
+
+
+def test_runtime_root_platform_refuses_before_filesystem_mutation(
+    tmp_path, monkeypatch
+):
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    monkeypatch.setattr(
+        docker_host.os,
+        "supports_dir_fd",
+        os.supports_dir_fd - {os.mkdir},
+    )
+
+    with pytest.raises(ValueError, match="docker_runtime_roots_platform_unavailable"):
+        docker_host._prepare_writable_roots(_locked_roots(), artifact, "/artifacts")
+    assert not list(artifact.iterdir())
+    state = tmp_path / "attempt"
+    with pytest.raises(ValueError, match="docker_runtime_roots_platform_unavailable"):
+        with docker_host.open_host({}, state_root=state, mode="start"):
+            pytest.fail("unsupported platform reached host composition")
+    assert not state.exists()
 
 
 def committed(path, raw):
@@ -218,6 +251,13 @@ def test_shared_preview_public_start_native_five_and_cold_retained(
         result["start"]["accepted"]
         and len([c for c in commands if c[:2] == ("container", "create")]) == 1
     )
+    writable = kwargs["artifact_root"] / "run"
+    assert all(
+        (writable / name).is_dir()
+        for name in ("artifacts", "state", "tracking", "cache", "tmp")
+    )
+    # A later cold read authenticates retained state; it must not prepare roots.
+    (writable / "tracking").rmdir()
     # Original compiled documents/request may be removed: cold uses exact copies.
     for ref in (
         config["request_file"],
@@ -228,6 +268,7 @@ def test_shared_preview_public_start_native_five_and_cold_retained(
     assert (
         launch.known(retained, "observe", adapter_options=options)["state"] == "running"
     )
+    assert not (writable / "tracking").exists()
     state["status"] = "exited"
     (kwargs["artifact_root"] / "native").mkdir(mode=0o700)
     values = native_values(kwargs, monkeypatch)
