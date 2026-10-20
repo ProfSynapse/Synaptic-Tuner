@@ -86,7 +86,7 @@ Frozen inventory SHA-256:
 This is dependency-installation evidence only; no ML framework was imported
 and no Metal probe, model load or training step was executed.
 
-## Worker boundary that still needs implementation
+## Prepared worker boundary
 
 The pinned
 [dataset code](https://github.com/ml-explore/mlx-lm/blob/93e6d4a6447b3080861985947f0820e76fcb957d/mlx_lm/tuner/datasets.py)
@@ -97,10 +97,35 @@ rows, chat-template options, or per-token target masks.
 
 The pinned
 [trainer](https://github.com/ml-explore/mlx-lm/blob/93e6d4a6447b3080861985947f0820e76fcb957d/mlx_lm/tuner/trainer.py)
-accepts custom loss and batch iteration functions. The native worker should
-consume the existing prepared splits and token semantics explicitly through
-that boundary; it must not silently rerender, resplit or truncate targets.
-Real token-boundary comparisons and parameter updates are still required.
+accepts custom loss and batch iteration functions. The internal
+`tuner/runtime/native_mlx_sft.py` candidate now implements those hooks over
+shared `PreparedSFTExample` values, preserving split/row identities, arbitrary
+ignored-label spans and partial batches without using the upstream loaders.
+CPU contracts check causal shifting, safe ignored targets, token-weighted loss,
+and complete validation traversal. Real tokenizer comparisons, MLX autograd and
+parameter updates are still required.
+
+The associated `native_mlx_runtime.py` comparison accepts an exact host-supplied
+inventory, interpreter hash and original dependency-lock hash. It rejects
+metadata/interpreter drift before worker imports and returns only
+`CANDIDATE_MATCH_ONLY`. It is neither an inventory issuer nor a native runtime
+material. The complete expectation must be reviewed against this 50-package
+lock; the two-package CPU fixtures are only unit-test inputs.
+
+Read-only source inspection on the installed Mac candidate found these hashes:
+
+- `mlx_lm/tuner/trainer.py`:
+  `0b6027fdb11803e951ceee52c83a81f82daa922ea8c6b7ca6888953461064e8e`
+- `mlx_lm/tuner/datasets.py`:
+  `dcd675376d68d1813261c8389236b586b16b9a58a5ea80be8eb535bb9d0e9689`
+- Candidate Python executable:
+  `b41507ef245eac19f76b6ed5a53fbc5eb49bf7b83b95b78414a50fccfe0bf0e7`
+- Linked Homebrew Python framework:
+  `c5042528a85834df4ead67663e949dc938f7354f98c0c7b70c0f4a17830234e8`
+
+`otool -L` confirms that executable loads a separate Homebrew Python framework
+and the system library. Its executable hash alone is not a native-library
+closure. These observations involved no ML imports or GPU activity.
 
 See the [native desktop plan](../../../docs/plans/native-desktop-training-api-v1.md)
 for runtime material, provider lifecycle and artifact acceptance requirements.
