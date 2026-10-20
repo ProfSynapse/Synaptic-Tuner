@@ -1,7 +1,7 @@
 """Private native model preparation contracts; no SDK network or ML imports."""
 
 from contextlib import contextmanager
-from hashlib import sha1
+from hashlib import sha1, sha256
 import io
 import json
 import os
@@ -182,6 +182,92 @@ def test_model_transfer_stops_before_overflow_write_and_retains_claim(candidate)
             preparation._fetch_member(config, member, root, remaining=512, opener=open_url)
     assert (repository / "model.safetensors").read_bytes() == b""
     assert not (workspace / "model-snapshot").exists()
+
+
+def _probe_config(candidate):
+    source, _, workspace = candidate
+    source_path = workspace / "config.json"
+    record = workspace / "transport-probe"
+    record.mkdir(mode=0o700)
+    return {"schema": "synaptic-native-model-transfer-probe/v1",
+            "source_config": str(source_path),
+            "source_sha256": sha256(source_path.read_bytes()).hexdigest(),
+            "member_path": "model.safetensors", "record_root": str(record),
+            "timeout_seconds": 120, "maximum_redirects": 3,
+            "get_body_bytes": 1, "range_requested": False}
+
+
+def test_transfer_probe_caps_body_and_preserves_consumed_acquisition(candidate):
+    config = _probe_config(candidate)
+    root = Path(config["record_root"])
+    old = Path(candidate[0]["workspace_root"])
+    (old / "scratch").mkdir(mode=0o700)
+    (old / "scratch" / "original").write_bytes(b"retained")
+    calls = []
+
+    class Limited(_Response):
+        def read(self, size=-1):
+            assert size == 1
+            return super().read(size)
+
+    def open_url(request, timeout):
+        calls.append((request.get_method(), request.get_header("Range"), timeout))
+        return Limited(b"large body", request.full_url, headers={"Content-Length": "335450584"})
+
+    result = preparation._probe_transfer(config, opener=open_url)
+    assert calls == [("HEAD", None, 20), ("GET", None, 20)]
+    assert result["range_requested"] is False
+    assert result["observations"][1]["hops"][0]["body_bytes_read"] == 1
+    assert (old / "scratch" / "original").read_bytes() == b"retained"
+    assert (root / "probe-result.json").read_bytes() == preparation._canonical(result)
+    with pytest.raises(ValueError, match="consumed"):
+        preparation._probe_transfer(config, opener=open_url)
+    assert len(calls) == 2
+
+
+def test_transfer_probe_unknown_redirect_stops_before_target_and_never_leaks_url(candidate):
+    config = _probe_config(candidate)
+    calls = []
+
+    class Redirect(io.BytesIO):
+        status = 302
+
+        def __init__(self, url):
+            super().__init__(b"")
+            self.url = url
+            self.headers = {"Location": "https://unknown.example/private?token=SECRET"}
+
+        def geturl(self):
+            return self.url
+
+    def redirect(request, timeout):
+        calls.append(request.full_url)
+        return Redirect(request.full_url)
+
+    result = preparation._probe_transfer(config, opener=redirect)
+    assert len(calls) == 2
+    assert all(item["outcome"] == "redirect_destination_rejected"
+               for item in result["observations"])
+    assert all(item["hops"][0]["target_origin_class"] == "unrecognized_origin"
+               for item in result["observations"])
+    assert b"SECRET" not in (Path(config["record_root"]) / "probe-result.json").read_bytes()
+
+
+def test_transfer_probe_binds_source_bytes_and_retains_claim_on_transport_error(candidate):
+    config = _probe_config(candidate)
+    source_path = Path(config["source_config"])
+    source_path.write_bytes(source_path.read_bytes() + b"\n")
+    with pytest.raises(ValueError, match="source bytes"):
+        preparation._probe_transfer(config)
+    assert not (Path(config["record_root"]) / "probe-claim.json").exists()
+    config["source_sha256"] = sha256(source_path.read_bytes()).hexdigest()
+
+    def fail(request, timeout):
+        raise OSError("PRIVATE_URL_TOKEN")
+
+    result = preparation._probe_transfer(config, opener=fail)
+    assert [item["outcome"] for item in result["observations"]] == ["transport_error"] * 2
+    assert b"PRIVATE_URL_TOKEN" not in (Path(config["record_root"]) / "probe-result.json").read_bytes()
 
 
 def test_interrupted_transfer_retains_scratch_and_rejects_replay(candidate):

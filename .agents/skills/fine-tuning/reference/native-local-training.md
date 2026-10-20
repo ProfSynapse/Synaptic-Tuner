@@ -283,9 +283,21 @@ per-file and aggregate caps reject before excess writes. The SDK's unbounded
 snapshot/cache download path is not used. Unexpected redirect hosts fail
 closed. It verifies upstream hashes and publishes private create-only
 snapshots. Its receipt is
-`OBSERVED_NOT_ADMITTED`. No Mac model bytes or tokenizer labels have yet been
-acquired/reviewed. See `examples/training_qualification/native-host.md` for
+`OBSERVED_NOT_ADMITTED`. No complete Mac model snapshot or tokenizer labels
+have yet been acquired/reviewed. See `examples/training_qualification/native-host.md` for
 exact staging paths, publication digests and commands.
+
+The first bounded model acquisition left a consumed partial workspace with
+five verified small members and a zero-byte `model.safetensors`. Preserve it;
+the byte count alone does not diagnose the transport. A separately admitted
+`probe-transfer` uses the existing helper and a fresh private record root,
+binding the exact reviewed acquisition config hash and selected member. It
+performs at most one HEAD chain and one GET chain, up to three redirects each,
+20 seconds per request, 120 seconds for the owned child, and reads no more
+than one GET body byte without a Range header. Unknown redirect origins stop
+before follow. Closed observations contain no URL, query, header value,
+credential or exception text. Its consumed claim and result cannot repair or
+authorize replay of the old acquisition. See the host example for the config.
 
 See `docs/plans/native-desktop-training-api-v1.md` for remaining review and
 real-Mac acceptance. The CPU facade tests substitute the ML child;

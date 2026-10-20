@@ -123,9 +123,11 @@ shape, but exact tokenizer IDs, assistant-only label masks, and
 `enable_thinking=false` still require the pinned tokenizer and shared
 preprocessor before training. These data hashes do not grant training authority.
 
-The model workspace is empty. Its adjacent `model-acquisition-draft.json` is
-incomplete by design: `members` and `tokenizer_members` are empty. No model
-metadata request, weights download or ML import has run. The reusable
+The r12 one-use model acquisition workspace is consumed and partial: five
+small repository members were verified, while `model.safetensors` remains a
+zero-byte exclusive file. No snapshot publication exists. Preserve that
+workspace without retry or cleanup. A zero-byte file does not establish a
+transport cause. The reusable
 `native_model_preparation.py` action supports a later separately reviewed
 acquisition using exact complete upstream metadata, a 2 MiB streaming response
 cap before Hub `ModelInfo` parsing, and exact prewrite bounded HTTPS transfers
@@ -154,6 +156,18 @@ The exact acquisition schema and pins are in
 The template paths are placeholders, never execution authority. Review the
 complete metadata candidate, selected bytes, both snapshot manifests and
 tokenizer loadability before wiring them into the host config.
+
+For a separately admitted transport diagnosis, `probe-transfer` takes a fresh
+private config with schema `synaptic-native-model-transfer-probe/v1`: exact
+`source_config` path and `source_sha256`, `member_path`, fresh `record_root`,
+`timeout_seconds: 120`, `maximum_redirects: 3`, `get_body_bytes: 1`, and
+`range_requested: false`. It creates a consumed claim before network I/O,
+issues at most one HEAD chain and one GET chain through the approved HTTPS
+origins with proxy disabled, and reads at most one GET body byte. It writes
+only closed status, origin-class, encoding and length observations; unknown
+redirect origins stop before request. HEAD and GET may differ, and this probe
+cannot assign a cause to the earlier failed acquisition or authorize retry.
+Use a fresh reviewed workspace for any later acquisition.
 
 ## Reusable preparation and review sequence
 

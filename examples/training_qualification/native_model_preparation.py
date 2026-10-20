@@ -4,6 +4,8 @@
 ``inspect`` validates an independently reviewed inventory without network access.
 ``acquire`` is a later, separately authorized effect. It retains a consumed
 workspace on any uncertain failure and never retries automatically.
+``probe-transfer`` observes only a separately admitted HEAD and one-byte GET
+chain in a fresh private record root; it never repairs an acquisition.
 """
 
 from __future__ import annotations
@@ -15,10 +17,13 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
+import ssl
 import stat
 import sys
 import unicodedata
-from urllib.parse import quote, urlsplit
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,6 +42,19 @@ _MAX_METADATA_RESPONSE = 2 * 1024 * 1024
 _CHUNK = 64 * 1024
 _REDIRECT_HOSTS = frozenset({"huggingface.co", "cdn-lfs.huggingface.co",
                              "cas-bridge.xethub.hf.co"})
+_OFFICIAL_ORIGIN_CLASSES = {
+    "huggingface.co": "hub",
+    "cdn-lfs.huggingface.co": "legacy_lfs",
+    "cas-bridge.xethub.hf.co": "xet_bridge",
+    "cas-server.xethub.hf.co": "official_xet_cas_us",
+    "cas-server.xethub-eu.hf.co": "official_xet_cas_eu",
+    "transfer.xethub.hf.co": "official_xet_transfer_us",
+    "transfer.xethub-eu.hf.co": "official_xet_transfer_eu",
+    "us.aws.cdn.hf.co": "official_cdn_aws_us",
+    "us.gcp.cdn.hf.co": "official_cdn_gcp_us",
+    "cdn-lfs-us-1.hf.co": "official_lfs_us",
+    "cdn-lfs-eu-1.hf.co": "official_lfs_eu",
+}
 _MEMBER_FIELDS = {"path", "size", "kind", "upstream_digest"}
 
 
@@ -133,6 +151,141 @@ def _validate(value):
                 continue
             raise ValueError("model workspace has a prior acquisition claim")
     return members
+
+
+def _probe_selection(value, *, require_fresh):
+    """Bind a diagnostic to reviewed acquisition bytes, not its consumed workspace."""
+    if (type(value) is not dict or set(value) != {
+            "schema", "source_config", "source_sha256", "member_path", "record_root",
+            "timeout_seconds", "maximum_redirects", "get_body_bytes", "range_requested",
+    } or value["schema"] != "synaptic-native-model-transfer-probe/v1"
+            or type(value["source_sha256"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", value["source_sha256"]) is None
+            or value["timeout_seconds"] != 120 or type(value["timeout_seconds"]) is not int
+            or value["maximum_redirects"] != 3 or type(value["maximum_redirects"]) is not int
+            or value["get_body_bytes"] != 1 or type(value["get_body_bytes"]) is not int
+            or value["range_requested"] is not False):
+        raise ValueError("model transfer probe selection differs")
+    source_path = value["source_config"]
+    if (type(source_path) is not str or not Path(source_path).is_absolute()
+            or str(Path(source_path)) != os.path.normpath(source_path)):
+        raise ValueError("model transfer source path differs")
+    with NativeTree(Path(source_path).parent, private=True) as parent:
+        source_raw = parent.read(Path(source_path).name, maximum=1 << 20)
+    if hashlib.sha256(source_raw).hexdigest() != value["source_sha256"]:
+        raise ValueError("model transfer source bytes differ")
+    source = json.loads(source_raw, object_pairs_hook=_pairs,
+                        parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+    _validate_common(source)
+    member_path = value["member_path"]
+    if type(member_path) is not str:
+        raise ValueError("model transfer member differs")
+    relative_member(member_path)
+    selected = [_member(item) for item in source["members"] if type(item) is dict
+                and item.get("path") == member_path]
+    if len(selected) != 1:
+        raise ValueError("model transfer member differs from source")
+    record_root = value["record_root"]
+    if (type(record_root) is not str or not Path(record_root).is_absolute()
+            or str(Path(record_root)) != os.path.normpath(record_root)):
+        raise ValueError("model transfer record root differs")
+    with NativeTree(Path(record_root), private=True) as root:
+        if require_fresh and root.members():
+            raise ValueError("model transfer probe slot is consumed")
+    return source, selected[0]
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+def _origin_class(url):
+    try:
+        parsed = urlsplit(url)
+        if (parsed.scheme != "https" or parsed.username or parsed.password
+                or parsed.port not in (None, 443) or parsed.fragment):
+            return "invalid_origin"
+        return _OFFICIAL_ORIGIN_CLASSES.get(parsed.hostname, "unrecognized_origin")
+    except ValueError:
+        return "invalid_origin"
+
+
+def _probe_chain(url, method, *, expected_size, opener=None):
+    """Observe one method chain; never follow a URL outside acquisition policy."""
+    if opener is None:
+        opener = build_opener(ProxyHandler({}), _NoRedirect()).open
+    hops = []
+    for redirect_count in range(4):
+        if _origin_class(url) == "invalid_origin" or urlsplit(url).hostname not in _REDIRECT_HOSTS:
+            return {"method": method, "outcome": "destination_rejected", "hops": hops}
+        request = Request(url, method=method,
+                          headers={"Accept-Encoding": "identity",
+                                   "User-Agent": "synaptic-native-model-transfer-probe/1"})
+        try:
+            response = opener(request, timeout=20)
+        except HTTPError as error:
+            response = error
+        except (URLError, TimeoutError, socket.timeout, ssl.SSLError, OSError):
+            return {"method": method, "outcome": "transport_error", "hops": hops}
+        with response:
+            status = response.status
+            entry = {"origin_class": _origin_class(url),
+                     "status": status if type(status) is int and 100 <= status <= 599 else 0}
+            headers = response.headers
+            if status in (301, 302, 303, 307, 308):
+                location = headers.get("Location")
+                target = urljoin(url, location) if location else ""
+                entry["target_origin_class"] = _origin_class(target)
+                entry["target_allowed"] = (entry["target_origin_class"] != "invalid_origin"
+                                           and urlsplit(target).hostname in _REDIRECT_HOSTS)
+                hops.append(entry)
+                if not entry["target_allowed"]:
+                    return {"method": method, "outcome": "redirect_destination_rejected",
+                            "hops": hops}
+                if redirect_count == 3:
+                    return {"method": method, "outcome": "redirect_limit", "hops": hops}
+                url = target
+                continue
+            declared = headers.get("Content-Length")
+            entry["content_length"] = (int(declared) if declared is not None
+                                       and declared.isdecimal() and len(declared) <= 12 else None)
+            entry["declared_size_matches"] = entry["content_length"] == expected_size
+            entry["encoding_identity"] = headers.get("Content-Encoding", "identity") == "identity"
+            if method == "GET" and status == 200:
+                try:
+                    entry["body_bytes_read"] = len(response.read(1))
+                except (URLError, TimeoutError, socket.timeout, ssl.SSLError, OSError):
+                    hops.append(entry)
+                    return {"method": method, "outcome": "body_read_error", "hops": hops}
+            hops.append(entry)
+            return {"method": method, "outcome": "response_observed", "hops": hops}
+    raise AssertionError("unreachable redirect bound")
+
+
+def _probe_transfer(config, *, opener=None):
+    source, member = _probe_selection(config, require_fresh=True)
+    root_path = Path(config["record_root"])
+    selection = hashlib.sha256(_canonical(config)).hexdigest()
+    claim = {"schema": "synaptic-native-model-transfer-probe-claim/v1",
+             "selection_sha256": selection, "status": "CONSUMED"}
+    with NativeTree(root_path, private=True) as root:
+        root.write_exclusive("probe-claim.json", _canonical(claim))
+    url = (f"{_ENDPOINT}/{source['repository']}/resolve/{source['revision']}/"
+           f"{quote(member['path'], safe='/')}")
+    observations = [_probe_chain(url, method, expected_size=member["size"], opener=opener)
+                    for method in ("HEAD", "GET")]
+    result = {"schema": "synaptic-native-model-transfer-probe-result/v1",
+              "status": "OBSERVED_NOT_ADMITTED", "selection_sha256": selection,
+              "source_sha256": config["source_sha256"], "member_path": member["path"],
+              "member_declared_bytes": member["size"], "range_requested": False,
+              "observations": observations}
+    raw = _canonical(result)
+    if len(raw) > 4096:
+        raise ValueError("model transfer probe result exceeds bound")
+    with NativeTree(root_path, private=True) as root:
+        root.write_exclusive("probe-result.json", raw)
+    return result
 
 
 def _upstream(member, raw):
@@ -442,12 +595,15 @@ def _acquire_private(config, *, api_type=None, download=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("inspect", "metadata-candidate", "acquire",
+                                          "probe-transfer", "_probe_worker",
                                           "_metadata_worker", "_worker"))
     parser.add_argument("config", type=Path)
     args = parser.parse_args(argv)
     try:
         config = _read_config(args.config)
-        if args.action in {"metadata-candidate", "_metadata_worker"}:
+        if args.action in {"probe-transfer", "_probe_worker"}:
+            _probe_selection(config, require_fresh=True)
+        elif args.action in {"metadata-candidate", "_metadata_worker"}:
             _validate_common(config)
         else:
             _validate(config)
@@ -456,19 +612,23 @@ def main(argv=None):
                       "selection_sha256": hashlib.sha256(_canonical(config)).hexdigest(),
                       "member_count": len(config["members"]),
                       "declared_bytes": sum(item["size"] for item in config["members"])}
+        elif args.action == "_probe_worker":
+            result = _probe_transfer(config)
         elif args.action == "_metadata_worker":
             result = _metadata_candidate(config)
         elif args.action == "_worker":
             result = _acquire(config)
         else:
+            workspace = (config["record_root"] if args.action == "probe-transfer"
+                         else config["workspace_root"])
             environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C",
-                           "HF_HOME": config["workspace_root"],
+                           "HF_HOME": workspace,
                            "HF_HUB_DISABLE_TELEMETRY": "1", "HF_HUB_DISABLE_IMPLICIT_TOKEN": "1",
-                           "XDG_CACHE_HOME": config["workspace_root"],
-                           "TMPDIR": config["workspace_root"]}
+                           "XDG_CACHE_HOME": workspace, "TMPDIR": workspace}
             status, output = run_bounded_command(
                 [sys.executable, "-I", "-B", str(Path(__file__).resolve()),
-                 "_metadata_worker" if args.action == "metadata-candidate" else "_worker",
+                 ("_probe_worker" if args.action == "probe-transfer" else
+                  "_metadata_worker" if args.action == "metadata-candidate" else "_worker"),
                  str(args.config)], environment=environment,
                 maximum=4096, timeout=config["timeout_seconds"],
             )
@@ -479,7 +639,14 @@ def main(argv=None):
             worker_result = json.loads(output[:-1], object_pairs_hook=_pairs)
             if _canonical(worker_result) + b"\n" != output:
                 raise ValueError("model acquisition worker result differs")
-            if args.action == "metadata-candidate":
+            if args.action == "probe-transfer":
+                with NativeTree(Path(config["record_root"]), private=True) as root:
+                    result = json.loads(root.read("probe-result.json", maximum=4096),
+                                        object_pairs_hook=_pairs)
+                if (result != worker_result or result.get("status") != "OBSERVED_NOT_ADMITTED"
+                        or result.get("selection_sha256") != hashlib.sha256(_canonical(config)).hexdigest()):
+                    raise ValueError("model transfer probe result differs")
+            elif args.action == "metadata-candidate":
                 with NativeTree(Path(config["workspace_root"]), private=True) as root:
                     candidate = json.loads(root.read("metadata-candidate.json", maximum=1 << 20))
                 result = {"status": candidate["status"], "repository": config["repository"],
