@@ -1,7 +1,7 @@
 schema_version: synaptic-project/v1
 project:
-  id: synaptic-grpo-final-1da
-  name: GRPO final stable candidate qualification
+  id: synaptic-grpo-0d515-provider-free
+  name: GRPO 0d515 provider-free qualification preparation
 engine:
   requires: ==1.1.0
   api: v1
