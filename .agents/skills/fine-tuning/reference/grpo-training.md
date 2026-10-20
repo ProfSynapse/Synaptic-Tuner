@@ -8,10 +8,16 @@ constructor-only Modal diagnostic, see
 source requires an accelerator at import, so a CPU-only patched-constructor
 probe cannot reach that boundary. The checked-in
 `scripts/qualify_derived_training_image.py release plan-grpo-constructor-input`
-command derives the exact four-row input. The private diagnostic operator
-requires reviewed new image/source and independent read-only retained snapshot
-custody. A diagnostic claim is consumed; it grants no training replay or
-qualification.
+command derives the exact four-row input. The private configured consumer is
+`examples/training_qualification/grpo_constructor.py`; use its owner-only
+example config and separate `prepare-model`, `plan`, `prepare`, `admit`,
+`execute-once`, and `readback` review gates. It requires reviewed new
+image/source and independent read-only retained snapshot custody. A diagnostic
+claim is consumed; it grants no training replay or qualification. The old
+deployment's superseded app generation is retained evidence, while the exact
+old model Volume identity is rehydrated read-only. Generated Unsloth code is
+not source-attested by pinned wheel files, so its type-site label remains
+`OTHER` unless a future exact generated-code proof is added.
 
 ## Public GRPO declarations and CPU preparation
 

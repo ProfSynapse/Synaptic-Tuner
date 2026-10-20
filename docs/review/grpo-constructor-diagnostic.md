@@ -11,7 +11,7 @@ probe cannot reach the constructor. No package, recipe, import-order or model
 change is supported by that observation.
 
 This implementation is **not execution-ready**. It provides a restricted private
-Modal diagnostic operator and a distinct constructor-only result. It has no
+Modal diagnostic operator, a configured host consumer, and a distinct constructor-only result. It has no
 public TrainingAPI method, training verb or CPU qualification receipt. There
 has been no new provider call, image build/pull, model download, GPU attempt,
 ML import, container or training operation in this iteration.
@@ -35,13 +35,17 @@ scope, quote and independently fetched exact Hub member metadata. It binds a
 new diagnostic image deployment **separately** from the retained snapshot
 deployment. The old model-cache Volume is opened by its authenticated retained
 name and ID and mounted read-only. A fresh claim precedes pricing, deployment
-observation and Sandbox creation. Current layouts for both deployments are
+observation and Sandbox creation. The current new deployment layout is
 rechecked. The host creates one named Sandbox from the exact new image ID with
 one L40S, two CPUs, 8 GiB, a 120-second provider lifetime, blocked workload
 network and no Secret. The host has a 240-second overall deadline from before
 its first provider read, plus a bounded 30-second cleanup observation. It
-streams a maximum 128 KiB dispatch and captures at most 8 KiB of closed result;
-stdout and stderr drains are concurrent and bounded.
+streams a maximum 128 KiB dispatch and captures at most 8 KiB of closed result.
+The supervisor redirects stdout and stderr to `/dev/null` before library
+imports. A bounded ready/ack handshake keeps its result file accessible while
+the Sandbox runs; the host makes one sized Modal FileIO read of at most 8193
+bytes. It never opens the SDK's line-buffered stdout or stderr. An absent or
+late handshake leaves the claim consumed and the result inconclusive.
 
 The installed `packaged_grpo_constructor_child` supervisor verifies every
 read-only retained member against the independent Git/LFS metadata and SHA256
@@ -57,14 +61,13 @@ the Sandbox.
 The result includes fixed stage and category, six-argument signature binding,
 patched-class predicate, requested precision versus actual model dtype,
 model/tokenizer/reward/callback/dataset predicates, class/signature hashes, and
-one source-verified type-site label: `UNSLOTH_WRAPPER`,
-`PATCHED_GRPO_INIT`, `TRANSFORMERS_BASE` or `OTHER`. The site mapper inspects
-code-object identity internally and emits no exception text, stack frame,
-line, path, argv or environment. It requires exact installed Unsloth, TRL and
-Transformers source hashes from the reviewed admission. A dtype mismatch with
-an Unsloth wrapper failure would support a targeted precision test, while an
-`OTHER` site remains inconclusive. Neither pattern alone retroactively proves
-the consumed run's cause.
+one conservative type-site label: `TRANSFORMERS_BASE` or `OTHER` for type
+failures. The pinned Unsloth compiler writes trainer code at import time, so
+the reviewed wheel-source hashes do not authenticate that generated region.
+The generated patched-class shape is reported `UNKNOWN`. A positional MRO
+match never labels an Unsloth region. The site mapper emits no exception text,
+stack frame, line, path, argv or environment. Precision and object-shape
+predicates can still separate hypotheses; `OTHER` remains inconclusive.
 
 The host independently reads the exact Sandbox ID's terminal state, then
 terminates and rechecks its owned ID if needed. A late create result receives
@@ -76,15 +79,11 @@ the CPU reader or public training path.
 
 ## Exact remaining admission
 
-Before one effect, root must review and bind:
+Before the constructor GPU effect, root must review and bind:
 
 1. The final clean pushed engine and host superproject commits and gitlink;
-   the complete refreshed GRPO offline closure digest
-   `8c7b40c6aec21c4aeeb1f66c7184de915126640c4a55726099007cdec594eb59`
-   (133 members), outer closure digest
-   `7b4c35b9523cd1d1ef95cd9c66800f13b570ae5d19b1c446a91cbd68b57e2c83`
-   (14 members), Modal runtime lock file SHA256
-   `3bcd5d9ca2065a1462745e738e4e1d60f89e3c31829964bc2f054b795cf4b561`;
+   the final refreshed complete GRPO offline and outer closure digests (fixed
+   133 and 14 members), and Modal runtime lock SHA256;
    the final wheel SHA256, runtime release digest, exact newly deployed Modal
    image ID, pinned Python 3.11.14, SDK 1.5.4 and ML-stack inventory. The old
    image does not contain this child, so a new image/release built by the normal
@@ -95,7 +94,7 @@ Before one effect, root must review and bind:
    app generation, image and three Volume IDs. Bind the old model-cache
    Volume's name and ID separately; old calls, claims, read keys, Secrets and
    resources are never reused as new execution authority or cleaned up.
-3. An independent pinned Hub `model_info(..., files_metadata=True)` read for
+3. An independent bounded pinned Hub metadata read for
    `HuggingFaceTB/SmolLM2-135M-Instruct` revision
    `a91318be21aeaf0879874faa161dcb40c68847e9`, complete expected member
    names/sizes/Git or LFS hashes and reviewed SHA256s (at most 64 members,
@@ -105,13 +104,12 @@ Before one effect, root must review and bind:
 4. The exact four-row compiler input, recipe, plan and JSONL digests and
    reviewed installed Unsloth/TRL/Transformers source SHA256s. The original
    r3 input hash is historical. The retained `plan-ready.json` with the
-   checked-in candidate recipe and rows yields v3 input SHA256
+   checked-in candidate recipe and rows yielded historical v3 input SHA256
    `73b50f888df367fc0cffa18d7ea770b9690a79dfee80e36d97341d67aa0fea23`
    (3336 bytes). This is a provider-free projection, not execution authority;
    rederive against the exact final clean pushed source before admission.
-   The checked-in three-library source manifest SHA256 is
-   `e8253a7c1080ccbf02b52fa746804d9866493e88fd31fb94425f522ddd398afd`;
-   each entry was checked against its exact published wheel bytes.
+   The checked-in three-library source manifest must be bound by its final
+   SHA256 and each entry checked against its exact published wheel bytes.
 5. One unused `grpo-diag-<24 hex>` attempt, distinct claim/catalog/receipt,
    one L40S, two CPUs, 8 GiB, 120-second Sandbox lifetime, blocked workload
    network, no Secret, 8 KiB closed result and a fresh scoped GPU quote under
@@ -119,17 +117,45 @@ Before one effect, root must review and bind:
    excludes CPU, memory, storage and possible usage outside the timeout; it is
    not a provider billing cap.
 
-The private operator accepts only authenticated runtime objects and exact
-reviewed local source inputs; it deliberately has no ready-to-run command until
-these concrete release, deployment, snapshot and source records exist. The
-normal CPU self-check stays one CPU, 512 MiB, 120 seconds and unchanged.
+The private consumer is `examples/training_qualification/grpo_constructor.py`.
+Copy `examples/training_qualification/grpo-constructor.example.json` to an
+owner-only private config, replace every placeholder with exact existing
+paths/profile and two unused attempt refs, and use the locked CPython 3.11.14
+host with Modal SDK 1.5.4. The configured owner-only `hf_token_file` contains
+only token bytes without a newline; the normal builder receives that named
+value without searching ambient environment. The phases are separate:
+
+```text
+python -B examples/training_qualification/grpo_constructor.py --config PRIVATE.json prepare-model
+python -B examples/training_qualification/grpo_constructor.py --config PRIVATE.json plan
+python -B examples/training_qualification/grpo_constructor.py --config PRIVATE.json prepare --reviewed-sha256 BUILD_SHA256
+python -B examples/training_qualification/grpo_constructor.py --config PRIVATE.json admit --reviewed-capture-sha256 CAPTURE_SHA256 --reviewed-model-sha256 MODEL_SHA256
+python -B examples/training_qualification/grpo_constructor.py --config PRIVATE.json execute-once --reviewed-sha256 EXECUTION_SHA256 --reviewed-capture-sha256 CAPTURE_SHA256 --reviewed-model-sha256 MODEL_SHA256
+python -B examples/training_qualification/grpo_constructor.py --config PRIVATE.json readback --reviewed-capture-sha256 CAPTURE_SHA256 --reviewed-model-sha256 MODEL_SHA256
+```
+
+`prepare-model` uses bounded anonymous pinned Hub metadata and small Git-blob
+reads. It never downloads LFS weights. Review its complete inventory and
+SHA256 before `admit`. `plan` binds clean pushed source/gitlink, retained
+release/deployment/Volume, four-row input, recipe, profile, library hashes and
+build scope. `prepare` requires the reviewed plan digest before the normal
+local build, deployment and unchanged CPU self-check. It retains the new wheel,
+release, deployment, quote and CPU receipt for separate review. `admit`
+rechecks the reviewed capture, upstream inventory and exact bindings before
+writing a create-only GPU execution admission. `execute-once` requires that
+reviewed digest, rederives the admission and consumes one claim before Modal
+reads or Sandbox creation. `readback` verifies the distinct signed receipt
+and prints only closed labels and hashes. The historical run supplies model
+custody only. A new deployment may supersede the old app generation, so the
+old facts are authenticated from retention and only its exact Volume is
+rehydrated. The normal CPU self-check remains one CPU, 512 MiB, 120 seconds.
 
 ## Provider-free verification
 
 The focused tests cover four-row compilation and mutations, independent model
 metadata/source/wheel/scope checks, actual GRPO constructor-only selection,
-no trainer train/generate/save path, source-verified code-object region mapping,
-actual hung and flooding child process-group termination, bounded output,
+no trainer train/generate/save path, conservative site classification,
+actual interrupted child process-group termination, bounded result transfer,
 identity-checked Sandbox cleanup and distinct signed receipt readback. These
 CPU tests do not attest the pinned installed Unsloth class, the retained Modal
 snapshot, a Modal GPU or a constructor cause.

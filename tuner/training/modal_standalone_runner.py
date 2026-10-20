@@ -254,7 +254,7 @@ def _private_root() -> Path:
     return training_state_root()
 
 
-def prepare_modal_standalone_local(*, plan, context):
+def prepare_modal_standalone_local(*, plan, context, state_root: Path | None = None):
     """The same mandatory local-only preparation used by normal execution."""
     validate_local_launcher()
     from tuner.execution.providers.modal.runtime_build import current_clean_source_commit
@@ -271,7 +271,9 @@ def prepare_modal_standalone_local(*, plan, context):
     if (admitted.profile_sha256 != plan.profile_sha256 or admitted.image != plan.profile_base_image
             or intent["intent_digest"] != plan.runtime_material_intent_digest):
         raise ModalLocalPreparationUnavailable("PROFILE_BINDING")
-    return prepare_local_inputs(profile_path, root=_private_root(), expected_intent=plan.runtime_material_intent_digest, source_root=context.engine_root)
+    return prepare_local_inputs(profile_path, root=_private_root() if state_root is None else state_root,
+                                expected_intent=plan.runtime_material_intent_digest,
+                                source_root=context.engine_root)
 
 
 def _attempt_journal(root: Path, attempt_ref: str, *, fresh_attempt: bool) -> Path:
@@ -333,7 +335,8 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1 | ModalGRPOR
                        context: object, resources: ResourceSpec,
                        storage: ModalHostStorageV1, effect_id: str,
                        modal_profile: str, modal_environment: str,
-                       builder_cache_root: Path, metrics_admission=None, local_inputs=None):
+                       builder_cache_root: Path, metrics_admission=None, local_inputs=None,
+                       hf_token: str | None = None):
     if type(plan) not in (ModalSFTRecipePlanV1, ModalGRPORecipePlanV1):
         raise ModalStandaloneRunUnavailable("modal_host_configuration_invalid")
     grpo = type(plan) is ModalGRPORecipePlanV1
@@ -361,6 +364,7 @@ def _qualified_runtime(*, modal: object, plan: ModalSFTRecipePlanV1 | ModalGRPOR
     secrets_port = _HostSecrets({
         "SYNAPTIC_TRAIN_AUTHORITY_KEY": secrets.token_hex(32),
         "SYNAPTIC_TRAIN_READER_KEY": secrets.token_hex(32),
+        **({"HF_TOKEN": hf_token} if hf_token is not None else {}),
     })
     hf_ref = SecretRef("env", "HF_TOKEN")
     secrets_port.resolve(hf_ref)

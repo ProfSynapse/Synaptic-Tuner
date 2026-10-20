@@ -4,10 +4,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import queue
 import sys
 import time
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import pytest
 
@@ -254,9 +254,102 @@ def test_fixed_region_projection_uses_class_code_and_verified_sources():
     try:
         Wrapper()
     except TypeError as error:
-        assert child._site(error, Wrapper, True) == "PATCHED_GRPO_INIT"
+        assert child._site(error, Wrapper, True) == "OTHER"
         assert child._site(error, Wrapper, False) == "OTHER"
     assert set(child._empty_result()) == set(child.validate_result(child.canonical(child._empty_result())))
+
+
+def test_isolated_entry_decodes_the_actual_four_row_dataset(tmp_path, monkeypatch):
+    from Trainers.grpo import runtime_v1
+    recipe, dataset_path, plan, _ = _planned_input(tmp_path)
+    probe_raw = derive_probe_input(recipe_path=recipe, plan_ready_path=plan,
+                                   dataset_path=dataset_path)
+    probe = verify_probe_input(probe_raw)
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    for name in ("state", "tmp", "tracking", "artifacts", "prepared_input", "cache"):
+        (tmp_path / name).mkdir()
+    paths = {name: str(tmp_path / name) for name in
+             ("prepared_input", "artifacts", "state", "tracking", "cache", "tmp")}
+    release = SimpleNamespace()
+    dispatch = {"release": {}, "model": {"ref": probe["workload"]["model"]["model_id"],
+                "revision": probe["workload"]["model"]["revision"],
+                "tokenizer_revision": probe["workload"]["model"]["tokenizer_revision"]},
+                "library_sources": {}}
+    environment = tuple(sorted(os.environ.items()))
+    transport = child.canonical({"dispatch": dispatch, "private_manifest": {},
+        "paths": paths, "environment": [list(item) for item in environment],
+        "deadline": time.monotonic() + 30})
+    source = tmp_path / "transport.json"
+    source.write_bytes(transport)
+    output = tmp_path / "result.json"
+    fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    monkeypatch.setattr(child, "validate_dispatch", lambda raw: (dispatch, probe_raw))
+    monkeypatch.setattr(child, "parse_packaged_runtime_release", lambda raw: release)
+    monkeypatch.setattr(child.shared, "_inspect_release", lambda *a, **k: object())
+    monkeypatch.setattr(child, "_installed_import_guard", lambda *a, **k: object())
+    monkeypatch.setattr(child, "grpo_child_environment", lambda *a: environment)
+    monkeypatch.setattr(child.shared, "_retain_private_snapshot", lambda *a, **k:
+                        SimpleNamespace(snapshot=snapshot, check=lambda: None, close=lambda: None))
+    monkeypatch.setattr(child, "_source_verified", lambda sources: True)
+    monkeypatch.setattr(child, "_observation", lambda cls, kwargs, verified: {})
+    monkeypatch.setattr(child, "sys", SimpleNamespace(flags=SimpleNamespace(isolated=1),
+                                                     meta_path=sys.meta_path))
+    monkeypatch.chdir(tmp_path / "tmp")
+    calls = []
+    def run_grpo(**kwargs):
+        from Trainers.grpo.runtime_v1 import admit_grpo_inputs
+        _, rows, _, _ = admit_grpo_inputs(config=kwargs["config"],
+            dataset_bytes=kwargs["dataset_bytes"],
+            reward_documents=kwargs["reward_documents"],
+            reward_schema=kwargs["reward_schema"],
+            model_identity=kwargs["model_identity"], workload=kwargs["workload"])
+        calls.append(len(rows))
+        kwargs["_runtime_milestone"]("TRAINER_SETUP")
+        kwargs["_constructor_observer"](object, {})
+        return object()
+    monkeypatch.setattr(runtime_v1, "run_grpo", run_grpo)
+    try:
+        child._isolated(source, hashlib.sha256(transport).hexdigest(), fd)
+    finally:
+        os.close(fd)
+    assert calls == [4]
+    assert child.validate_result(output.read_bytes())["status"] == "CONSTRUCTED"
+
+
+def test_interrupt_reaps_actual_owned_child(tmp_path, monkeypatch):
+    original = child.subprocess.Popen
+    spawned = []
+    class Interrupted:
+        def __init__(self, real):
+            self.real = real
+            self.pid = real.pid
+            self.returncode = None
+            self.once = True
+        def wait(self, timeout=None):
+            if self.once:
+                self.once = False
+                raise KeyboardInterrupt
+            self.returncode = self.real.wait(timeout=timeout)
+            return self.returncode
+    def launch(*args, **kwargs):
+        real = original(*args, **kwargs)
+        spawned.append(real)
+        return Interrupted(real)
+    monkeypatch.setattr(child.subprocess, "Popen", launch)
+    answer = tmp_path / "answer"
+    fd = os.open(answer, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            child._wait_isolated_child((sys.executable, "-c", "import time; time.sleep(60)"),
+                cwd=tmp_path, environment=dict(os.environ), result_fd=fd,
+                deadline=time.monotonic() + 10)
+        assert spawned[0].poll() is not None
+    finally:
+        if spawned and spawned[0].poll() is None:
+            os.killpg(spawned[0].pid, child.signal.SIGKILL)
+            spawned[0].wait(timeout=5)
+        os.close(fd)
 
 
 def test_precision_distinction_matches_pinned_unsloth_branch_without_torch_import(monkeypatch):
@@ -288,10 +381,81 @@ def test_actual_hung_and_flooding_cpu_children_are_reaped(tmp_path):
         os.close(fd)
 
 
-def test_stream_flood_is_bounded_without_retaining_tail():
-    out = queue.Queue(maxsize=1)
-    host._read_limited(iter([b"x" * 8192, b"y"]), 8192, out)
-    assert out.get_nowait() == (False, None)
+def test_result_file_has_one_aggregate_byte_cap_and_never_opens_line_logs():
+    result = child.canonical(child._empty_result())
+    class File:
+        def __init__(self, raw): self.raw = raw
+        def read(self, size):
+            assert size == 8193
+            return self.raw[:size]
+        def close(self): self.closed = True
+    class Sandbox:
+        @property
+        def stdout(self): raise AssertionError("SDK by-line stdout must not be opened")
+        @property
+        def stderr(self): raise AssertionError("SDK by-line stderr must not be opened")
+        def __init__(self, raw): self.file = File(raw)
+        def open(self, path, mode):
+            assert path == child._RESULT_PATH and mode == "rb"
+            return self.file
+    accepted = Sandbox(result)
+    assert host._read_closed_result_file(accepted) == result
+    assert accepted.file.closed is True
+    oversized = Sandbox(b"x" * 8193)
+    with pytest.raises(ValueError):
+        host._read_closed_result_file(oversized)
+    assert oversized.file.closed is True
+
+
+def test_bounded_hub_metadata_caps_unrelated_body_and_hung_read():
+    class Response:
+        headers = {"Content-Encoding": "identity"}
+        def __init__(self, url, raw, *, hang=False):
+            self.url, self.raw, self.hang = url, raw, hang
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def geturl(self): return self.url
+        def read(self, size):
+            if self.hang:
+                time.sleep(60)
+            raw, self.raw = self.raw[:size], self.raw[size:]
+            return raw
+    class Opener:
+        def __init__(self, raw, *, hang=False): self.raw, self.hang = raw, hang
+        def open(self, request, timeout):
+            assert urlparse(request.full_url).hostname == "huggingface.co"
+            assert timeout <= 5
+            return Response(request.full_url, self.raw, hang=self.hang)
+    url = "https://huggingface.co/api/models/fixture/tiny/revision/" + "a" * 40 + "?blobs=true"
+    with pytest.raises(ValueError):
+        host._bounded_hub_bytes(url, maximum=32, deadline=time.monotonic() + 2,
+                                opener=Opener(b'{"unrelated":"' + b"x" * 100 + b'"}'))
+    start = time.monotonic()
+    with pytest.raises(TimeoutError):
+        host._bounded_hub_bytes(url, maximum=32, deadline=start + 0.15,
+                                opener=Opener(b"{}", hang=True))
+    assert time.monotonic() - start < 2
+
+
+def test_model_manifest_uses_pinned_git_blob_and_lfs_sha_without_weights(monkeypatch):
+    git = b'{"model_type":"fixture"}'
+    git_blob = hashlib.sha1(f"blob {len(git)}\0".encode() + git).hexdigest()
+    lfs_sha = "a" * 64
+    revision = "b" * 40
+    metadata = json.dumps({"sha": revision, "siblings": [
+        {"rfilename": "config.json", "size": len(git), "blobId": git_blob},
+        {"rfilename": "model.safetensors", "size": 100, "blobId": "c" * 40,
+         "lfs": {"size": 100, "sha256": lfs_sha, "pointerSize": 130}},
+    ]}).encode()
+    urls = []
+    def fake_read(url, *, maximum, deadline, opener):
+        urls.append(url)
+        return metadata if "/api/models/" in url else git
+    monkeypatch.setattr(host, "_bounded_hub_bytes", fake_read)
+    manifest = host.prepare_pinned_model_manifest("fixture/tiny", revision)
+    assert manifest["members"][0]["sha256"] == hashlib.sha256(git).hexdigest()
+    assert manifest["members"][1]["sha256"] == lfs_sha
+    assert len(urls) == 2 and "model.safetensors" not in urls[1]
 
 
 def test_cleanup_requires_fresh_exact_id_terminal_proof(monkeypatch):
@@ -467,8 +631,22 @@ def test_restricted_modal_dispatch_uses_one_sandbox_and_separate_receipt(monkeyp
         object_id = "sb-exact"
         def __init__(self):
             self.stdin = Stdin()
-            self.stdout = iter((result,))
-            self.stderr = iter(())
+            self.acknowledged = False
+        def open(self, path, mode):
+            if path == child._READY_PATH and mode == "rb":
+                return SimpleNamespace(read=lambda size: b"1", close=lambda: None)
+            if path == child._RESULT_PATH and mode == "rb":
+                return SimpleNamespace(read=lambda size: result, close=lambda: None)
+            if path == child._ACK_PATH and mode == "xb":
+                def write(raw):
+                    assert raw == b"1"
+                    self.acknowledged = True
+                return SimpleNamespace(write=write, close=lambda: None)
+            raise AssertionError("unexpected sandbox file")
+        @property
+        def stdout(self): raise AssertionError("line-buffered logs forbidden")
+        @property
+        def stderr(self): raise AssertionError("line-buffered logs forbidden")
         def terminate(self, *, wait):
             raise AssertionError("completed Sandbox must not need termination")
     sandbox = Sandbox()
@@ -501,7 +679,8 @@ def test_restricted_modal_dispatch_uses_one_sandbox_and_separate_receipt(monkeyp
             @staticmethod
             def from_id(value, *, client):
                 assert value == "sb-exact"
-                return SimpleNamespace(object_id=value, poll=lambda: 0)
+                return SimpleNamespace(object_id=value,
+                    poll=lambda: 0 if sandbox.acknowledged else None)
     admission = host.ModalGRPOConstructorAdmission(b"dispatch", "grpo-diag-" + "6" * 24,
         source.commit, source.host_commit, release.package_digest, release.manifest_digest,
         deployment.facts_digest,
@@ -524,6 +703,7 @@ def test_restricted_modal_dispatch_uses_one_sandbox_and_separate_receipt(monkeyp
         assert calls[0]["memory"] == (8192, 8192) and calls[0]["timeout"] == 120
         assert calls[0]["block_network"] is True and calls[0]["secrets"] == []
         assert sandbox.stdin.writes == [b"dispatch"]
+        assert sandbox.acknowledged is True
         with pytest.raises(Exception):
             host.execute_modal_grpo_constructor_once(sdk=SDK, client=object(),
                 client_binding=binding, runtime=runtime, snapshot_runtime=runtime,

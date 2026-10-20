@@ -109,7 +109,7 @@ def fixture(tmp_path, monkeypatch):
         for name in ("persistent_root", "destination_root", "scratch_root")
     }
     for path in roots.values():
-        path.mkdir()
+        path.mkdir(mode=0o700)
     return SimpleNamespace(files=files, info=info, calls=calls, roots=roots)
 
 
@@ -226,9 +226,11 @@ def test_real_volume_binding_publishes_verified_model_fixture(fixture, monkeypat
     ))
     target_parent = tmp_path / "__modal" / "volumes"
     target = target_parent / "vo-test"
-    target.mkdir(parents=True)
+    (tmp_path / "__modal").mkdir(mode=0o700)
+    target_parent.mkdir(mode=0o700)
+    target.mkdir(mode=0o700)
     mount = tmp_path / "mnt" / "model-cache"
-    mount.parent.mkdir()
+    mount.parent.mkdir(mode=0o700)
     mount.symlink_to(target, target_is_directory=True)
     marker_name = ".synaptic-test-marker"
     marker = b"m" * 32

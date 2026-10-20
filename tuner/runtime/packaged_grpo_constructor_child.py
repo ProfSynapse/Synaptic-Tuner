@@ -8,6 +8,7 @@ immediately after trainer construction. All observable diagnostics are closed.
 from __future__ import annotations
 
 import base64
+import ast
 import hashlib
 import importlib.resources
 import inspect
@@ -202,23 +203,42 @@ def _code(method):
 def _site(error, trainer_class, sources_verified):
     if not sources_verified:
         return "OTHER"
-    chain = tuple(cls.__dict__.get("__init__") for cls in trainer_class.__mro__)
-    wrapper = _code(chain[0]) if chain else None
-    patched = _code(chain[1]) if len(chain) > 1 else None
-    base = {_code(cls.__dict__["__init__"]) for cls in trainer_class.__mro__
-            if cls.__module__.startswith("transformers") and "__init__" in cls.__dict__}
-    found = "OTHER"
+    # Unsloth 2026.1.2 writes a generated UnslothGRPOTrainer.py at import
+    # time. Its bytes are not covered by the three pinned wheel-source hashes.
+    # MRO position or a generated filename cannot authenticate that code.
+    try:
+        import transformers
+        from trl import GRPOTrainer
+        if trainer_class is not GRPOTrainer:
+            return "OTHER"
+        if transformers.Trainer not in trainer_class.__mro__:
+            return "OTHER"
+        base = _code(transformers.Trainer.__init__)
+        if base is None:
+            return "OTHER"
+        from importlib.util import find_spec
+        origin = find_spec("transformers.trainer").origin
+        if not isinstance(origin, str) or Path(base.co_filename).resolve() != Path(origin).resolve():
+            return "OTHER"
+        source = shared.stable_read(Path(origin), 2 * 1024 * 1024)
+        if hashlib.sha256(source).hexdigest() != pinned_library_sources()["transformers/trainer.py"]:
+            return "OTHER"
+        parsed = ast.parse(source)
+        methods = [method for node in parsed.body if isinstance(node, ast.ClassDef)
+            and node.name == "Trainer" for method in node.body
+            if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and method.name == "__init__"]
+        if len(methods) != 1 or base.co_firstlineno != min(
+                [methods[0].lineno, *(part.lineno for part in methods[0].decorator_list)]):
+            return "OTHER"
+    except BaseException:
+        return "OTHER"
     tb = error.__traceback__
     while tb is not None:
-        code = tb.tb_frame.f_code
-        if code in base:
-            found = "TRANSFORMERS_BASE"
-        elif code is patched and patched is not None:
-            found = "PATCHED_GRPO_INIT"
-        elif code is wrapper and wrapper is not None:
-            found = "UNSLOTH_WRAPPER"
+        if tb.tb_frame.f_code is base:
+            return "TRANSFORMERS_BASE"
         tb = tb.tb_next
-    return found
+    return "OTHER"
 
 
 def _dtype_relation(model, args):
@@ -259,8 +279,14 @@ def _observation(trainer_class, kwargs, verified):
         except TypeError:
             result["signature_binding"] = "REJECTED"
         chain = trainer_class.__mro__
-        if verified and len(chain) > 1:
-            result["patched_class"] = "YES" if chain[0].__name__ == "UnslothGRPOTrainer" and chain[1].__name__ == "_UnslothGRPOTrainer" else "NO"
+        if verified:
+            from trl import GRPOTrainer
+            if trainer_class is GRPOTrainer and len(chain) > 1:
+                # Unsloth compiles the outer class at import time. The pinned
+                # wheel source does not authenticate that generated code.
+                result["patched_class"] = ("UNKNOWN" if
+                    (chain[0].__name__, chain[1].__name__) ==
+                    ("UnslothGRPOTrainer", "_UnslothGRPOTrainer") else "NO")
         model, tokenizer, reward, callbacks, data = (kwargs[key] for key in
             ("model", "processing_class", "reward_funcs", "callbacks", "train_dataset"))
         result["precision_relation"] = _dtype_relation(model, kwargs["args"])
@@ -343,7 +369,7 @@ def _isolated(transport, digest, result_fd):
         if (type(value) is not dict or canonical(value) != raw
                 or set(value) != {"dispatch", "private_manifest", "paths", "environment", "deadline"}):
             raise ValueError
-        dispatch, dataset = validate_dispatch(canonical(value["dispatch"]))
+        dispatch, probe_bytes = validate_dispatch(canonical(value["dispatch"]))
         release = parse_packaged_runtime_release(dispatch["release"])
         paths = shared.PackagedSFTPaths(**{key: Path(item) for key, item in value["paths"].items()})
         environment = grpo_child_environment(release, paths, Path(os.environ.get("SYNAPTIC_MODEL_SNAPSHOT", "")))
@@ -362,8 +388,10 @@ def _isolated(transport, digest, result_fd):
                 {"ref": model["ref"], "revision": model["revision"], "tokenizer_revision": model["tokenizer_revision"]})
             retained.check()
             stage = "INPUT"
-            document = validate_dispatch(canonical(dispatch))[0]
-            probe = verify_probe_input(base64.b64decode(document["input_base64"], validate=True))
+            probe = verify_probe_input(probe_bytes)
+            dataset = base64.b64decode(probe["dataset_base64"], validate=True)
+            if hashlib.sha256(dataset).hexdigest() != probe["dataset_sha256"]:
+                raise ValueError
             stage = "IMPORT"
             from Trainers.grpo.runtime_v1 import run_grpo
             output = paths.state / "grpo-output"
@@ -448,16 +476,29 @@ def _wait_isolated_child(argv, *, cwd, environment, result_fd, deadline):
         start_new_session=True)
     try:
         child.wait(timeout=max(0.1, deadline - time.monotonic()))
-    except subprocess.TimeoutExpired:
-        os.killpg(child.pid, signal.SIGKILL)
-        child.wait(timeout=5)
-        raise TimeoutError from None
+    except BaseException as error:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            child.wait(timeout=5)
+        except BaseException:
+            pass
+        if isinstance(error, subprocess.TimeoutExpired):
+            raise TimeoutError from None
+        raise
     return child.returncode
+
+
+_RESULT_PATH = "/tmp/synaptic-grpo-constructor-result.json"
+_READY_PATH = "/tmp/synaptic-grpo-constructor-ready"
+_ACK_PATH = "/tmp/synaptic-grpo-constructor-ack"
 
 
 def _supervise():
     result = _empty_result()
-    result_fd = os.dup(1)
+    result_fd = os.open(_RESULT_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     sink = os.open(os.devnull, os.O_WRONLY)
     os.dup2(sink, 1)
     os.dup2(sink, 2)
@@ -524,6 +565,21 @@ def _supervise():
             payload = canonical(_empty_result())
         os.write(result_fd, payload)
         os.close(result_fd)
+        with open(_READY_PATH, "xb") as marker:
+            marker.write(b"1")
+            marker.flush()
+            os.fsync(marker.fileno())
+        # Modal's Sandbox filesystem is only live while this process runs.
+        # Keep it available for a bounded host read, then exit on one ack.
+        until = time.monotonic() + 10
+        while time.monotonic() < until:
+            try:
+                with open(_ACK_PATH, "rb") as marker:
+                    if marker.read(2) == b"1":
+                        break
+            except FileNotFoundError:
+                pass
+            time.sleep(0.05)
     return 0
 
 

@@ -1,0 +1,23 @@
+{
+  "schema_version": "synaptic-private-grpo-constructor-consumer/v1",
+  "engine_root": "/ABSOLUTE/CLEAN-PUSHED/synaptic-tuner",
+  "host_root": "/ABSOLUTE/CLEAN-PUSHED/HOST-WITH-EXACT-GITLINK",
+  "project_root": "/ABSOLUTE/GRPO-PROJECT",
+  "recipe_path": "/ABSOLUTE/GRPO-PROJECT/configuration/grpo.yaml",
+  "plan_ready_path": "/ABSOLUTE/GRPO-PROJECT/private/plan-ready.json",
+  "dataset_path": "/ABSOLUTE/GRPO-PROJECT/data/four-rows.jsonl",
+  "profiles_root": "/ABSOLUTE/CLEAN-PUSHED/synaptic-tuner/Trainers/runtime_profiles",
+  "private_root": "/ABSOLUTE/NEW-OWNER-PRIVATE/diagnostic-attempt",
+  "retained_root": "/ABSOLUTE/OLD-OWNER-PRIVATE/retained-run",
+  "retained_run": {
+    "run_id": "modal-f5d1b7f10ce5d4196ccd13f9",
+    "project_ref": "standalone-training"
+  },
+  "modal_profile": "EXPLICIT-EXISTING-PROFILE",
+  "modal_environment": "synaptic-smoke-v1",
+  "hf_token_file": "/ABSOLUTE/OWNER-ONLY/HF-TOKEN-BYTES-WITHOUT-NEWLINE",
+  "model_ref": "HuggingFaceTB/SmolLM2-135M-Instruct",
+  "model_revision": "a91318be21aeaf0879874faa161dcb40c68847e9",
+  "cpu_attempt_ref": "cpu-qual-0123456789abcdef01234567",
+  "diagnostic_attempt_ref": "grpo-diag-0123456789abcdef01234567"
+}

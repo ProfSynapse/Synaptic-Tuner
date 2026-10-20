@@ -11,15 +11,19 @@ from dataclasses import dataclass, field
 import hashlib
 from io import BytesIO
 from pathlib import Path
-import queue
+import signal
+import ssl
 import threading
 import time
+from types import SimpleNamespace
+from urllib.parse import quote, urlparse
+from urllib.request import HTTPSHandler, HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from zipfile import ZipFile
 
 from scripts.capture_modal_inference_runtime import _OperationOwnership, _bounded_call
 from tuner.execution.foundation_v2.canonical import canonical_bytes, parse_canonical_object
 from tuner.execution.providers.modal.facade import MODAL_VOLUME_V1
-from tuner.execution.providers.modal.model_snapshot import authoritative_model_members, _bind_hub_api
+from tuner.execution.providers.modal.model_snapshot import authoritative_model_members
 from tuner.execution.providers.modal.runtime_release_qualification import (
     QUALIFICATION_HMAC_KEY_REF, ModalRuntimeQualificationHmacAuthenticator,
     _observe_current_layout, _validate_deployment_release,
@@ -77,12 +81,128 @@ def _model_role(runtime):
     return matches[0]
 
 
-def _pinned_model_info(model):
-    """One exact public metadata read, independent of the retained Volume."""
-    from huggingface_hub import HfApi, snapshot_download
-    _bind_hub_api(HfApi, snapshot_download)
-    return HfApi(endpoint="https://huggingface.co", token=False).model_info(
-        model["ref"], revision=model["revision"], files_metadata=True, token=False)
+_METADATA_MAX = 1 << 20
+_GIT_FILES_MAX = 32 << 20
+
+
+class _HubOnlyRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        parsed = urlparse(new_url)
+        if parsed.scheme != "https" or parsed.hostname != "huggingface.co":
+            raise ValueError
+        return super().redirect_request(request, fp, code, message, headers, new_url)
+
+
+def _bounded_hub_bytes(path, *, maximum, deadline, opener=None):
+    """Exact anonymous Hub read with a whole-operation timer and byte cap."""
+    if (threading.current_thread() is not threading.main_thread()
+            or not hasattr(signal, "setitimer") or type(path) is not str
+            or not path.startswith("https://huggingface.co/")
+            or type(maximum) is not int or not 0 < maximum <= _GIT_FILES_MAX
+            or time.monotonic() >= deadline):
+        raise ValueError
+    selected = opener or build_opener(ProxyHandler({}), HTTPSHandler(context=ssl.create_default_context()),
+                                      _HubOnlyRedirect())
+    old_handler = signal.getsignal(signal.SIGALRM)
+    old_timer = signal.getitimer(signal.ITIMER_REAL)
+    if old_timer != (0.0, 0.0):
+        raise ValueError
+    def expired(signum, frame):
+        raise TimeoutError
+    signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, max(0.001, deadline - time.monotonic()))
+    try:
+        request = Request(path, headers={"Accept-Encoding": "identity", "Accept": "application/json"})
+        with selected.open(request, timeout=max(0.001, min(5.0, deadline - time.monotonic()))) as response:
+            parsed = urlparse(response.geturl())
+            if (parsed.scheme != "https" or parsed.hostname != "huggingface.co"
+                    or response.headers.get("Content-Encoding", "identity") != "identity"):
+                raise ValueError
+            length = response.headers.get("Content-Length")
+            if length is not None and (not length.isdecimal() or int(length) > maximum):
+                raise ValueError
+            data = bytearray()
+            while True:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError
+                chunk = response.read(min(65536, maximum + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+                if len(data) > maximum:
+                    raise ValueError
+            return bytes(data)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+
+def _pinned_model_info(model, *, opener=None):
+    """Bounded Hub metadata projection; no SDK full-buffer response or token."""
+    ref, revision = model["ref"], model["revision"]
+    if (type(ref) is not str or type(revision) is not str
+            or any(part in {"", ".", ".."} for part in ref.split("/"))
+            or not revision.isascii() or len(revision) != 40
+            or any(ch not in "0123456789abcdef" for ch in revision)):
+        raise ValueError
+    url = "https://huggingface.co/api/models/" + "/".join(quote(part, safe="") for part in ref.split("/"))
+    url += "/revision/" + revision + "?blobs=true"
+    raw = _bounded_hub_bytes(url, maximum=_METADATA_MAX,
+                             deadline=time.monotonic() + 30, opener=opener)
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError
+            result[key] = value
+        return result
+    import json
+    value = json.loads(raw, object_pairs_hook=unique,
+                       parse_constant=lambda value: (_ for _ in ()).throw(ValueError()))
+    if type(value) is not dict or type(value.get("siblings")) is not list:
+        raise ValueError
+    siblings = []
+    for item in value["siblings"]:
+        if type(item) is not dict:
+            raise ValueError
+        lfs = item.get("lfs")
+        if lfs is not None and type(lfs) is not dict:
+            raise ValueError
+        siblings.append(SimpleNamespace(rfilename=item.get("rfilename"), size=item.get("size"),
+            blob_id=item.get("blobId"),
+            lfs=SimpleNamespace(sha256=lfs.get("sha256")) if lfs is not None else None))
+    return SimpleNamespace(sha=value.get("sha"), siblings=siblings)
+
+
+def prepare_pinned_model_manifest(ref, revision, *, opener=None):
+    """Independent upstream inventory; Git bytes are bounded and LFS weights stay remote."""
+    model = {"ref": ref, "revision": revision}
+    members = authoritative_model_members(_pinned_model_info(model, opener=opener),
+                                          model_ref=ref, revision=revision)
+    if len(members) > 64 or sum(size for size, _, _ in members.values()) > 2 * 1024**3:
+        raise ValueError
+    deadline = time.monotonic() + 60
+    git_total = 0
+    result = []
+    for path, (size, kind, upstream) in sorted(members.items()):
+        if kind == "lfs":
+            content_sha = upstream
+        else:
+            git_total += size
+            if git_total > _GIT_FILES_MAX:
+                raise ValueError
+            url = "https://huggingface.co/" + "/".join(quote(part, safe="") for part in ref.split("/"))
+            url += "/resolve/" + revision + "/" + "/".join(quote(part, safe="") for part in path.split("/"))
+            raw = _bounded_hub_bytes(url, maximum=max(1, size), deadline=deadline, opener=opener)
+            if (len(raw) != size or hashlib.sha1(f"blob {size}\0".encode("ascii") + raw).hexdigest()
+                    != upstream):
+                raise ValueError
+            content_sha = hashlib.sha256(raw).hexdigest()
+        result.append({"path": path, "size_bytes": size, "kind": kind,
+                       "upstream_digest": upstream, "sha256": content_sha})
+    prepared = {"ref": ref, "revision": revision, "tokenizer_revision": revision, "members": result}
+    validate_model_inventory(prepared)
+    return prepared
 
 
 def _source_pair(engine_repository, host_repository):
@@ -216,18 +336,39 @@ def admit_modal_grpo_constructor(*, runtime, snapshot_runtime,
         raise ModalGRPOConstructorUnavailable("ADMISSION") from None
 
 
-def _read_limited(stream, limit, output):
-    captured = bytearray()
+def _read_closed_result_file(sandbox):
+    """Modal 1.5.4 FileIO.read(n) requests at most n bytes, without log buffering."""
+    from tuner.runtime.packaged_grpo_constructor_child import _RESULT_PATH
+    stream = sandbox.open(_RESULT_PATH, "rb")
     try:
-        for chunk in stream:
-            if type(chunk) is str:
-                chunk = chunk.encode("utf-8")
-            if type(chunk) is not bytes or len(chunk) > limit - len(captured):
-                raise ValueError
-            captured.extend(chunk)
-        output.put((True, bytes(captured)))
-    except BaseException:
-        output.put((False, None))
+        raw = stream.read(_OUTPUT_MAX + 1)
+        if type(raw) is not bytes or not 0 < len(raw) <= _OUTPUT_MAX:
+            raise ValueError
+        validate_result(raw)
+        return raw
+    finally:
+        stream.close()
+
+
+def _result_ready(sandbox):
+    from tuner.runtime.packaged_grpo_constructor_child import _READY_PATH
+    try:
+        stream = sandbox.open(_READY_PATH, "rb")
+        try:
+            return stream.read(2) == b"1"
+        finally:
+            stream.close()
+    except Exception:
+        return False
+
+
+def _ack_result(sandbox):
+    from tuner.runtime.packaged_grpo_constructor_child import _ACK_PATH
+    stream = sandbox.open(_ACK_PATH, "xb")
+    try:
+        stream.write(b"1")
+    finally:
+        stream.close()
 
 
 def _terminal_by_id(sdk, client, sandbox_id, *, deadline):
@@ -406,11 +547,10 @@ def execute_modal_grpo_constructor_once(*, sdk, client, client_binding, runtime,
             binding=client_binding, runtime=runtime)
         _bounded_call(lambda: _observe_current_layout(observer, runtime.deployment_facts),
                       deadline=deadline, timeout_code="constructor_layout_unavailable")
-        snapshot_observer = _CurrentQualificationObserver(sdk=sdk, client=client,
-            binding=client_binding, runtime=snapshot_runtime)
-        _bounded_call(lambda: _observe_current_layout(
-            snapshot_observer, snapshot_runtime.deployment_facts),
-            deadline=deadline, timeout_code="constructor_layout_unavailable")
+        # The old deployment is retained custody, not a current app generation.
+        # A new release of the same app necessarily supersedes that generation.
+        # Authenticate its retained facts above and rehydrate only its exact
+        # model-cache Volume identity below.
         phase = "VOLUME"
         name = admission.model_cache_volume_name
         if type(name) is not str:
@@ -462,23 +602,24 @@ def execute_modal_grpo_constructor_once(*, sdk, client, client_binding, runtime,
                                sandbox.stdin.write_eof(), sandbox.stdin.drain()),
                       deadline=deadline, timeout_code="constructor_input_indeterminate")
         phase = "OUTPUT"
-        out, err = queue.Queue(maxsize=1), queue.Queue(maxsize=1)
-        threading.Thread(target=_read_limited, args=(sandbox.stdout, _OUTPUT_MAX, out), daemon=True).start()
-        threading.Thread(target=_read_limited, args=(sandbox.stderr, _OUTPUT_MAX, err), daemon=True).start()
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError
-        ok, data = out.get(timeout=remaining)
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError
-        err_ok, err_data = err.get(timeout=remaining)
-        if not ok or not err_ok or err_data or data is None:
-            raise ValueError
-        validate_result(data)
-        result = data
+        ready = False
+        while not ready and time.monotonic() < deadline:
+            ready = _bounded_call(lambda: _result_ready(sandbox), deadline=deadline,
+                                  timeout_code="constructor_output_unavailable")
+            if not ready:
+                terminal = _terminal_by_id(sdk, client, sandbox_id, deadline=deadline)
+                if terminal is not None:
+                    raise ValueError
+                time.sleep(0.05)
+        result = _bounded_call(lambda: _read_closed_result_file(sandbox),
+                               deadline=deadline, timeout_code="constructor_output_unavailable")
+        _bounded_call(lambda: _ack_result(sandbox), deadline=deadline,
+                      timeout_code="constructor_output_unavailable")
         phase = "TERMINAL"
-        terminal = _terminal_by_id(sdk, client, sandbox_id, deadline=deadline)
+        while terminal is None and time.monotonic() < deadline:
+            terminal = _terminal_by_id(sdk, client, sandbox_id, deadline=deadline)
+            if terminal is None:
+                time.sleep(0.05)
         if terminal != 0:
             raise ValueError
         primary = "COMPLETED"
