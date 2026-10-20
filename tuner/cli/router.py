@@ -220,6 +220,7 @@ COMMAND_ROUTES: dict[str, Route] = {
 # `doctor <subcommand>` routes (dispatched by _run_doctor).
 DOCTOR_SUBCOMMAND_ROUTES: dict[str, Route] = {
     "sft-mask": Route(_H + "sft_mask_doctor_handler:SFTMaskDoctorHandler", _run_with_context),
+    "native-training": Route(_H + "native_training_doctor_handler:NativeTrainingDoctorHandler", _run_with_context),
 }
 
 # `train --job-config` is a managed-provider job, not the interactive trainer.
