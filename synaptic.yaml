@@ -1,7 +1,7 @@
 schema_version: synaptic-project/v1
 project:
-  id: synaptic-grpo-0d515-provider-free
-  name: GRPO 0d515 provider-free qualification preparation
+  id: synaptic-grpo-ba228-ordinary
+  name: GRPO ba228 ordinary qualification preparation
 engine:
   requires: ==1.1.0
   api: v1
