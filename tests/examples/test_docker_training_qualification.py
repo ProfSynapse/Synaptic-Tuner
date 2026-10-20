@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,6 +23,70 @@ spec = importlib.util.spec_from_file_location(
 launch = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(launch)
 import docker_host
+
+
+def _locked_roots():
+    return SimpleNamespace(
+        roots={
+            "engine": "/source/engine",
+            "project": "/source/project",
+            **{
+                name: "/artifacts/run/" + name
+                for name in ("artifacts", "state", "tracking", "cache", "tmp")
+            },
+        }
+    )
+
+
+def test_cached_model_start_prepares_all_locked_writable_roots(tmp_path):
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    cache = artifact / "run" / "cache"
+    cache.parent.mkdir(mode=0o700)
+    cache.mkdir(mode=0o700)
+    model = cache / "verified-model"
+    model.write_bytes(b"existing verified model bytes")
+    before = (model.stat().st_ino, model.read_bytes())
+
+    docker_host._prepare_writable_roots(_locked_roots(), artifact, "/artifacts")
+
+    assert all(
+        (artifact / "run" / name).is_dir()
+        for name in ("artifacts", "state", "tracking", "cache", "tmp")
+    )
+    assert (model.stat().st_ino, model.read_bytes()) == before
+
+
+@pytest.mark.parametrize("hostile", ["ancestor_link", "leaf_link", "loose_mode"])
+def test_cached_model_root_preparation_rejects_hostile_paths(tmp_path, hostile):
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    outside = tmp_path / "outside"
+    outside.mkdir(mode=0o700)
+    run = artifact / "run"
+    if hostile == "ancestor_link":
+        run.symlink_to(outside, target_is_directory=True)
+    else:
+        run.mkdir(mode=0o700)
+        leaf = run / "artifacts"
+        if hostile == "leaf_link":
+            leaf.symlink_to(outside, target_is_directory=True)
+        else:
+            leaf.mkdir(mode=0o755)
+
+    with pytest.raises(ValueError, match="docker_runtime_roots_invalid"):
+        docker_host._prepare_writable_roots(_locked_roots(), artifact, "/artifacts")
+
+
+def test_cached_model_root_preparation_rejects_unmapped_root(tmp_path):
+    artifact = tmp_path / "artifact"
+    artifact.mkdir(mode=0o700)
+    source = _locked_roots()
+    source.roots["tracking"] = "/source/tracking"
+
+    with pytest.raises(ValueError, match="docker_runtime_roots_invalid"):
+        docker_host._prepare_writable_roots(source, artifact, "/artifacts")
+    assert not list(artifact.iterdir())
 
 
 def committed(path, raw):
