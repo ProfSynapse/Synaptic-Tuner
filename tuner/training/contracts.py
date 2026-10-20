@@ -287,10 +287,10 @@ class RuntimeSpec:
             image = _required(self.image, "image")
             if _PINNED_IMAGE_PATTERN.fullmatch(image) is None or self.material_digest is not None:
                 raise ValueError("image must be pinned to an exact sha256 digest")
-        elif self.material_kind == "modal_build":
+        elif self.material_kind in {"modal_build", "native_environment"}:
             if self.image is not None or type(self.material_digest) is not str \
                     or _SHA256_PATTERN.fullmatch(self.material_digest) is None:
-                raise ValueError("Modal build runtime requires only a material digest")
+                raise ValueError("non-OCI runtime requires only a material digest")
             image = None
         else:
             raise ValueError("runtime material kind is unsupported")

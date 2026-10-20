@@ -226,3 +226,40 @@ def verify_native_material(raw: bytes, *, expected_digest: str,
                                      dependency_lock=dependency_lock)
     if actual != raw:
         raise ValueError("native runtime bytes or library closure differ")
+
+
+def native_runtime_spec(raw: bytes):
+    """Represent captured native bytes in the existing compiler contract.
+
+    Structural representation grants no execution or hardware authority. The
+    selected host admission must independently authenticate and revalidate the
+    capture; no OCI image or Modal build is fabricated.
+    """
+    from tuner.training.contracts import RuntimeSpec
+
+    value = strict_json(raw)
+    fields = {
+        "schema", "status", "platform", "config", "runtime", "executable",
+        "trees", "files", "native_dependencies", "aliases", "trust_boundary",
+    }
+    if (type(value) is not dict or set(value) != fields
+            or value["schema"] != "synaptic-native-mlx-capture/v1"
+            or value["status"] != "OBSERVED_NOT_ADMITTED" or canonical(value) != raw):
+        raise ValueError("native material capture is invalid")
+    platform_value = value["platform"]
+    if (type(platform_value) is not dict or set(platform_value) != {"system", "machine", "macos", "kernel_build"}
+            or platform_value["system"] != "Darwin" or platform_value["machine"] != "arm64"
+            or any(type(platform_value[key]) is not str or not platform_value[key]
+                   for key in ("macos", "kernel_build"))):
+        raise ValueError("native material platform is unsupported")
+    NativeCaptureConfig.from_dict(value["config"])
+    runtime = value["runtime"]
+    if type(runtime) is not dict or set(runtime) != set(MLXRuntimeExpectation.__dataclass_fields__) | {"status"}:
+        raise ValueError("native material runtime fields differ")
+    if runtime["status"] != "CANDIDATE_MATCH_ONLY":
+        raise ValueError("native material comparison status differs")
+    expected = MLXRuntimeExpectation.from_dict({
+        name: runtime[name] for name in MLXRuntimeExpectation.__dataclass_fields__
+    })
+    return RuntimeSpec(None, expected.dependency_lock_sha256, expected.python_version,
+                       "native_environment", hashlib.sha256(raw).hexdigest())

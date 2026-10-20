@@ -80,6 +80,13 @@ def _values(raw, tensor):
             yield value
 
 
+def finite_adapter_tensors(raw: bytes) -> tuple[NativeTensor, ...]:
+    tensors = adapter_tensors(raw)
+    if any(not math.isfinite(value) for tensor in tensors for value in _values(raw, tensor)):
+        raise ValueError("native adapter has nonfinite parameters")
+    return tensors
+
+
 def verify_adapter_delta(initial: bytes, final: bytes, *, expected_shapes: tuple[tuple[str, tuple[int, ...]], ...]):
     before = adapter_tensors(initial)
     after = adapter_tensors(final)

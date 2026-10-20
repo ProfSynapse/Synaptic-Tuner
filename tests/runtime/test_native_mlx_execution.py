@@ -106,6 +106,7 @@ def test_native_modules_keep_sdk_imports_lazy():
     result = subprocess.run(
         [sys.executable, "-c",
          "import sys; import tuner.runtime.native_mlx_composition; "
+         "import tuner.training.native_mlx_family; import tuner.training.native_mlx_planning; "
          "assert not any(n.split('.')[0] in "
          "{'mlx','mlx_lm','transformers','torch','numpy','modal'} for n in sys.modules)"],
         cwd=Path(__file__).resolve().parents[2], capture_output=True, timeout=15,

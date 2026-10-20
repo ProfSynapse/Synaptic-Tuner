@@ -216,6 +216,27 @@ def test_global_site_packages_alias_is_pinned_but_not_followed(capture):
     assert "must_not_capture.py" not in raw.decode()
 
 
+def test_existing_runtime_spec_represents_native_without_invented_oci(capture):
+    from tuner.training.contracts import RuntimeSpec
+    config, expected, lock, _ = capture
+    captured = json.loads(material.capture_native_material(config, expected, dependency_lock=lock))
+    captured["platform"] = {
+        "system": "Darwin", "machine": "arm64", "macos": "15.0",
+        "kernel_build": "reviewed-kernel-build",
+    }
+    raw = material.canonical(captured)
+    spec = material.native_runtime_spec(raw)
+    assert spec.image is None and spec.material_kind == "native_environment"
+    assert spec.material_digest == hashlib.sha256(raw).hexdigest()
+    assert spec.dependency_lock_digest == expected.dependency_lock_sha256
+    with pytest.raises(ValueError):
+        RuntimeSpec("repo/image@sha256:" + "a" * 64, "b" * 64, "3.11.14",
+                    "native_environment", "c" * 64)
+    captured["platform"]["system"] = "Linux"
+    with pytest.raises(ValueError, match="platform"):
+        material.native_runtime_spec(material.canonical(captured))
+
+
 @pytest.mark.parametrize("raw", [b'{"a":1,"a":2}', b'{"a":NaN}', b'{"a":Infinity}'])
 def test_strict_capture_parser(raw):
     with pytest.raises(ValueError):

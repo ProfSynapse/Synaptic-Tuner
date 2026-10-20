@@ -195,6 +195,7 @@ def execute_native_sft(
             },
         })
         destination.write_exclusive("adapter_config.json", adapter_config)
+        destination.write_exclusive("input_binding.json", canonical(bound.to_dict()))
         result = canonical({
             "schema": "synaptic-native-mlx-sft-result/v1",
             "status": "CANDIDATE_WORKER_COMPLETE",

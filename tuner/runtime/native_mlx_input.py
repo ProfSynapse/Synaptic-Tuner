@@ -86,9 +86,8 @@ class BoundNativeInput:
     workload_digest: str
     runtime_digest: str
 
-    @property
-    def digest(self):
-        return hashlib.sha256(canonical({
+    def to_dict(self):
+        return {
             "schema": "synaptic-native-tokenization-binding/v1",
             "prepared_digest": self.prepared.digest,
             "source": self.prepared.source.to_dict(),
@@ -96,7 +95,11 @@ class BoundNativeInput:
             "tokenization": self.tokenization.to_dict(),
             "workload_digest": self.workload_digest,
             "runtime_digest": self.runtime_digest,
-        })).hexdigest()
+        }
+
+    @property
+    def digest(self):
+        return hashlib.sha256(canonical(self.to_dict())).hexdigest()
 
 
 def read_retained_native_source(source, identity: PreparedTrainingInputIdentity) -> bytes:
