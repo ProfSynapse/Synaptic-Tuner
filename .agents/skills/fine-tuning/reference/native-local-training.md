@@ -298,6 +298,11 @@ than one GET body byte without a Range header. Unknown redirect origins stop
 before follow. Closed observations contain no URL, query, header value,
 credential or exception text. Its consumed claim and result cannot repair or
 authorize replay of the old acquisition. See the host example for the config.
+The r13 one-use probe observed HTTP 302 on both methods to the exact
+`us.aws.cdn.hf.co` origin documented by Hugging Face; the preexisting
+acquisition allowlist rejected it before follow. Only that exact observed
+origin was added to the helper allowlist. Preserve the r12 consumed workspace;
+the probe cannot retroactively establish its failure cause or admit a retry.
 
 See `docs/plans/native-desktop-training-api-v1.md` for remaining review and
 real-Mac acceptance. The CPU facade tests substitute the ML child;

@@ -169,6 +169,13 @@ redirect origins stop before request. HEAD and GET may differ, and this probe
 cannot assign a cause to the earlier failed acquisition or authorize retry.
 Use a fresh reviewed workspace for any later acquisition.
 
+The r13 probe observed HTTP 302 for both HEAD and GET from the exact Hub
+resolve URL to `us.aws.cdn.hf.co`, which the acquisition helper rejected before
+following. Hugging Face lists that exact HTTPS origin as a model-download CDN.
+The helper now allows that one observed origin while retaining the same
+redirect count, size and hash bounds. This observation does not prove why the
+r12 transfer stopped, and no model weight bytes were fetched by the probe.
+
 ## Reusable preparation and review sequence
 
 The following capture/admission/start commands are for a **later reviewed

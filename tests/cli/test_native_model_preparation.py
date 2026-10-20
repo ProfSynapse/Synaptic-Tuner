@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 import tempfile
+from urllib.request import Request
 
 import pytest
 
@@ -182,6 +183,34 @@ def test_model_transfer_stops_before_overflow_write_and_retains_claim(candidate)
             preparation._fetch_member(config, member, root, remaining=512, opener=open_url)
     assert (repository / "model.safetensors").read_bytes() == b""
     assert not (workspace / "model-snapshot").exists()
+
+
+def test_observed_exact_cdn_is_allowed_for_bounded_member_bytes(candidate):
+    config, files, workspace = candidate
+    member = next(item for item in config["members"] if item["path"] == "model.safetensors")
+    repository = workspace / "repository"
+    repository.mkdir(mode=0o700)
+    cdn = "https://us.aws.cdn.hf.co/opaque?signature=PRIVATE"
+
+    def open_url(request, timeout):
+        assert request.full_url.startswith("https://huggingface.co/")
+        assert timeout == 20
+        return _Response(files["model.safetensors"], cdn,
+                         headers={"Content-Length": str(member["size"])})
+
+    with preparation.NativeTree(repository, private=True) as root:
+        assert preparation._fetch_member(config, member, root, remaining=512,
+                                         opener=open_url) == member["size"]
+    assert (repository / "model.safetensors").read_bytes() == files["model.safetensors"]
+    initial = Request("https://huggingface.co/reviewed/model/resolve/" + "a" * 40 + "/model.safetensors")
+    handler = preparation._RestrictedRedirect(preparation._REDIRECT_HOSTS, 2)
+    assert handler.redirect_request(initial, None, 302, "", {}, cdn).full_url == cdn
+    for rejected in ("https://us.aws.cdn.hf.co.evil.test/file",
+                     "http://us.aws.cdn.hf.co/file"):
+        with pytest.raises(ValueError, match="HTTPS destination"):
+            preparation._url_host(rejected, preparation._REDIRECT_HOSTS)
+    with pytest.raises(ValueError, match="HTTPS destination"):
+        handler.redirect_request(initial, None, 302, "", {}, "https://unreviewed.example/file")
 
 
 def _probe_config(candidate):

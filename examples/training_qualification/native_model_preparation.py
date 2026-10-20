@@ -40,8 +40,10 @@ _MAX_BYTES = 512 * 1024 * 1024
 _MAX_FILES = 128
 _MAX_METADATA_RESPONSE = 2 * 1024 * 1024
 _CHUNK = 64 * 1024
+# The exact additional CDN origin was observed in a separately admitted
+# one-byte probe and is listed in Hugging Face's model-download documentation.
 _REDIRECT_HOSTS = frozenset({"huggingface.co", "cdn-lfs.huggingface.co",
-                             "cas-bridge.xethub.hf.co"})
+                             "cas-bridge.xethub.hf.co", "us.aws.cdn.hf.co"})
 _OFFICIAL_ORIGIN_CLASSES = {
     "huggingface.co": "hub",
     "cdn-lfs.huggingface.co": "legacy_lfs",
