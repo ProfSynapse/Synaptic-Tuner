@@ -160,6 +160,22 @@ tokenizer loadability before wiring them into the host config.
 The following capture/admission/start commands are for a **later reviewed
 stage**. The current source and runtime closure cannot pass capture yet.
 
+The r11 private 54-package runtime repair passed checked-in `verify`, but
+static capture remained blocked by the pinned MLX wheel's nested runpath:
+`mlx/core…so` declares `@loader_path/lib` and loads `libmlx.dylib`, which
+requests `@rpath/libjaccl.dylib` without declaring its own rpath. The observed
+file is inside the private package tree. The r12 resolver change models
+declaring-loader-relative inherited paths and still requires a unique captured
+target in every load context. Recheck the exact final pushed source before
+running capture; the r11 unresolved selection is review material only.
+
+The separately admitted r12 model acquisition consumed its one attempt and
+stopped at a zero-byte `scratch/repository/model.safetensors` after several
+small members had been verified. The retained workspace has no published
+model/tokenizer snapshots or acquisition result. This locates the transfer
+boundary, not its cause or retry authority. Preserve scratch and inspect the
+exact transport behavior before any new independently reviewed attempt.
+
 The r9 offline install and metadata-only `verify` succeeded with a private
 Python 3.11.14 executable and 54 locked distributions. Full custody review
 found only two empty uv lock files, `uv-python/.lock` and `venv/.lock`, at mode

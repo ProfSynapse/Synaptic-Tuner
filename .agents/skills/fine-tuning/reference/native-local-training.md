@@ -92,6 +92,16 @@ Mach-O dependencies, uncaptured external files and extra declared OS libraries
 reject. OS shared-cache dependencies are explicitly trusted through the recorded
 OS/kernel build, not falsely described as hashed ordinary files.
 
+For `@rpath` dependencies, inspect the complete captured load chain. Apple's
+dyld runpath list includes `LC_RPATH` entries from the chain leading to the
+dependent image; expand `@loader_path` relative to the image declaring each
+entry. The static checker requires one captured Mach-O target across every
+proven context and rejects ambiguous targets, paths outside the capture,
+unreachable cycles and excessive contexts. Do not insert an ambient search
+directory or a package-specific fallback to make a candidate pass. A static
+capture remains an observation; repeat it on the final independently reviewed
+pushed source after any checker change.
+
 This captures installed bytes and static native dependencies. It does **not**
 prove selected wheel archive provenance, attest dynamic `dlopen` behavior,
 freeze the filesystem against a malicious same-uid process, or independently

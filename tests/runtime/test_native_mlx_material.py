@@ -124,6 +124,92 @@ def test_native_dependency_resolution_requires_captured_target(private_tree):
     assert (str(executable), "@loader_path/Python", str(library)) in edges
 
 
+def test_native_runpath_follows_declaring_loader_through_dependencies(private_tree):
+    package = private_tree / "package"
+    library_dir = package / "lib"
+    library_dir.mkdir(parents=True)
+    core = package / "core.so"
+    engine = library_dir / "libmlx.dylib"
+    helper = library_dir / "libjaccl.dylib"
+    core.write_bytes(macho("@rpath/libmlx.dylib", rpaths=("@loader_path/lib",)))
+    engine.write_bytes(macho("@rpath/libjaccl.dylib"))
+    helper.write_bytes(macho("/usr/lib/libSystem.B.dylib"))
+    links = {str(p): macho_links(p.read_bytes()) for p in (core, engine, helper)}
+    edges = resolve_links(links, executable=str(core), admitted_files=set(links),
+                          system_libraries=("/usr/lib/libSystem.B.dylib",))
+    assert (str(core), "@rpath/libmlx.dylib", str(engine)) in edges
+    assert (str(engine), "@rpath/libjaccl.dylib", str(helper)) in edges
+
+
+def test_native_runpath_expands_relative_to_its_declarer(private_tree):
+    entry = private_tree / "entry"
+    plugin = private_tree / "plugin"
+    libs = private_tree / "libs"
+    for path in (entry, plugin, libs):
+        path.mkdir()
+    executable = entry / "python"
+    core = plugin / "core.so"
+    engine = libs / "libengine.dylib"
+    helper = libs / "libhelper.dylib"
+    executable.write_bytes(macho("@loader_path/../plugin/core.so"))
+    core.write_bytes(macho("@rpath/libengine.dylib", rpaths=("@loader_path/../libs",)))
+    engine.write_bytes(macho("@rpath/libhelper.dylib"))
+    helper.write_bytes(macho())
+    links = {str(p): macho_links(p.read_bytes()) for p in (executable, core, engine, helper)}
+    edges = resolve_links(links, executable=str(executable), admitted_files=set(links),
+                          system_libraries=())
+    assert (str(engine), "@rpath/libhelper.dylib", str(helper)) in edges
+
+
+def test_native_runpath_rejects_different_ancestor_bindings(private_tree):
+    first = private_tree / "first"
+    second = private_tree / "second"
+    for directory in (first, second):
+        directory.mkdir()
+    roots = (private_tree / "first.so", private_tree / "second.so")
+    shared = private_tree / "shared.dylib"
+    leaves = (first / "leaf.dylib", second / "leaf.dylib")
+    for root, directory in zip(roots, (first, second), strict=True):
+        root.write_bytes(macho("@loader_path/shared.dylib",
+                               rpaths=(f"@loader_path/{directory.name}",)))
+    shared.write_bytes(macho("@rpath/leaf.dylib"))
+    for leaf in leaves:
+        leaf.write_bytes(macho())
+    links = {str(p): macho_links(p.read_bytes()) for p in (*roots, shared, *leaves)}
+    with pytest.raises(ValueError, match="differs across load chains"):
+        resolve_links(links, executable=str(roots[0]), admitted_files=set(links),
+                      system_libraries=())
+
+
+def test_native_runpath_rejects_outside_captured_target(private_tree):
+    executable = private_tree / "python"
+    library = private_tree / "libengine.dylib"
+    executable.write_bytes(macho("@rpath/libengine.dylib", rpaths=("@loader_path",)))
+    library.write_bytes(macho())
+    links = {str(p): macho_links(p.read_bytes()) for p in (executable, library)}
+    with pytest.raises(ValueError, match="outside captured"):
+        resolve_links(links, executable=str(executable), admitted_files={str(executable)},
+                      system_libraries=())
+
+
+def test_native_runpath_cycle_is_bounded_and_orphan_cycle_rejects(private_tree):
+    executable = private_tree / "python"
+    first = private_tree / "first.dylib"
+    second = private_tree / "second.dylib"
+    executable.write_bytes(macho("@loader_path/first.dylib"))
+    first.write_bytes(macho("@loader_path/second.dylib"))
+    second.write_bytes(macho("@loader_path/first.dylib"))
+    links = {str(p): macho_links(p.read_bytes()) for p in (executable, first, second)}
+    edges = resolve_links(links, executable=str(executable), admitted_files=set(links),
+                          system_libraries=())
+    assert len(edges) == 3
+    executable.write_bytes(macho())
+    links[str(executable)] = macho_links(executable.read_bytes())
+    with pytest.raises(ValueError, match="no proven load chain"):
+        resolve_links(links, executable=str(executable), admitted_files=set(links),
+                      system_libraries=())
+
+
 @pytest.fixture
 def capture(private_tree, monkeypatch):
     trees = [private_tree / name for name in ("stdlib", "packages", "source")]
