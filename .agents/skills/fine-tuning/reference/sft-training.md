@@ -492,6 +492,27 @@ the consumed claim, roots, container and retained logs; the diagnostics never
 authorize replay. See `docs/review/offline-sft-worker-diagnostics.md` for the
 October 20 evidence boundary, CPU regressions and fresh-run prerequisites.
 
+For a fresh, credential-free Docker Torch import reproduction against an exact
+retained packaged release, use the checked-in
+`scripts/diagnose_docker_torch_import.py` with `--docker`, `--docker-config`,
+`--release`, the exact `--expected-release-sha256`, `--daemon-id`, and a
+nonexistent private `--output-dir`. It
+requires the release's image ID to be present locally, starts one retained
+read-only container with at most 2 CPUs, 4 GiB, 120 seconds, no network or GPU,
+and no model mount. The bare mode has no source mount. Its result and stdout contain only closed import
+categories and identities. Keep the new container and `container.id`; do not
+replay the original training claim. `PASS` only says Torch imports in that
+reduced environment; a rejection class is a reproduction boundary, not proof
+of a dependency or repair. Review the pinned package/runtime source before any
+change to profile, image, or runtime policy.
+When the bare probe passes, an optional `--source-root` binds the exact retained
+staged engine read-only and repeats Torch import after the offline worker's
+closure validation, owned-module guard, and trainer environment bootstrap.
+Use a fresh output directory for each probe. The guarded result adds the last
+closed stage; it still runs no trainer or model code.
+The exact r2 CPU evidence and its unresolved runtime difference are in
+`docs/review/docker-torch-import-r2-diagnosis.md`.
+
 After an intentional worker source change, check and refresh existing
 manifests with the checked-in maintainers in dependency order:
 `regenerate_offline_sft_worker_closure.py`,
