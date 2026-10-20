@@ -556,6 +556,25 @@ workload/source hashes, device scope, host user, caps and filesystem before
 each fresh use. A reconstructed child environment is a source-and-plan
 deduction; it is not a historical capture of the failed child.
 
+`--worker-context --worker-entry` selects a separate, still import-only
+diagnostic. It reconstructs the pinned runtime's trainer argument vector,
+including a one-byte sealed stand-in for the prepared dataset descriptor,
+then invokes the authenticated worker's real `main()` and nested
+`runpy.run_path` trainer entry. A source-bound line trace raises at the
+`UNSLOTH_IMPORT` marker after Torch import, while a narrow import-call and
+module-finder barrier prevents Unsloth entry even if tracing is disabled or
+that module name was cached. A PASS
+requires the worker's closed stop label and real trainer `__main__` module
+binding. The worker still performs its own argument, closure and import-guard
+checks. It records closed environment digests before and after Torch import,
+separate from the supplied and interpreter-startup digests. The diagnostic
+starts through `-I -c` to install that boundary, so it
+does not reproduce the original direct `-I` script startup. The sealed data
+byte, reduced filesystem and absent model weights also differ from the failed
+attempt. Review and admit a fresh one-use command before any live execution;
+do not infer the historical failure cause from either result. See the r12
+proposal in the diagnosis note.
+
 After an intentional worker source change, check and refresh existing
 manifests with the checked-in maintainers in dependency order:
 `regenerate_offline_sft_worker_closure.py`,

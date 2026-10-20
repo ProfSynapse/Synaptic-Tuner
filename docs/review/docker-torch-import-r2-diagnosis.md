@@ -480,3 +480,90 @@ specified reduced host context. It is not a capture of r2's historical child
 and leaves root/default capabilities, 16-GiB memory, writable root, actual
 model cache and full parent preparation different. The r2 failure cause
 remains unproven.
+
+## r12 worker-entry comparison and proposed import-only probe — unexecuted
+
+Read-only inspection of the retained r2 workload and containers on
+2026-10-20 found a prepared dataset reference; the r2 parent source therefore
+passes one sealed prepared-dataset descriptor to its isolated worker. The
+retained workload remains SHA-256
+`1534308c977c2c1cb2b1d80d9cc5c07e31303db63b336686e1c5ccc2644b1064`.
+Its planned environment is bound by that workload, but no historical child
+environment or complete child argv was captured. Source inspection establishes
+how `runtime_v1.py` builds them, not their actual r2 process bytes.
+Read-only execution of the hash-pinned runtime's argument appender against
+the hash-pinned workload produced 34 appended tokens with SHA-256
+`7d2de6641ff52cd26c4515b2c0f65bed94b9eb11ee8ae02b0910596b26fd5937`;
+this is a source/plan reconstruction, not a retained child argv digest.
+
+| Boundary | Retained r2 source/container | Consumed r11 probe | Proposed r12 worker entry |
+| --- | --- | --- | --- |
+| Isolated launch | Parent calls `/opt/unsloth-venv/bin/python3 -I` on the worker script with trainer arguments | Separate `-I -c` child; evaluates worker under a diagnostic name, skipping its main and argument validation | Separate `-I -c` child enters the authenticated worker with `runpy.run_path(..., run_name="__main__")`; worker runs its real admission and nested trainer `runpy.run_path` |
+| Trainer module | Worker sets full trainer argv and `runpy` temporarily binds trainer as `sys.modules['__main__']` | Compiled AST prefix executes in an unattached dictionary with only the trainer filename in argv | Trace checks trainer filename, reconstructed argv and actual `sys.modules['__main__']` namespace, then stops at the authenticated `UNSLOTH_IMPORT` marker |
+| Environment | Parent replaces inherited environment after removing `PYTHONPATH`; r2 process bytes were not retained | Source/plan reconstruction, supplied through a private stdin pipe | Same source/plan reconstruction, with separate supplied and observed digests; stdin is `/dev/null` |
+| Descriptors and stdio | Prepared input gives one sealed `pass_fds` descriptor; stdin `/dev/null`, stdout/stderr exclusive regular files | No prepared descriptor; stdout pipe and stderr `/dev/null` | One sealed one-byte **synthetic** descriptor and `pass_fds`; stdout/stderr private exclusive files under the 64-MiB artifacts tmpfs |
+| Container and data | Root, default capabilities, writable root, 16 GiB; `/source` read-only, `/artifacts` writable and populated with model/cache/prepared state; device 0 | Source-owner UID/GID, caps dropped, read-only root, 4 GiB, private artifacts tmpfs, no model or dataset bytes; device 0 | Keeps those reduced r11 host settings and device 0; no model or historical dataset bytes mounted |
+
+The new `--worker-context --worker-entry` mode uses the pinned runtime source's
+`_append_sft_arguments` and retained workload fields to reconstruct the
+trainer flags and values, while substituting a sealed one-byte descriptor for
+the historical prepared data. The worker's own argument validator, closure
+check, origin verification and import guard execute. The complete authenticated
+trainer source runs through `import torch`; a line trace raises at the unique
+`UNSLOTH_IMPORT` marker, before `from unsloth ...`. A narrow import-call and
+module-finder barrier prevents Unsloth entry if tracing is disabled, even if
+the module name was cached.
+The worker's closed `phase=TRAINER category=OTHER milestone=TORCH_IMPORT` stop
+label, real trainer `__main__` binding and no barrier activation are required
+for `PASS`. It records environment digests immediately before Torch import and
+after it returns, alongside the separate supplied and interpreter-startup
+digests; no environment values are published. Any worker failure reports only
+fixed stage/category labels. The
+helper retains source, release, image and daemon checks, claim-before-create,
+8-KiB Docker CLI output budget, 120-second execution deadline and exactly-once
+owned cleanup. It does not call trainer main, load weights or train.
+
+The wrapper and trace/import barrier are diagnostic additions that can affect
+timing or a transitive Unsloth import; r2 used direct
+`-I` worker script startup. The synthetic dataset content, reduced host
+privileges/filesystem and absent model cache remain differences. A PASS or
+failure would test this narrower worker-entry hypothesis under those reduced
+conditions and could not retroactively identify r2's cause. No container,
+Docker start/exec, device request or ML import occurred while preparing r12.
+
+The **unexecuted** proposed single command, requiring root review and a new
+one-use admission, is:
+
+```sh
+python3 -I scripts/diagnose_docker_torch_import.py \
+  --docker /usr/bin/docker \
+  --docker-config /home/profsynapse/.local/share/synaptic-qualification/docker-sft-stable-image-c/docker-config \
+  --release /home/profsynapse/.local/share/synaptic-qualification/docker-sft-stable-image-c/evidence/runtime-release.json \
+  --expected-release-sha256 5f65824ceb5e250a58314da0233b9c07f1d63f1b0a39892d9b36af694938bfe6 \
+  --daemon-id 24805003-b125-469b-8080-9da4daacd364 \
+  --source-root /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-0d515-20261020/attempt-r2/source/engine \
+  --source-lock /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-0d515-20261020/attempt-r2/material/source-lock.json \
+  --expected-source-lock-sha256 d19aecb2d3ca1b7b6fa32a2445c45251e59d8cac2332293c68b73a61cbff4665 \
+  --expected-manifest-sha256 3842689403abc5b42e28d58545b88616b81cd8fc738ee5557e97159df65d00ef \
+  --expected-closure-digest 8465ff2b7cedb352337e7cedc5bb17cc169892c2eedae0b280569f4a0cde5002 \
+  --worker-context --worker-entry \
+  --expected-workload-sha256 1534308c977c2c1cb2b1d80d9cc5c07e31303db63b336686e1c5ccc2644b1064 \
+  --expected-runtime-sha256 460121aaee3eb83764f67d9307cfb57a3b25c117611d987577b9631b6956a1b3 \
+  --expected-trainer-sha256 75c2ab22fbc5dd80b8ddd5e6d0da816d1451cda0cd620c34717336a39a8a7644 \
+  --gpu-device 0 \
+  --output-dir /home/profsynapse/.local/share/synaptic-qualification/torch-import-r12-20261020/worker-entry-gpu0-1
+```
+
+Before any effect, review the clean pushed checkout and helper SHA-256
+`67224904f0124d6defb38003a9da23406848957ec2a5b2935d5c971781485daa`,
+trusted verifier SHA-256
+`2304eeb00667954510c34cc4aacaa818532a301fbeabf04c2fb165d6cd1d70b5`,
+all pins above, source/ancestor private custody without an active writer,
+unchanged daemon/image, idle GPU 0, and the exact host settings and code delta.
+Create only the fresh parent at mode 0700 and require the named child absent;
+collision or drift rejects without another name. Save and read back a specific
+one-use admission before start. The extra authority sought is exactly one
+fresh bounded GPU-0 import-only diagnostic container, including the synthetic
+sealed descriptor and real worker/runpy entry. This preparation grants none
+of that live authority; all r2/r4/r6/r8/r11 claims and containers remain
+consumed and preserved.

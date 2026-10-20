@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import base64
+import re
 import shutil
 import subprocess
 import sys
@@ -198,6 +200,182 @@ def test_worker_context_program_is_isolated_and_excludes_trainer_main(tmp_path: 
     assert "lines[:positions[2]]" in diagnostic._WORKER_PREFIX_CHILD
     assert identity["child_env_sha256"] != hashlib.sha256(b"").hexdigest()
     assert identity["child_env_lc_ctype_sha256"] != identity["child_env_sha256"]
+
+
+def _entry_fixture(tmp_path: Path, *, disable_trace: bool = False,
+                   import_error: bool = False):
+    """Use real isolated runpy and a non-ML Torch stub at the stop boundary."""
+    engine = tmp_path / "engine"
+    trainer = engine / "Trainers/sft/train_sft.py"
+    trainer.parent.mkdir(parents=True)
+    worker = engine / "tuner/runtime/offline_sft_worker.py"
+    worker.parent.mkdir(parents=True)
+    worker.write_text("""import runpy,sys
+from pathlib import Path
+def mark(value):
+ pass
+def main():
+ if sys.argv[1:]!=['--','--max-steps','1','--no-load-in-4bit']:
+  print('OFFLINE_SFT_WORKER_REJECTED phase=ARGUMENTS category=REJECTION',file=sys.stderr)
+  return 2
+ root=Path(__file__).parents[2]
+ trainer=root/'Trainers/sft/train_sft.py'
+ sys.path[:0]=[str(trainer.parent),str(root)]
+ sys.argv=[str(trainer),*sys.argv[2:]]
+ try:
+  runpy.run_path(str(trainer),run_name='__main__',init_globals={'__packaged_runtime_phase__':mark})
+ except ImportError:
+  print('OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=IMPORT milestone=TORCH_IMPORT',file=sys.stderr)
+  return 2
+ except BaseException:
+  print('OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=OTHER milestone=TORCH_IMPORT',file=sys.stderr)
+  return 2
+ return 0
+if __name__=='__main__':
+ raise SystemExit(main())
+""")
+    trainer.write_text("""import os,sys
+from pathlib import Path
+def _mark_packaged_runtime_phase(value):
+ marker=globals().get('__packaged_runtime_phase__')
+ if marker is not None: marker(value)
+assert __name__=='__main__'
+assert sys.modules['__main__'].__dict__ is globals()
+_mark_packaged_runtime_phase("BOOTSTRAP_ENV")
+os.environ['TORCH_COMPILE_DISABLE']='1'
+_mark_packaged_runtime_phase("TORCH_IMPORT")
+import torch  # noqa: E402
+_mark_packaged_runtime_phase("UNSLOTH_IMPORT")
+from unsloth import is_bfloat16_supported  # noqa: E402
+Path(__file__).with_name('TRAINER_FELL_THROUGH').write_text('bad')
+""")
+    (trainer.parent / "torch.py").write_text(
+        "from pathlib import Path\nimport sys\n"
+        + ("import types\nsys.settrace(None)\n"
+           "sys.modules['unsloth']=types.ModuleType('unsloth')\n"
+           "sys.modules['unsloth'].is_bfloat16_supported=True\n"
+           if disable_trace else "")
+        + "Path(__file__).with_name('TORCH_IMPORTED').write_text('yes')\n"
+        + ("raise ImportError('private detail')\n" if import_error else ""))
+    (trainer.parent / "unsloth.py").write_text(
+        "from pathlib import Path\n"
+        "Path(__file__).with_name('UNSLOTH_IMPORTED').write_text('bad')\n"
+        "is_bfloat16_supported=True\n")
+    environment = {"PATH": "/usr/bin:/bin", "PYTHONNOUSERSITE": "1",
+                   "PYTHONSAFEPATH": "1", "PYTHONDONTWRITEBYTECODE": "1"}
+    observed_locale = {**environment, "LC_CTYPE": "C.UTF-8"}
+    arguments = ["--", "--max-steps", "1", "--no-load-in-4bit"]
+    digest = lambda obj: hashlib.sha256(json.dumps(
+        obj, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    source = diagnostic._WORKER_ENTRY_CHILD
+    for key, value in {
+        "DIAGNOSTIC_ENGINE_ROOT": str(engine),
+        "DIAGNOSTIC_STDERR_PATH": str(tmp_path / "worker-entry.stderr"),
+        "EXPECTED_TRAINER_SHA256": hashlib.sha256(trainer.read_bytes()).hexdigest(),
+        "EXPECTED_WORKER_SHA256": hashlib.sha256(worker.read_bytes()).hexdigest(),
+        "EXPECTED_SUPPLIED_ENV_SHA256": digest(environment),
+        "EXPECTED_LC_ENV_SHA256": digest(observed_locale),
+        "EXPECTED_TRAINER_ARGV_SHA256": digest([str(trainer), *arguments[1:]]),
+    }.items():
+        source = source.replace(key, value)
+    return trainer, source, environment, arguments
+
+
+@pytest.mark.parametrize("disable_trace", [False, True])
+def test_real_isolated_worker_entry_stops_before_unsloth(tmp_path: Path,
+                                                         disable_trace: bool) -> None:
+    trainer, source, environment, arguments = _entry_fixture(
+        tmp_path, disable_trace=disable_trace)
+    with (tmp_path / "worker-entry.stderr").open("xb") as stderr:
+        completed = subprocess.run([sys.executable, "-I", "-c", source, *arguments],
+            cwd=tmp_path, env=environment, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=stderr, timeout=20)
+    assert completed.returncode == 0
+    result = json.loads(completed.stdout)
+    assert result["boundary"] == "BEFORE_UNSLOTH"
+    if disable_trace:
+        assert result["category"] == "OTHER"
+    else:
+        assert result["category"] == "PASS"
+        assert result["stage"] == "TORCH_IMPORT"
+        assert result["context"]["runpy_main_bound"] is True
+        assert (result["context"]["environment_before_torch_sha256"] ==
+                result["context"]["environment_after_torch_sha256"])
+        assert (result["context"]["environment_before_torch_sha256"] !=
+                result["context"]["environment_observed_sha256"])
+    assert (trainer.parent / "TORCH_IMPORTED").exists()
+    assert not (trainer.parent / "UNSLOTH_IMPORTED").exists()
+    assert not (trainer.parent / "TRAINER_FELL_THROUGH").exists()
+
+
+def test_real_isolated_worker_entry_reports_closed_torch_import_failure(
+        tmp_path: Path) -> None:
+    trainer, source, environment, arguments = _entry_fixture(
+        tmp_path, import_error=True)
+    with (tmp_path / "worker-entry.stderr").open("xb") as stderr:
+        completed = subprocess.run([sys.executable, "-I", "-c", source, *arguments],
+            cwd=tmp_path, env=environment, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=stderr, timeout=20)
+    assert completed.returncode == 0
+    result = json.loads(completed.stdout)
+    assert result == {"schema_version": "synaptic-docker-torch-import-child/v1",
+        "category": "IMPORT", "stage": "TORCH_IMPORT", "context": {},
+        "boundary": "BEFORE_UNSLOTH"}
+    assert (trainer.parent / "TORCH_IMPORTED").exists()
+    assert not (trainer.parent / "UNSLOTH_IMPORTED").exists()
+
+
+def test_isolated_worker_entry_rejects_trainer_drift_before_worker(
+        tmp_path: Path) -> None:
+    trainer, source, environment, arguments = _entry_fixture(tmp_path)
+    trainer.write_bytes(trainer.read_bytes() + b"\n")
+    with (tmp_path / "worker-entry.stderr").open("xb") as stderr:
+        completed = subprocess.run([sys.executable, "-I", "-c", source, *arguments],
+            cwd=tmp_path, env=environment, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=stderr, timeout=20)
+    assert completed.returncode == 0
+    result = json.loads(completed.stdout)
+    assert result["category"] == "OTHER" and result["stage"] == "ENTRY_ADMISSION"
+    assert result["context"] == {}
+    assert not (trainer.parent / "TORCH_IMPORTED").exists()
+
+
+def test_worker_entry_source_and_mode_bind_before_docker(tmp_path: Path,
+                                                         monkeypatch) -> None:
+    flags, workload_path = _stage_worker_context(tmp_path)
+    docker, config, state = _fake_docker(tmp_path)
+    monkeypatch.setattr(diagnostic, "_run", lambda *args, **kwargs:
+                        pytest.fail("Docker touched"))
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, worker_entry=True, **flags)
+    assert json.loads(state.read_text())["status"] == "absent"
+    workload = json.loads(workload_path.read_text())
+    workload["configuration"]["document"]["dataset"] = {
+        "ref": "prepared://sha256/" + "a" * 64}
+    workload_path.write_text(json.dumps(workload, sort_keys=True, separators=(",", ":")))
+    flags["expected_workload_sha256"] = hashlib.sha256(workload_path.read_bytes()).hexdigest()
+    identity = diagnostic._worker_context_identity(
+        flags["source_root"], flags["expected_workload_sha256"],
+        flags["expected_runtime_sha256"], flags["expected_trainer_sha256"],
+        flags["expected_closure_digest"])
+    probe = diagnostic._worker_probe(identity, flags["expected_closure_digest"],
+                                     entry_mode=True)
+    ast.parse(probe)
+    assert "EXPECTED_" not in probe and "ENTRY_MODE" not in probe
+    match = re.search(r"base64\.b64decode\('([A-Za-z0-9+/=]+)'\)", probe)
+    assert match is not None
+    child = base64.b64decode(match.group(1)).decode()
+    ast.parse(child)
+    assert "DIAGNOSTIC_ENGINE_ROOT" not in child
+    assert "DIAGNOSTIC_STDERR_PATH" not in child
+    assert "runpy.run_path(str(worker),run_name='__main__')" in child
+    assert "sys.settrace(trace)" in child and "_UnslothBarrier" in child
+    trainer = flags["source_root"] / "Trainers/sft/train_sft.py"
+    trainer.write_bytes(trainer.read_bytes() + b"\n")
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, worker_entry=True, **flags)
+    assert json.loads(state.read_text())["status"] == "absent"
+    assert not (tmp_path / "out").exists()
 
 
 @pytest.mark.parametrize("mutation,expected", [

@@ -220,6 +220,143 @@ os.write(report_fd,(json.dumps({'schema_version':'synaptic-docker-torch-import-c
 os.close(report_fd)
 """
 
+# The optional entry probe enters the authenticated worker's real main and
+# runpy trainer path. A line trace stops on the exact UNSLOTH_IMPORT marker;
+# the independent import finder prevents any Unsloth module body from running
+# if a future interpreter/library disables tracing. Neither hook replaces the
+# worker's argument validation, closure guard or runpy.run_path call.
+_WORKER_ENTRY_CHILD = """import builtins,hashlib,json,os,re,runpy,sys
+from pathlib import Path
+root=Path('DIAGNOSTIC_ENGINE_ROOT')
+worker=root/'tuner/runtime/offline_sft_worker.py'
+trainer=root/'Trainers/sft/train_sft.py'
+stage='ENTRY_ADMISSION'
+category='OTHER'
+context={}
+reached=False
+blocked=False
+class _StopAtMarker(BaseException):
+ pass
+class _BlockedImport(BaseException):
+ pass
+class _UnslothBarrier:
+ def find_spec(self,fullname,path=None,target=None):
+  global blocked
+  if fullname=='unsloth' or fullname.startswith('unsloth.'):
+   blocked=True
+   raise _BlockedImport()
+  return None
+original_import=builtins.__import__
+def guarded_import(name,globals=None,locals=None,fromlist=(),level=0):
+ global blocked
+ if name=='unsloth' or name.startswith('unsloth.'):
+  blocked=True
+  raise _BlockedImport()
+ return original_import(name,globals,locals,fromlist,level)
+def _digest(value):
+ return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+try:
+ observed=dict(os.environ)
+ observed_sha=_digest(observed)
+ if observed_sha=='EXPECTED_SUPPLIED_ENV_SHA256':
+  delta='NONE'
+ elif observed_sha=='EXPECTED_LC_ENV_SHA256' and observed.get('LC_CTYPE')=='C.UTF-8':
+  delta='LC_CTYPE_C_UTF8'
+ else:
+  raise ValueError()
+ if sys.flags.isolated!=1 or sys.flags.no_user_site!=1 or not sys.flags.safe_path or os.environ.get('PYTHONNOUSERSITE')!='1' or os.environ.get('PYTHONSAFEPATH')!='1':
+  raise ValueError()
+ if any(name=='unsloth' or name.startswith('unsloth.') for name in sys.modules):
+  raise ValueError()
+ with worker.open('rb') as stream:
+  worker_raw=stream.read(1024*1024+1)
+ if len(worker_raw)>1024*1024 or hashlib.sha256(worker_raw).hexdigest()!='EXPECTED_WORKER_SHA256':
+  raise ValueError()
+ with trainer.open('rb') as stream:
+  source=stream.read(1024*1024+1)
+ if len(source)>1024*1024 or hashlib.sha256(source).hexdigest()!='EXPECTED_TRAINER_SHA256':
+  raise ValueError()
+ lines=source.decode('utf-8').splitlines(keepends=True)
+ markers=('_mark_packaged_runtime_phase("BOOTSTRAP_ENV")','_mark_packaged_runtime_phase("TORCH_IMPORT")','_mark_packaged_runtime_phase("UNSLOTH_IMPORT")')
+ positions=[next((i for i,line in enumerate(lines) if line.strip()==marker),-1) for marker in markers]
+ if positions[0]<0 or not positions[0]<positions[1]<positions[2] or any(sum(line.strip()==marker for line in lines)!=1 for marker in markers):
+  raise ValueError()
+ if lines[positions[1]+1].strip()!='import torch  # noqa: E402' or lines[positions[2]+1].strip()!='from unsloth import is_bfloat16_supported  # noqa: E402':
+  raise ValueError()
+ import ast
+ prefix=ast.parse(''.join(lines[:positions[2]]),filename=str(trainer))
+ if not isinstance(prefix.body[-1],ast.Import) or [alias.name for alias in prefix.body[-1].names]!=['torch']:
+  raise ValueError()
+ if any(isinstance(node,ast.ImportFrom) and node.module and node.module.split('.')[0] in ('unsloth','transformers','trl') for node in ast.walk(prefix)) or any(isinstance(node,ast.Import) and any(alias.name.split('.')[0] in ('unsloth','transformers','trl') for alias in node.names) for node in ast.walk(prefix)):
+  raise ValueError()
+ arguments=sys.argv[1:]
+ if not arguments or arguments[0]!='--' or _digest([str(trainer),*arguments[1:]])!='EXPECTED_TRAINER_ARGV_SHA256':
+  raise ValueError()
+ context={'environment_supplied_sha256':'EXPECTED_SUPPLIED_ENV_SHA256','environment_observed_sha256':observed_sha,'startup_env_delta':delta,'python_isolated':True,'cwd_sha256':hashlib.sha256(os.getcwd().encode()).hexdigest(),'file_sha256':hashlib.sha256(str(trainer).encode()).hexdigest(),'argv_sha256':_digest([str(trainer),*arguments[1:]]),'runpy_main_bound':False}
+ marker_line=positions[2]+1
+ def trainer_lines(frame,event,arg):
+  global stage,reached
+  if event=='line' and frame.f_lineno==positions[1]+1:
+   stage='TORCH_IMPORT'
+   context['environment_before_torch_sha256']=_digest(dict(os.environ))
+  if event=='line' and frame.f_lineno==marker_line:
+   if frame.f_globals.get('__name__')!='__main__' or frame.f_globals.get('__file__')!=str(trainer) or sys.modules['__main__'].__dict__ is not frame.f_globals or sys.argv!=[str(trainer),*arguments[1:]]:
+    raise ValueError()
+   context['runpy_main_bound']=True
+   context['environment_after_torch_sha256']=_digest(dict(os.environ))
+   context['sys_path_sha256']=hashlib.sha256(json.dumps(sys.path,separators=(',',':')).encode()).hexdigest()
+   reached=True
+   stage='TORCH_IMPORT'
+   raise _StopAtMarker()
+  return trainer_lines
+ def trace(frame,event,arg):
+  if event=='call' and frame.f_code.co_filename==str(trainer):
+   return trainer_lines
+  return None
+ sys.meta_path.insert(0,_UnslothBarrier())
+ builtins.__import__=guarded_import
+ sys.argv=[str(worker),*arguments]
+ stage='WORKER_MAIN'
+ sys.settrace(trace)
+ try:
+  runpy.run_path(str(worker),run_name='__main__')
+ except SystemExit as error:
+  if type(error.code) is not int or error.code!=2:
+   raise ValueError()
+ finally:
+  sys.settrace(None)
+ stderr_path=Path('DIAGNOSTIC_STDERR_PATH')
+ with stderr_path.open('rb') as stream:
+  stream.seek(0,2)
+  stream.seek(max(0,stream.tell()-512))
+  stderr_tail=stream.read(512)
+ closed=stderr_tail.rsplit(b'\\n',2)
+ label=closed[-2] if len(closed)>=2 and closed[-1]==b'' else b''
+ match=re.fullmatch(rb'OFFLINE_SFT_WORKER_REJECTED phase=(BOOTSTRAP|CLOSURE|BOOTSTRAP_ORIGIN|ARGUMENTS|IMPORT_GUARD|TRAINER|POSTCHECK) category=(REJECTION|IMPORT|OS|VALUE|SYSTEM_EXIT|OTHER)(?: milestone=(BOOTSTRAP_ENV|TORCH_IMPORT|UNSLOTH_IMPORT|TRAINER_IMPORT|TRAIN_CALL))?',label)
+ if blocked or match is None:
+  raise ValueError()
+ if reached and context['runpy_main_bound'] and match.groups()==(b'TRAINER',b'OTHER',b'TORCH_IMPORT'):
+  category='PASS'
+ else:
+  context={}
+  phase,kind,milestone=match.groups()
+  stage=({'BOOTSTRAP':'WORKER_MAIN','CLOSURE':'WORKER_CLOSURE','BOOTSTRAP_ORIGIN':'WORKER_ORIGIN','ARGUMENTS':'WORKER_ARGUMENTS','IMPORT_GUARD':'WORKER_GUARD','TRAINER':'TORCH_IMPORT' if milestone==b'TORCH_IMPORT' else 'TRAINER_PREFIX','POSTCHECK':'WORKER_POSTCHECK'})[phase.decode('ascii')]
+  category=kind.decode('ascii') if kind in (b'IMPORT',b'OS') else 'OTHER'
+except ModuleNotFoundError:
+ category='MODULE_NOT_FOUND'
+except ImportError:
+ category='IMPORT'
+except OSError:
+ category='OS'
+except RuntimeError:
+ category='RUNTIME'
+except BaseException:
+ category='OTHER'
+if category!='PASS':
+ context={}
+os.write(1,(json.dumps({'schema_version':'synaptic-docker-torch-import-child/v1','category':category,'stage':stage,'context':context,'boundary':'BEFORE_UNSLOTH'},sort_keys=True,separators=(',',':'))+'\\n').encode('ascii'))
+"""
+
 _WORKER_CONTEXT_PROBE = """import base64,hashlib,json,os,sys,subprocess
 report_fd=os.dup(1)
 null_fd=os.open('/dev/null',os.O_WRONLY)
@@ -261,23 +398,73 @@ try:
   (Path(roots['cache'])/name).mkdir(mode=0o700,exist_ok=True)
  stage='ISOLATED_CHILD'
  child=base64.b64decode('CHILD_SOURCE_B64')
- supplied_raw=json.dumps(environment,sort_keys=True,separators=(',',':')).encode()
- if len(supplied_raw)>8192:
-  raise ValueError()
- process=subprocess.Popen([sys.executable,'-I','-c',child.decode('utf-8')],cwd=roots['tmp'],env=environment,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
- process.stdin.write(supplied_raw)
- process.stdin.close()
- payload=process.stdout.read(4097)
- if len(payload)>4096:
-  process.kill();process.wait()
-  raise ValueError()
- if process.wait()!=0:
-  raise ValueError()
+ if ENTRY_MODE:
+  import fcntl,runpy
+  runtime_path=Path('/source/engine/Trainers/sft/runtime_v1.py')
+  with runtime_path.open('rb') as stream:
+   runtime_raw=stream.read(1024*1024+1)
+  if len(runtime_raw)>1024*1024 or hashlib.sha256(runtime_raw).hexdigest()!='EXPECTED_RUNTIME_SHA256':
+   raise ValueError()
+  runtime_module=runpy.run_path(str(runtime_path),run_name='__diagnostic_runtime__')
+  config=workload['configuration']['document'];dataset=config['dataset']
+  if not dataset['ref'].startswith('prepared://sha256/'):
+   raise ValueError()
+  descriptor=os.memfd_create('synaptic-diagnostic-input',os.MFD_CLOEXEC|os.MFD_ALLOW_SEALING)
+  try:
+   os.write(descriptor,b'0')
+   seals=fcntl.F_SEAL_SEAL|fcntl.F_SEAL_SHRINK|fcntl.F_SEAL_GROW|fcntl.F_SEAL_WRITE
+   fcntl.fcntl(descriptor,fcntl.F_ADD_SEALS,seals)
+   arguments=['--','--model-name',ref,'--model-revision',revision,'--anonymous-model',
+    '--model-cache-dir',roots['cache']+'/model','--model-snapshot',snapshot,
+    '--local-file','/proc/self/fd/'+str(descriptor),
+    '--output-root',roots['state']+'/runtime-v1-trainer/output',
+    '--run-timestamp','runtime-v1','--no-dashboard','--quiet',
+    '--runtime-v1-workload-fingerprint',environment['SYNAPTIC_WORKLOAD_FINGERPRINT'],
+    '--runtime-v1-configuration-revision',workload['configuration']['revision'],
+    '--runtime-v1-tokenizer-revision',model['tokenizer_revision'],
+    '--runtime-v1-dataset-revision',dataset['revision'],
+    '--runtime-v1-dataset-digest',dataset['content_digest']]
+   runtime_module['_append_sft_arguments'](arguments,config['sft'],model,
+    dataset_schema=dataset['format'] if dataset['format']=='synaptic-conversation-sft-row/v1' else None)
+   trainer_argv=['/source/engine/Trainers/sft/train_sft.py',*arguments[1:]]
+   argv_sha=hashlib.sha256(json.dumps(trainer_argv,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+   token='EXPECTED'+'_'+'TRAINER_ARGV_SHA256'
+   child_text=child.decode('utf-8').replace(token,argv_sha)
+   if token in child_text:
+    raise ValueError()
+   stdout_path=Path(roots['tracking'])/'worker-entry.stdout'
+   stderr_path=Path(roots['tracking'])/'worker-entry.stderr'
+   with stdout_path.open('xb') as stdout,stderr_path.open('xb') as stderr:
+    process=subprocess.Popen([sys.executable,'-I','-c',child_text,*arguments],cwd=roots['tmp'],env=environment,stdin=subprocess.DEVNULL,stdout=stdout,stderr=stderr,pass_fds=(descriptor,))
+    if process.wait()!=0:
+     raise ValueError()
+   with stdout_path.open('rb') as stream:
+    payload=stream.read(4097)
+   if len(payload)>4096:
+    raise ValueError()
+  finally:
+   os.close(descriptor)
+ else:
+  supplied_raw=json.dumps(environment,sort_keys=True,separators=(',',':')).encode()
+  if len(supplied_raw)>8192:
+   raise ValueError()
+  process=subprocess.Popen([sys.executable,'-I','-c',child.decode('utf-8')],cwd=roots['tmp'],env=environment,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+  process.stdin.write(supplied_raw)
+  process.stdin.close()
+  payload=process.stdout.read(4097)
+  if len(payload)>4096:
+   process.kill();process.wait()
+   raise ValueError()
+  if process.wait()!=0:
+   raise ValueError()
  result=json.loads(payload)
- if set(result)!={'schema_version','category','stage','context','boundary'} or result['schema_version']!='synaptic-docker-torch-import-child/v1' or result['boundary']!='BEFORE_UNSLOTH' or result['category'] not in ('PASS','MODULE_NOT_FOUND','IMPORT','OS','RUNTIME','OTHER') or result['stage'] not in ('WORKER_IMPORT','WORKER_CLOSURE','WORKER_GUARD','TRAINER_PREFIX','BOOTSTRAP_ENV','TORCH_IMPORT') or not isinstance(result['context'],dict):
+ if set(result)!={'schema_version','category','stage','context','boundary'} or result['schema_version']!='synaptic-docker-torch-import-child/v1' or result['boundary']!='BEFORE_UNSLOTH' or result['category'] not in ('PASS','MODULE_NOT_FOUND','IMPORT','OS','RUNTIME','OTHER') or result['stage'] not in ('WORKER_IMPORT','WORKER_CLOSURE','WORKER_GUARD','TRAINER_PREFIX','BOOTSTRAP_ENV','TORCH_IMPORT','ENTRY_ADMISSION','WORKER_MAIN','WORKER_ORIGIN','WORKER_ARGUMENTS','WORKER_POSTCHECK') or not isinstance(result['context'],dict):
   raise ValueError()
  if result['category']=='PASS':
-  if result['stage']!='TORCH_IMPORT' or set(result['context'])!={'environment_supplied_sha256','environment_observed_sha256','startup_env_delta','python_isolated','cwd_sha256','file_sha256','sys_path_sha256'} or result['context']['python_isolated'] is not True or result['context']['startup_env_delta'] not in ('NONE','LC_CTYPE_C_UTF8') or any(not isinstance(value,str) or not __import__('re').fullmatch('[0-9a-f]{64}',value) for key,value in result['context'].items() if key.endswith('_sha256')):
+  expected_context={'environment_supplied_sha256','environment_observed_sha256','startup_env_delta','python_isolated','cwd_sha256','file_sha256','sys_path_sha256'}
+  if ENTRY_MODE:
+   expected_context.update(('argv_sha256','runpy_main_bound','environment_before_torch_sha256','environment_after_torch_sha256'))
+  if result['stage']!='TORCH_IMPORT' or set(result['context'])!=expected_context or result['context']['python_isolated'] is not True or result['context']['startup_env_delta'] not in ('NONE','LC_CTYPE_C_UTF8') or (ENTRY_MODE and (result['context']['runpy_main_bound'] is not True or result['context']['argv_sha256']!=argv_sha)) or any(not isinstance(value,str) or not __import__('re').fullmatch('[0-9a-f]{64}',value) for key,value in result['context'].items() if key.endswith('_sha256')):
    raise ValueError()
  elif result['context']!={}:
   raise ValueError()
@@ -453,6 +640,7 @@ def _worker_context_identity(source_root: Path, expected_workload: str,
     workload_raw = _read(source_root.parent / "control/workload.json", 1024 * 1024)
     runtime_raw = _read(source_root / "Trainers/sft/runtime_v1.py", 1024 * 1024)
     trainer_raw = _read(source_root / "Trainers/sft/train_sft.py", 1024 * 1024)
+    worker_raw = _read(source_root / "tuner/runtime/offline_sft_worker.py", 1024 * 1024)
     if (hashlib.sha256(workload_raw).hexdigest() != expected_workload
             or hashlib.sha256(runtime_raw).hexdigest() != expected_runtime
             or hashlib.sha256(trainer_raw).hexdigest() != expected_trainer):
@@ -499,20 +687,29 @@ def _worker_context_identity(source_root: Path, expected_workload: str,
     return {"workload_sha256": expected_workload,
             "runtime_sha256": expected_runtime,
             "trainer_sha256": expected_trainer,
+            "worker_sha256": hashlib.sha256(worker_raw).hexdigest(),
             "child_env_sha256": hashlib.sha256(json.dumps(
                 child_env, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
             "child_env_lc_ctype_sha256": hashlib.sha256(json.dumps(
                 child_env_lc_ctype, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
 
 
-def _worker_probe(identity: dict[str, str], closure: str) -> str:
-    child = _WORKER_PREFIX_CHILD.replace("EXPECTED_TRAINER_SHA256",
-                                         identity["trainer_sha256"])
+def _worker_probe(identity: dict[str, str], closure: str, *, entry_mode: bool = False) -> str:
+    child = (_WORKER_ENTRY_CHILD if entry_mode else _WORKER_PREFIX_CHILD)
+    child = child.replace("EXPECTED_TRAINER_SHA256", identity["trainer_sha256"])
     child = child.replace("EXPECTED_SUPPLIED_ENV_SHA256",
                           identity["child_env_sha256"])
+    if entry_mode:
+        child = child.replace("EXPECTED_LC_ENV_SHA256",
+                              identity["child_env_lc_ctype_sha256"])
+        child = child.replace("EXPECTED_WORKER_SHA256", identity["worker_sha256"])
+        child = child.replace("DIAGNOSTIC_ENGINE_ROOT", "/source/engine")
+        child = child.replace("DIAGNOSTIC_STDERR_PATH",
+                              "/artifacts/run/tracking/worker-entry.stderr")
     probe = _WORKER_CONTEXT_PROBE
     replacements = {"EXPECTED_WORKLOAD_SHA256": identity["workload_sha256"],
                     "EXPECTED_CLOSURE_DIGEST": closure,
+                    "EXPECTED_RUNTIME_SHA256": identity["runtime_sha256"],
                     "EXPECTED_ROOTS": repr(_R2_ROOTS),
                     "EXPECTED_ENV_KEYS": repr(sorted(_R2_ENV_KEYS)),
                     "ROOT_BINDINGS": repr({_ROOT_ENV[name]: value
@@ -522,6 +719,7 @@ def _worker_probe(identity: dict[str, str], closure: str) -> str:
         if probe.count(key) != 1:
             raise ValueError("SOURCE_IDENTITY_INVALID")
         probe = probe.replace(key, value)
+    probe = probe.replace("ENTRY_MODE", "True" if entry_mode else "False")
     return probe
 
 
@@ -632,12 +830,13 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
              expected_manifest_sha256: str | None = None,
              expected_closure_digest: str | None = None,
              gpu_device: str | None = None, worker_context: bool = False,
+             worker_entry: bool = False,
              expected_workload_sha256: str | None = None,
              expected_runtime_sha256: str | None = None,
              expected_trainer_sha256: str | None = None) -> dict[str, object]:
     worker_values = (expected_workload_sha256, expected_runtime_sha256,
                      expected_trainer_sha256)
-    if ((worker_context and (source_root is None or any(value is None for value in worker_values)))
+    if (worker_entry and not worker_context) or ((worker_context and (source_root is None or any(value is None for value in worker_values)))
             or (not worker_context and any(value is not None for value in worker_values))):
         raise ValueError("SOURCE_IDENTITY_INVALID")
     if gpu_device not in (None, "0") or (gpu_device is not None and source_root is None):
@@ -679,6 +878,15 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
         expected_manifest_sha256, expected_closure_digest))
     context_identity = ({} if not worker_context else _worker_context_identity(
         source_root, *worker_values, expected_closure_digest))
+    if worker_entry:
+        try:
+            workload = json.loads(_read(source_root.parent / "control/workload.json", 1024 * 1024))
+            dataset_ref = workload["configuration"]["document"]["dataset"]["ref"]
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("SOURCE_IDENTITY_INVALID") from None
+        if (type(dataset_ref) is not str or
+                not re.fullmatch(r"prepared://sha256/[0-9a-f]{64}", dataset_ref)):
+            raise ValueError("SOURCE_IDENTITY_INVALID")
     custody = (() if source_root is None else tuple(_path_custody(path) for path in
         (source_root, source_root.parent / "control/offline-sft-worker-v1.json", source_lock,
          *((source_root.parent / "control/workload.json",) if worker_context else ()))))
@@ -692,7 +900,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     output_dir.mkdir(mode=0o700)
     nonce = secrets.token_hex(16)
     name = "synaptic-torch-import-" + nonce
-    probe = (_worker_probe(context_identity, expected_closure_digest)
+    probe = (_worker_probe(context_identity, expected_closure_digest, entry_mode=worker_entry)
              if worker_context else (_PROBE if source_root is None else
              _GUARDED_PROBE.replace("EXPECTED_CLOSURE_DIGEST", expected_closure_digest)))
     if gpu_device is not None:
@@ -705,7 +913,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     claim = {"schema_version": SCHEMA, "daemon_id": daemon_id, "image_id": image,
              "release_sha256": expected_release_sha256, "source_identity": source_identity,
              "context_identity": context_identity,
-             "name": name, "scope": "worker_context" if worker_context else
+             "name": name, "scope": ("worker_entry" if worker_entry else "worker_context") if worker_context else
              ("bare" if source_root is None else "guarded"),
              "helper_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
              "probe_sha256": hashlib.sha256(probe.encode("utf-8")).hexdigest(),
@@ -834,14 +1042,20 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
             or (worker_context and (child["boundary"] != "BEFORE_UNSLOTH"
                 or child["stage"] not in {"READ_WORKLOAD", "ISOLATED_CHILD",
                     "WORKER_IMPORT", "WORKER_CLOSURE", "WORKER_GUARD",
-                    "TRAINER_PREFIX", "BOOTSTRAP_ENV", "TORCH_IMPORT"}
+                    "TRAINER_PREFIX", "BOOTSTRAP_ENV", "TORCH_IMPORT",
+                    "ENTRY_ADMISSION", "WORKER_MAIN", "WORKER_ORIGIN",
+                    "WORKER_ARGUMENTS", "WORKER_POSTCHECK"}
                 or type(child["context"]) is not dict
                 or (child["category"] == "PASS" and
                     (child["stage"] != "TORCH_IMPORT" or
-                     set(child["context"]) != {"environment_supplied_sha256",
+                     set(child["context"]) != ({"environment_supplied_sha256",
                         "environment_observed_sha256", "startup_env_delta",
                         "python_isolated", "cwd_sha256", "file_sha256", "sys_path_sha256"}
+                        | ({"argv_sha256", "runpy_main_bound",
+                            "environment_before_torch_sha256",
+                            "environment_after_torch_sha256"} if worker_entry else set()))
                      or child["context"]["python_isolated"] is not True
+                     or (worker_entry and child["context"]["runpy_main_bound"] is not True)
                      or child["context"]["startup_env_delta"] not in
                         {"NONE", "LC_CTYPE_C_UTF8"}))
                 or (child["category"] != "PASS" and child["context"] != {})
@@ -868,7 +1082,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
               "container_id": cid, "image_id": image, "daemon_id": daemon_id,
               "runtime_release_digest": digest,
               "training_executed": False, "gpu_used": None if gpu_device is not None else False,
-              "scope": "worker_context" if worker_context else
+              "scope": ("worker_entry" if worker_entry else "worker_context") if worker_context else
               ("bare" if source_root is None else "guarded"),
               "claim_sha256": label, "source_identity": source_identity,
               "context_identity": context_identity,
@@ -899,6 +1113,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-closure-digest")
     parser.add_argument("--gpu-device")
     parser.add_argument("--worker-context", action="store_true")
+    parser.add_argument("--worker-entry", action="store_true")
     parser.add_argument("--expected-workload-sha256")
     parser.add_argument("--expected-runtime-sha256")
     parser.add_argument("--expected-trainer-sha256")
@@ -913,6 +1128,7 @@ def main(argv: list[str] | None = None) -> int:
                           expected_manifest_sha256=args.expected_manifest_sha256,
                           expected_closure_digest=args.expected_closure_digest,
                           gpu_device=args.gpu_device, worker_context=args.worker_context,
+                          worker_entry=args.worker_entry,
                           expected_workload_sha256=args.expected_workload_sha256,
                           expected_runtime_sha256=args.expected_runtime_sha256,
                           expected_trainer_sha256=args.expected_trainer_sha256)
