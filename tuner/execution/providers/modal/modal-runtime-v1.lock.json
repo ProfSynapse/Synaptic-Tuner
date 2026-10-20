@@ -386,7 +386,7 @@
     },
     "model_preparation": {
       "path": "tuner/execution/providers/modal/model_snapshot.py",
-      "sha256": "9d4762b821b2944a8a62932d0aec105c2f6920d64bf4ceed6907e5458799e337"
+      "sha256": "0b6d665c347a65150bff21b8b21c19c1f437bbcd8db69821c4240f2c57e44cdf"
     },
     "sft_runtime": {
       "path": "Trainers/sft/runtime_v1.py",

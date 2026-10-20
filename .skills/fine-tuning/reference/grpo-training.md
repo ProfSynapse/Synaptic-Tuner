@@ -2,15 +2,16 @@
 
 Group Relative Policy Optimization — optimizes model behavior using reward functions against generated completions.
 
-For the consumed 0d515 Modal trainer-setup failure and the bounded,
-constructor-only derived-image diagnostic, see
+For the consumed 0d515 Modal trainer-setup failure and restricted,
+constructor-only Modal diagnostic, see
 `docs/review/grpo-constructor-diagnostic.md`. The pinned Unsloth Zoo 2026.1.2
 source requires an accelerator at import, so a CPU-only patched-constructor
-probe cannot reach that boundary. Use the checked-in
+probe cannot reach that boundary. The checked-in
 `scripts/qualify_derived_training_image.py release plan-grpo-constructor-input`
-and `release diagnose-grpo-constructor` commands after reviewing exact source,
-image, normal plan and offline model custody. A diagnostic claim is consumed;
-it grants no training replay or qualification.
+command derives the exact four-row input. The private diagnostic operator
+requires reviewed new image/source and independent read-only retained snapshot
+custody. A diagnostic claim is consumed; it grants no training replay or
+qualification.
 
 ## Public GRPO declarations and CPU preparation
 
@@ -635,7 +636,7 @@ actual accepted wheel anchor is replaced by the actual newly built current-sourc
 wheel in bound build material, using the existing normal builder. Never invent a
 future SHA or embed a circular self-hash. Actual derived-image inventory and CPU
 GRPO qualification remain separate from the 396-distribution base observation.
-The old SFT profiles and fixed SFT68/outer5 and GRPO131/outer13 inventories stay
+The old SFT profiles and fixed SFT68/outer5 and GRPO133/outer14 inventories stay
 unchanged. Installed candidate tests require an actual fresh wheel, verify the
 runtime YAML/inventory are shipped and the source image profile is absent, and
 label their synthetic Git preplan observation as CPU control-flow evidence only.

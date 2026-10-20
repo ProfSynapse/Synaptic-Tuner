@@ -161,20 +161,29 @@ def admit_packaged_grpo(*, runtime_release, provider_binding, execution_binding,
         raise PackagedGRPOExecutionError("ADMISSION") from None
 
 
-def _invocation_spec(admitted, manifest, dataset_fd, metric_fd, deadline):
-    paths = admitted.paths
-    model = _model(parse_packaged_grpo_workload(admitted.workload_bytes))
-    _, snapshot = shared._private_manifest(manifest, paths, model)
-    environment = dict(admitted.environment)
+def grpo_child_environment(release, paths, snapshot, declared=()):
+    """One replacement environment for normal and constructor-only GRPO children."""
+    environment = dict(declared)
+    if (len(environment) != len(declared)
+            or not set(environment) <= {"CUDA_VISIBLE_DEVICES", "NVIDIA_VISIBLE_DEVICES", "LANG", "LC_ALL"}):
+        raise ValueError
     environment.setdefault("LC_ALL", "C.UTF-8")
     environment.update({
-        "PATH": ":".join(dict.fromkeys((str(Path(admitted.release.python_executable).parent),
+        "PATH": ":".join(dict.fromkeys((str(Path(release.python_executable).parent),
                                        "/usr/local/bin", "/usr/bin", "/bin"))),
         "PYTHONNOUSERSITE": "1", "PYTHONSAFEPATH": "1", "PYTHONDONTWRITEBYTECODE": "1",
         "HF_HOME": str(paths.cache / "huggingface"), "TRANSFORMERS_CACHE": str(paths.cache / "transformers"),
         "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "WANDB_DISABLED": "true",
         "TMPDIR": str(paths.tmp), "HOME": str(paths.tmp), "SYNAPTIC_MODEL_SNAPSHOT": str(snapshot),
     })
+    return tuple(sorted(environment.items()))
+
+
+def _invocation_spec(admitted, manifest, dataset_fd, metric_fd, deadline):
+    paths = admitted.paths
+    model = _model(parse_packaged_grpo_workload(admitted.workload_bytes))
+    _, snapshot = shared._private_manifest(manifest, paths, model)
+    environment = dict(grpo_child_environment(admitted.release, paths, snapshot, admitted.environment))
     payload = {
         "schema_version": _CHILD_SCHEMA, "release": admitted.release.to_dict(),
         "provider_binding": admitted.provider_binding.to_dict(), "execution": admitted.execution.to_dict(),
