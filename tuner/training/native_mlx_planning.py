@@ -79,6 +79,8 @@ class NativeRestrictedAdmissionV1:
     prepared_digest: str
     model_digest: str
     tokenizer_digest: str
+    workload_digest: str
+    selection_digest: str
     run_id: str
     attempt: str
     maximum_updates: int
@@ -89,7 +91,8 @@ class NativeRestrictedAdmissionV1:
 
     def __post_init__(self):
         for name in ("profile_digest", "source_digest", "runtime_digest", "hardware_digest",
-                     "prepared_digest", "model_digest", "tokenizer_digest", "tag"):
+                     "prepared_digest", "model_digest", "tokenizer_digest",
+                     "workload_digest", "selection_digest", "tag"):
             digest_text(getattr(self, name), name)
         for name in ("run_id", "attempt", "authority_ref", "key_ref"):
             safe_ref(getattr(self, name), name)
@@ -107,6 +110,7 @@ class NativePlanningV1:
         "resolved", "run", "workload", "runtime_capture", "limits", "scope",
         "provider", "profile_digest", "_clock", "_qualification",
         "_qualification_authority", "_restricted_admission", "_restricted_authority",
+        "_selection_digest", "_retained_read",
         "descriptor", "executor_descriptor",
         "adapter_descriptor", "binding", "context_value", "plan", "_sealed",
     )
@@ -121,10 +125,14 @@ class NativePlanningV1:
         workload: bytes, runtime_capture: bytes, limits: NativeProcessLimits,
         scope: ExecutionScopeV1, clock, qualification=None, qualification_authority=None,
         restricted_admission=None, restricted_authority=None,
+        selection_digest=None, retained_read=False,
     ):
         if (type(resolved) is not ResolvedTrainingRequest or type(run) is not TrainingRunRef
-                or type(limits) is not NativeProcessLimits or type(scope) is not ExecutionScopeV1):
+                or type(limits) is not NativeProcessLimits or type(scope) is not ExecutionScopeV1
+                or type(retained_read) is not bool):
             raise TypeError("exact native plan inputs required")
+        if selection_digest is not None:
+            digest_text(selection_digest, "selection_digest")
         projection = parse_native_workload(workload)
         runtime = native_runtime_spec(runtime_capture)
         if (run.project_ref != resolved.project_ref
@@ -147,7 +155,8 @@ class NativePlanningV1:
         self._clock = clock
         self._qualification, self._qualification_authority = qualification, qualification_authority
         self._restricted_admission, self._restricted_authority = restricted_admission, restricted_authority
-        available = self.admitted()
+        self._selection_digest, self._retained_read = selection_digest, retained_read
+        available = self.qualified() or self.restricted() or (retained_read and self.restricted_selection())
         self.descriptor = ProviderDescriptor(
             "synaptic-provider-descriptor/v1", "native-mlx", "Apple native MLX", "1.0.0",
             ProviderCapabilities(available, False, False, False, available, False),
@@ -188,23 +197,33 @@ class NativePlanningV1:
         if not self.qualified():
             raise ValueError("native_hardware_qualification_required")
 
-    def restricted(self):
+    def restricted_selection(self):
         proof = self._restricted_admission
         try:
             workload = parse_native_workload(self.workload)
-            now = datetime.fromisoformat(self._clock.now().replace("Z", "+00:00"))
-            expires = datetime.fromisoformat(proof.expires_at.replace("Z", "+00:00"))
             return (
                 type(proof) is NativeRestrictedAdmissionV1
                 and proof.profile_digest == self.profile_digest
                 and proof.source_digest == self.resolved.source_digest
                 and proof.runtime_digest == self.resolved.runtime_digest
                 and proof.prepared_digest == workload.source.content_digest
+                and proof.workload_digest == self.resolved.workload_digest
+                and self._selection_digest is not None
+                and proof.selection_digest == self._selection_digest
                 and proof.run_id == self.run.run_id
                 and proof.maximum_updates == workload.controls.iterations
-                and now < expires <= now + timedelta(hours=1)
                 and self._restricted_authority.authenticate(proof) is True
             )
+        except Exception:
+            return False
+
+    def restricted(self):
+        if not self.restricted_selection():
+            return False
+        try:
+            now = datetime.fromisoformat(self._clock.now().replace("Z", "+00:00"))
+            expires = datetime.fromisoformat(self._restricted_admission.expires_at.replace("Z", "+00:00"))
+            return now < expires <= now + timedelta(hours=1)
         except Exception:
             return False
 
@@ -212,6 +231,8 @@ class NativePlanningV1:
         return self.qualified() or self.restricted()
 
     def require_admitted(self, *, attempt=None, model_digest=None, tokenizer_digest=None):
+        if self._retained_read:
+            raise ValueError("native_retained_read_has_no_dispatch_authority")
         if self.qualified():
             return
         proof = self._restricted_admission
@@ -245,7 +266,7 @@ class NativePlanningV1:
             raise ValueError("native plan differs")
         now = self._clock.now()
         expiry = (datetime.fromisoformat(now.replace("Z", "+00:00")) + timedelta(minutes=15))
-        ready = self.admitted()
+        ready = not self._retained_read and self.admitted()
         return TrainingPreflight(
             plan.plan_fingerprint, ready, now,
             expiry.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),

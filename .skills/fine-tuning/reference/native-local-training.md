@@ -181,8 +181,11 @@ model layer set and complete tokenizer snapshot selection.
 No accepting **ordinary** hardware authority is shipped. An unadmitted
 candidate has observe/artifact capabilities disabled and preflight is not
 ready. A separately verified `NativeRestrictedAdmissionV1` enables only its
-exact initial run, attempt, source, runtime, prepared bytes and model/tokenizer
-snapshots, subject to a finite expiry; it is not qualification. The host
+exact compiled workload and host selection, including project, request, run,
+attempt, private state root, process limits, artifact budget, source, runtime,
+prepared bytes and model/tokenizer snapshots, subject to a finite start expiry;
+it is not qualification. Retained public reads authenticate that signed selection
+after expiry and remote branch advancement without new dispatch authority. The host
 consumer in `examples/training_qualification/native_host.py` verifies the
 external signature using a separately supplied reviewed public-key SHA-256.
 It has no signing key or acceptance switch. The same host checks the actual

@@ -14,12 +14,12 @@ import os
 from pathlib import Path
 import platform
 import re
-import subprocess
 import sys
 
 ENGINE_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ENGINE_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bounded_command import BoundedCommandError, run_bounded_command
 from launch import Clock, NamedSecrets, _private, download
 
 from synaptic_tuner.api.v1.planning import ResolvedTrainingRequest
@@ -93,13 +93,14 @@ def _write_owned(root, name, raw, maximum):
 def _command(argv, *, cwd=None, maximum=4096):
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C",
            "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1"}
-    result = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, timeout=15, check=True)
-    if len(result.stdout) > maximum or len(result.stderr) > maximum:
-        raise ValueError("native host command output exceeds bound")
-    return result.stdout.decode("utf-8").strip()
+    status, stdout = run_bounded_command(argv, cwd=cwd, environment=env,
+                                         maximum=maximum, timeout=15)
+    if status != 0:
+        raise ValueError("native host command refused")
+    return stdout.decode("utf-8").strip()
 
 
-def source_record(config):
+def source_record(config, *, check_remote=True):
     """Observe the real clean checkout and exact pushed ref, never a supplied SHA alone."""
     root = Path(config["engine_root"])
     if (not root.is_absolute() or root.resolve(strict=True) != root
@@ -115,9 +116,10 @@ def source_record(config):
         raise ValueError("native engine ref is invalid")
     if commit != config["engine_commit"] or remote != config["engine_remote"]:
         raise ValueError("native local source selection differs")
-    remote_line = _command(["git", "ls-remote", "--exit-code", "origin", ref], cwd=root)
-    if remote_line != f"{commit}\t{ref}":
-        raise ValueError("native pushed source ref differs")
+    if check_remote:
+        remote_line = _command(["git", "ls-remote", "--exit-code", "origin", ref], cwd=root)
+        if remote_line != f"{commit}\t{ref}":
+            raise ValueError("native pushed source ref differs")
     value = {"schema": "synaptic-native-pushed-source/v1", "url": remote,
              "ref": ref, "commit": commit}
     return value, hashlib.sha256(canonical(value)).hexdigest()
@@ -216,15 +218,16 @@ class RootSignatureAuthority:
                 return False
             content = asdict(admission)
             content.pop("tag")
-            result = subprocess.run(
+            status, stdout = run_bounded_command(
                 ["openssl", "dgst", "-sha256", "-verify", str(self.key_path),
                  "-signature", str(self.signature_path)],
-                input=canonical(content), capture_output=True, timeout=10, check=False,
+                input_bytes=canonical(content), maximum=4096, timeout=10,
+                environment={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"},
             )
-            return (result.returncode == 0 and result.stdout.strip() == b"Verified OK"
+            return (status == 0 and stdout.strip() == b"Verified OK"
                     and _read(self.key_path, 16384) == self.key
                     and _read(self.signature_path, 16384) == self.signature)
-        except (OSError, subprocess.SubprocessError, ValueError):
+        except (OSError, BoundedCommandError, ValueError):
             return False
 
 
@@ -285,7 +288,18 @@ class _Grants:
         return grant
 
 
-def inspect(config, *, require_admission=False, trusted_root_key_sha256=None):
+class _ReadOnlyGrants:
+    """Cold public reads cannot mint or bind a new training grant."""
+
+    def authorize(self, requirements):
+        raise ValueError("native retained read has no grant authority")
+
+    def bind(self, grant, *, operation, requirements):
+        raise ValueError("native retained read has no dispatch authority")
+
+
+def inspect(config, *, require_admission=False, trusted_root_key_sha256=None,
+            retained_read=False):
     """Rebuild source, runtime, prepared publication and snapshot bindings."""
     fields = {
         "schema", "proposal_file", "engine_root", "engine_remote", "engine_ref", "engine_commit",
@@ -305,7 +319,13 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None):
     } or type(config["tokenizer_members"]) is not list
             or tuple(config["tokenizer_members"]) != tuple(sorted(set(config["tokenizer_members"])))):
         raise ValueError("native host authority or tokenizer selection invalid")
-    source, source_digest = source_record(config)
+    if type(retained_read) is not bool or (retained_read and not require_admission):
+        raise ValueError("native retained read requires signed selection")
+    state_root = Path(config["state_root"])
+    if (not state_root.is_absolute() or str(state_root) != os.path.normpath(str(state_root))
+            or str(state_root) != config["state_root"]):
+        raise ValueError("native state root is noncanonical")
+    source, source_digest = source_record(config, check_remote=not retained_read)
     hardware, hardware_digest = hardware_record()
     proposal = strict_json(_read(config["proposal_file"], 1 << 20))
     if (proposal.get("schema") != "synaptic-native-qualification-proposal/v1"
@@ -410,11 +430,22 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None):
     base = dict(resolved=resolved, run=run, workload=projection.workload.canonical_bytes,
                 runtime_capture=capture, limits=limits, scope=scope, clock=Clock())
     candidate = NativePlanningV1(**base)
+    selection_digest = hashlib.sha256(canonical({
+        "schema": "synaptic-native-host-execution-selection/v1",
+        "config": config, "source": source, "hardware": hardware,
+        "proposal": proposal, "profile": asdict(profile),
+        "training_input": training.to_dict(), "prepared_identity": identity.to_dict(),
+        "prepared_digest": hashlib.sha256(dataset).hexdigest(),
+        "capture_digest": capture_digest, "dependency_lock_digest": hashlib.sha256(lock).hexdigest(),
+        "model": asdict(model), "tokenizer": asdict(tokenizer),
+        "workload_digest": projection.workload.fingerprint,
+    })).hexdigest()
     admission_fields = dict(
         profile_digest=candidate.profile_digest, source_digest=source_digest,
         runtime_digest=resolved.runtime_digest, hardware_digest=hardware_digest,
         prepared_digest=identity.content_digest, model_digest=model.digest,
         tokenizer_digest=tokenizer.digest, run_id=run.run_id, attempt=config["attempt"],
+        workload_digest=projection.workload.fingerprint, selection_digest=selection_digest,
         maximum_updates=projection.controls.iterations,
     )
     if not require_admission:
@@ -433,8 +464,9 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None):
     if not root.authenticate(admission):
         raise ValueError("external restricted admission signature invalid")
     planning = NativePlanningV1(**base, restricted_admission=admission,
-                               restricted_authority=root)
-    if not planning.restricted():
+                               restricted_authority=root, selection_digest=selection_digest,
+                               retained_read=retained_read)
+    if not (planning.restricted_selection() if retained_read else planning.restricted()):
         raise ValueError("restricted native admission expired or refused")
     return {"source": source, "hardware": hardware, "admission_candidate": admission_fields,
             "capture_digest": capture_digest, "prepared_rows_bytes": len(dataset)}, (
@@ -446,10 +478,15 @@ def operate(config, *, action="start", destination=None, trusted_root_key_sha256
     """Start once, or recompose the same selected run for a cold public read."""
     if action not in {"start", "show", "observe", "verify", "download"}:
         raise ValueError("native public action is unavailable")
-    _, selected = inspect(config, require_admission=True,
-                          trusted_root_key_sha256=trusted_root_key_sha256)
-    planning, training, projection, dataset, lock, model, tokenizer = selected
     state = Path(config["state_root"])
+    if action != "start":
+        _private(state)
+        if _document(state / "config.json", 4 << 20) != config:
+            raise ValueError("retained native host configuration differs")
+    _, selected = inspect(config, require_admission=True,
+                          trusted_root_key_sha256=trusted_root_key_sha256,
+                          retained_read=action != "start")
+    planning, training, projection, dataset, lock, model, tokenizer = selected
     if action == "start":
         _create_private_dir(state)
     _private(state)
@@ -519,7 +556,9 @@ def operate(config, *, action="start", destination=None, trusted_root_key_sha256
             model=model, tokenizer=tokenizer, tokenizer_members=tuple(config["tokenizer_members"]),
             budget=NativeArtifactBudget(**config["artifact_budget"]),
             material_authority_ref=host["material_authority_ref"], material_key_ref=host["material_key_ref"])
-        ports = ReferenceHostPortsV1(store, store, clock, _Grants(selection, catalog, material_authority), secrets)
+        grants = (_Grants(selection, catalog, material_authority)
+                  if action == "start" else _ReadOnlyGrants())
+        ports = ReferenceHostPortsV1(store, store, clock, grants, secrets)
         authority = compose_reference_authority(
             clock=clock, secrets=secrets,
             authority_secret=SecretRef.from_dict(host["authority_secret"]),

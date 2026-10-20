@@ -19,6 +19,7 @@ from synaptic_tuner.api.v1.reference.stores import InMemoryDurableRecordStoreV1,
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from synaptic_tuner.api.v1.runs_facade import RunArtifactRequest, RunLogsRequest, RunOperationError
 from synaptic_tuner.api.v1.secrets import SecretRef
+from synaptic_tuner.api.v1.training_input import TrainingInputV1
 from synaptic_tuner.api.v1.training_facade import TrainingRequest
 from tuner.execution.foundation_v2.references import ExecutionScopeV1
 from tuner.runtime.native_mlx_material import canonical, native_runtime_spec, strict_json
@@ -133,12 +134,13 @@ def test_restricted_admission_is_exact_run_and_does_not_qualify_profile(publicat
         candidate.profile_digest, state.resolved.source_digest, state.resolved.runtime_digest,
         "4" * 64, parse_native_workload(state.kwargs["workload"]).source.content_digest,
         publication["model"].digest, publication["tokenizer"].digest,
+        state.resolved.workload_digest, "7" * 64,
         "run", "attempt-1", 3, "2026-10-20T12:30:00Z",
         "root-review", "root-public-key", "f" * 64,
     )
     admitted = NativePlanningV1(
         **state.kwargs, restricted_admission=proof,
-        restricted_authority=TestQualificationAuthority(),
+        restricted_authority=TestQualificationAuthority(), selection_digest="7" * 64,
     )
     assert admitted.restricted() and admitted.admitted() and not admitted.qualified()
     assert admitted.preflight(admitted.plan).ready
@@ -151,7 +153,44 @@ def test_restricted_admission_is_exact_run_and_does_not_qualify_profile(publicat
         admitted.require_qualified()
     changed = replace(proof, run_id="another-run")
     assert not NativePlanningV1(**state.kwargs, restricted_admission=changed,
-                                restricted_authority=TestQualificationAuthority()).admitted()
+                                restricted_authority=TestQualificationAuthority(),
+                                selection_digest="7" * 64).admitted()
+    training_document = state.training.to_dict()
+    training_document["hyperparameters"]["learning_rate"] = .0002
+    changed_training = TrainingInputV1.from_dict(training_document)
+    prior = parse_native_workload(state.kwargs["workload"])
+    changed_workload = compile_native_sft(changed_training, prior.source, prior.profile).workload
+    changed_kwargs = dict(state.kwargs)
+    changed_kwargs["workload"] = changed_workload.canonical_bytes
+    changed_kwargs["resolved"] = replace(
+        state.resolved,
+        resolved_config_digest=hashlib.sha256(changed_training.canonical_json().encode()).hexdigest(),
+        workload_digest=changed_workload.fingerprint,
+    )
+    substituted = NativePlanningV1(
+        **changed_kwargs, restricted_admission=proof,
+        restricted_authority=TestQualificationAuthority(), selection_digest="7" * 64,
+    )
+    assert substituted.profile_digest == admitted.profile_digest
+    assert not substituted.restricted_selection() and not substituted.preflight(substituted.plan).ready
+
+    class LateClock:
+        def now(self):
+            return "2026-10-20T14:00:00Z"
+
+    late_kwargs = {**state.kwargs, "clock": LateClock()}
+    retained = NativePlanningV1(
+        **late_kwargs, restricted_admission=proof,
+        restricted_authority=TestQualificationAuthority(), selection_digest="7" * 64,
+        retained_read=True,
+    )
+    assert retained.restricted_selection() and not retained.restricted()
+    assert retained.descriptor.descriptor_digest == admitted.descriptor.descriptor_digest
+    assert retained.plan == admitted.plan
+    assert not retained.preflight(retained.plan).ready
+    with pytest.raises(ValueError, match="no_dispatch_authority"):
+        retained.require_admitted(attempt="attempt-1", model_digest=publication["model"].digest,
+                                 tokenizer_digest=publication["tokenizer"].digest)
 
 
 def compose(state, publication, monkeypatch, *, fail=False):

@@ -5,8 +5,9 @@ host record/stream stores, Foundation grants, and the native provider family.
 It has no engine database, global provider registration, background training
 job, replay, install, or model download. `inspect` and `profile-candidate` are
 read-only. `start` is a one-shot effect and requires a separate root-signed
-admission for its exact source, runtime, hardware, model snapshots, prepared
-publication, run and attempt. An ordinary two-run qualification receipt is not
+admission for its exact compiled workload and host selection: source, runtime,
+hardware, model snapshots, prepared publication, project, request, run, attempt,
+private state root, process limits and artifact budget. An ordinary two-run qualification receipt is not
 created by this workflow.
 
 ## Inputs and private layout
@@ -144,8 +145,13 @@ the config or inspection is not independent approval. Root must review the
 source commit, selected wheels/install provenance, capture/build closure,
 hardware, model snapshot and both distinct prepared datasets before signing.
 
-An admitted restricted run can only use its exact run/attempt and snapshots.
-Its one-hour admission expires; collect cold public reads within that window.
+An admitted restricted run can only use its exact signed selection. Its
+one-hour admission is a start deadline. Cold show, observe, verify and download
+recompose the same signed selection and retained state after expiry, without
+renewing dispatch authority; they do not require the remote branch to remain
+at its former head. A new start or replay still requires fresh reviewed admission.
+Host metadata commands use an owned subprocess with a combined output byte
+bound and deadline; exceeding either ends its process group.
 The normal capability receipt still needs two real accepted runs, native
 artifact verification, Darwin deadline/owner-loss evidence, and a real
 Syntunia bridge readback. Public logs/cancel/reconcile, GRPO, and asynchronous
