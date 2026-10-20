@@ -2,7 +2,7 @@
 status: release-preparation
 scope: OSS API v1 stable workflow release
 baseline: 321a085f
-updated: 2026-10-15
+updated: 2026-10-20
 ---
 
 # Stable v1 release gate
@@ -28,7 +28,51 @@ pipeline compositions retain truthful backend status; no facade or CLI alone
 establishes a stable installed operational contract.
 The Python API is a library contract, not a deployed HTTP/MCP service.
 
-## Current release status — 2026-10-15, qualification repairs
+## Current release status — 2026-10-20, resumed qualification
+
+[#258](https://github.com/ProfSynapse/Synaptic-Tuner/pull/258) merged after all
+18 checks passed on `864a9bccbc8bd866c56c021c131f12959f8a8649`.
+Merge `eb8a722e8cb640558c0783bb281c29d1ec17a7b2` has the same tree as that
+tested candidate. The accepted wheel was built from `af1cb989`; the subsequent
+four test-only changes are excluded from the wheel, sdist and runtime inventories.
+This documentation update does not relabel the source of those artifacts or runs.
+No stable tag or release has been published.
+
+- **Modal SFT:** both separately admitted two-step runs on `864a9bcc` completed.
+  Runs `modal-4bcace8af9a4e37d00805ffd` and
+  `modal-1e3c4eaf107a1411b87f6176` each retained two numeric records bracketed
+  by pending observations of their exact calls, verified five native artifacts,
+  compared the retained progress file and acknowledged durable qualification
+  publication. Both verdicts are `delivered_precompletion`. The second run also
+  passed fresh-process public observation and retained readback with matching
+  artifact hashes. This meets the selected fixture's same-source two-run
+  criterion; general transport and partial-write qualification remain false.
+  Active cancellation and GRPO remain unexecuted on this candidate.
+- **HF SFT:** the completion job was submitted once under the renewed approval
+  and ended in provider `ERROR`, with closed diagnostic `DISPATCH/23`. The pinned
+  runtime maps that code to a nonzero trainer subprocess exit. Its underlying
+  cause is unknown: child logs stayed in private job storage, and the retained
+  bucket prefix contains only the prepared input. No cancellation or replay
+  occurred. The cancellation lane remains unused because successful native
+  completion verification was its prerequisite.
+- **Docker SFT:** the completion container exited with code 35 before trainer
+  invocation. Independent inspection confirmed it was no longer running and was
+  not reported OOM-killed. The runtime requires five existing writable roots;
+  the verified-cache reuse path lacked the artifacts, tracking and temporary
+  directories. This establishes a failing precondition, not the behavior of
+  later training stages. A separate consumer correction prepares the declared
+  private roots before source staging while preserving the existing cache.
+  It is not part of the `864a9bcc` live evidence and still requires qualification
+  through a distinct admitted attempt; the failed container
+  and its records are retained. The cancellation lane remains unused.
+
+The shared trainer, runtime profiles, image and model pins remain unchanged.
+Further HF completion spending needs a reviewed replacement scope; the unused
+cancellation slot is not replacement-job authority. Existing bounded Modal and
+desktop qualification authority remains subject to exact source and attempt
+review. Stable release gates remain open.
+
+## Earlier release status — 2026-10-15, qualification repairs
 
 [#256](https://github.com/ProfSynapse/Synaptic-Tuner/pull/256) merged after all
 18 checks passed on `ac5581a8`. Concurrent work reached main first, so the merge

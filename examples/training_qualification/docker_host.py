@@ -4,7 +4,9 @@ from contextlib import contextmanager, ExitStack
 from dataclasses import replace
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
+import stat
 import time
 
 from launch import read_committed, _write_bytes, _json, SFT_ROLES
@@ -27,6 +29,11 @@ from tuner.training.coordinator_material import CoordinatorResolvedMaterial
 from tuner.training.docker_host_composition import compose_docker_reference_host
 from tuner.execution.providers.docker_provider_v1.preparation import (
     DockerTrainingPreparationBridgeV1,
+)
+from tuner.execution.providers.docker_provider_v1.local_source import _Root
+from tuner.execution.providers.docker_provider_v1.local_artifacts import (
+    DockerLocalArtifactsV1,
+    _DIR,
 )
 from tuner.execution.providers.docker_provider_v1.model import (
     DockerProfileV1,
@@ -215,6 +222,85 @@ def selected_runner(endpoint, runner=subprocess_runner):
     return run
 
 
+def _require_runtime_root_platform():
+    if (
+        os.name != "posix"
+        or not hasattr(os, "O_NOFOLLOW")
+        or not hasattr(os, "O_DIRECTORY")
+        or any(
+            function not in os.supports_dir_fd
+            for function in (os.open, os.mkdir, os.stat)
+        )
+        or os.stat not in os.supports_follow_symlinks
+    ):
+        raise ValueError("docker_runtime_roots_platform_unavailable")
+
+
+def _prepare_writable_roots(execution_source, artifact_root, artifact_mount):
+    """Complete the locked writable layout while preserving a verified cache."""
+    _require_runtime_root_platform()
+    names = ("artifacts", "state", "tracking", "cache", "tmp")
+    locked = execution_source.roots
+    mount = PurePosixPath(artifact_mount)
+    if (
+        set(locked) != {*names, "engine", "project"}
+        or not mount.is_absolute()
+        or ".." in mount.parts
+    ):
+        raise ValueError("docker_runtime_roots_invalid")
+    relatives = []
+    for name in names:
+        path = PurePosixPath(locked[name])
+        if (
+            not path.is_absolute()
+            or ".." in path.parts
+            or not path.is_relative_to(mount)
+            or path == mount
+        ):
+            raise ValueError("docker_runtime_roots_invalid")
+        relatives.append(path.relative_to(mount))
+    if len(set(relatives)) != len(relatives) or any(
+        left in right.parents
+        for left in relatives
+        for right in relatives
+        if left != right
+    ):
+        raise ValueError("docker_runtime_roots_invalid")
+
+    try:
+        with ExitStack() as held:
+            guard = _Root(artifact_root)
+            held.callback(guard.stack.close)
+            chains = []
+            for relative in relatives:
+                guard.check()
+                parent = guard.fd
+                chain = []
+                for part in relative.parts:
+                    try:
+                        os.mkdir(part, 0o700, dir_fd=parent)
+                        os.fsync(parent)
+                    except FileExistsError:
+                        pass
+                    child = os.open(part, _DIR, dir_fd=parent)
+                    held.callback(os.close, child)
+                    info = os.fstat(child)
+                    if (
+                        not stat.S_ISDIR(info.st_mode)
+                        or info.st_uid != os.getuid()
+                        or stat.S_IMODE(info.st_mode) != 0o700
+                    ):
+                        raise ValueError("docker_runtime_roots_invalid")
+                    chain.append((parent, part, child))
+                    parent = child
+                chains.append(chain)
+            guard.check()
+            for chain in chains:
+                DockerLocalArtifactsV1._recheck(chain)
+    except (OSError, ValueError) as error:
+        raise ValueError("docker_runtime_roots_invalid") from error
+
+
 @contextmanager
 def open_host(
     config,
@@ -229,6 +315,8 @@ def open_host(
     """Cold Docker still needs original qualification assets and local mount roots."""
     if mode not in {"start", "read"}:
         raise ValueError("host mode invalid")
+    if mode == "start":
+        _require_runtime_root_platform()
     selected = config["docker"]
     profile, rich, material, recipes, basis = _components(config)
     run = TrainingRunRef(material.run_id, basis.project_ref)
@@ -281,6 +369,11 @@ def open_host(
             for root in (source_root, artifact_root):
                 if not root.exists():
                     root.mkdir(mode=0o700)
+            _prepare_writable_roots(
+                rich.execution_source,
+                artifact_root,
+                selected["artifact_container_root"],
+            )
         bundle = materialize_worker_bundle(
             build_source_worker_invocation(
                 rich,
