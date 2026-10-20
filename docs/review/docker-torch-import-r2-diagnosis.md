@@ -377,3 +377,41 @@ the exact remote identities and source custody, no active device-0 compute
 job, the proposed UID/caps/tmpfs/readonly filesystem and bounds, then save
 and read back a fresh one-use admission before any start. A collision or drift
 rejects without renaming or retrying; r2/r4/r6/r8 claims remain consumed.
+
+## r10 startup-environment evidence repair — no live execution
+
+Independent review found that the r9 helper compared a digest of the
+environment supplied to the isolated child with a digest observed *after*
+CPython startup. The retained r2 child plan supplies no locale keys. CPython
+may add `LC_CTYPE=C.UTF-8` when coercing the default C locale; its
+[3.12 command-line documentation](https://docs.python.org/3.12/using/cmdline.html#envvar-PYTHONCOERCECLOCALE)
+describes the insertion, and the
+[v3.12.3 preconfiguration source](https://github.com/python/cpython/blob/v3.12.3/Python/preconfig.c)
+contains that coercion path. A real local isolated CPython 3.12.15 subprocess
+with the fixed no-locale input added exactly this key/value. The pinned image's
+CPython 3.12.3 behavior has **not** been observed by executing this proposal.
+
+The repaired helper passes the exact supplied mapping to the child through a
+bounded private stdin pipe as well as `env=`. Before mounted worker code, the
+child checks the supplied digest against its independently bound expectation.
+At the existing preamble observation point it requires every supplied key
+and value unchanged. It accepts either no added keys or exactly
+`LC_CTYPE=C.UTF-8`; any other addition or changed supplied value rejects.
+It reports separate `environment_supplied_sha256` and
+`environment_observed_sha256` plus the closed delta `NONE` or
+`LC_CTYPE_C_UTF8`. The host verifies both digests against its own
+reconstruction, including the exact allowed locale variant. It never
+prints environment values, resets them, or claims to have captured r2's
+historical child. The owned lifecycle, 120-second execution deadline,
+8-KiB Docker CLI output limit, source commitments and stop-before-Unsloth
+boundary are unchanged.
+
+The proposed command in the r9 section above is unchanged and remains
+**unexecuted**. For root delta review, the repaired helper SHA-256 is
+`c7543b50c4aa41b91ed8293474b4f1719c69342550515a8d367b06dd3f1fd229`;
+the trusted closure verifier remains
+`2304eeb00667954510c34cc4aacaa818532a301fbeabf04c2fb165d6cd1d70b5`.
+Root must review the pushed commit and exact command, repeat the current
+identity/custody/device preflight, and save/read a fresh one-use admission
+before any container start. No r10 container, GPU request, ML import or
+training effect occurred.

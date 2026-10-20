@@ -125,10 +125,33 @@ report_fd=os.dup(1)
 null_fd=os.open('/dev/null',os.O_WRONLY)
 os.dup2(null_fd,1);os.dup2(null_fd,2);os.close(null_fd)
 from pathlib import Path
+def _environment_evidence(supplied,observed):
+ if type(supplied) is not dict or type(observed) is not dict or 'LC_CTYPE' in supplied:
+  raise ValueError()
+ if any(type(key) is not str or type(value) is not str for key,value in supplied.items()):
+  raise ValueError()
+ if any(observed.get(key)!=value for key,value in supplied.items()):
+  raise ValueError()
+ additions={key:value for key,value in observed.items() if key not in supplied}
+ if additions=={}:
+  delta='NONE'
+ elif additions=={'LC_CTYPE':'C.UTF-8'}:
+  delta='LC_CTYPE_C_UTF8'
+ else:
+  raise ValueError()
+ return {'environment_supplied_sha256':hashlib.sha256(json.dumps(supplied,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
+         'environment_observed_sha256':hashlib.sha256(json.dumps(observed,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
+         'startup_env_delta':delta}
 stage='WORKER_IMPORT'
 category='OTHER'
 context={}
 try:
+ supplied_raw=sys.stdin.buffer.read(8193)
+ if not supplied_raw or len(supplied_raw)>8192:
+  raise ValueError()
+ supplied_env=json.loads(supplied_raw)
+ if _environment_evidence(supplied_env,dict(os.environ))['environment_supplied_sha256']!='EXPECTED_SUPPLIED_ENV_SHA256':
+  raise ValueError()
  if sys.flags.isolated!=1 or sys.flags.no_user_site!=1 or not sys.flags.safe_path:
   raise ValueError()
  if os.environ.get('PYTHONNOUSERSITE')!='1' or os.environ.get('PYTHONSAFEPATH')!='1':
@@ -162,9 +185,9 @@ try:
  tree=ast.parse(prefix,filename=str(trainer))
  if not isinstance(tree.body[-1],ast.Import) or [alias.name for alias in tree.body[-1].names]!=['torch']:
   raise ValueError()
- if any(isinstance(node,(ast.Import,ast.ImportFrom)) and any(alias.name.split('.')[0] in ('unsloth','transformers','trl') for alias in node.names) for node in ast.walk(tree)):
+ if any(isinstance(node,ast.Import) and any(alias.name.split('.')[0] in ('unsloth','transformers','trl') for alias in node.names) for node in ast.walk(tree)) or any(isinstance(node,ast.ImportFrom) and node.module is not None and node.module.split('.')[0] in ('unsloth','transformers','trl') for node in ast.walk(tree)):
   raise ValueError()
- context['environment_sha256']=hashlib.sha256(json.dumps(dict(os.environ),sort_keys=True,separators=(',',':')).encode()).hexdigest()
+ context.update(_environment_evidence(supplied_env,dict(os.environ)))
  context['python_isolated']=True
  context['cwd_sha256']=hashlib.sha256(os.getcwd().encode()).hexdigest()
  context['file_sha256']=hashlib.sha256(str(trainer).encode()).hexdigest()
@@ -238,7 +261,12 @@ try:
   (Path(roots['cache'])/name).mkdir(mode=0o700,exist_ok=True)
  stage='ISOLATED_CHILD'
  child=base64.b64decode('CHILD_SOURCE_B64')
- process=subprocess.Popen([sys.executable,'-I','-c',child.decode('utf-8')],cwd=roots['tmp'],env=environment,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+ supplied_raw=json.dumps(environment,sort_keys=True,separators=(',',':')).encode()
+ if len(supplied_raw)>8192:
+  raise ValueError()
+ process=subprocess.Popen([sys.executable,'-I','-c',child.decode('utf-8')],cwd=roots['tmp'],env=environment,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+ process.stdin.write(supplied_raw)
+ process.stdin.close()
  payload=process.stdout.read(4097)
  if len(payload)>4096:
   process.kill();process.wait()
@@ -249,7 +277,7 @@ try:
  if set(result)!={'schema_version','category','stage','context','boundary'} or result['schema_version']!='synaptic-docker-torch-import-child/v1' or result['boundary']!='BEFORE_UNSLOTH' or result['category'] not in ('PASS','MODULE_NOT_FOUND','IMPORT','OS','RUNTIME','OTHER') or result['stage'] not in ('WORKER_IMPORT','WORKER_CLOSURE','WORKER_GUARD','TRAINER_PREFIX','BOOTSTRAP_ENV','TORCH_IMPORT') or not isinstance(result['context'],dict):
   raise ValueError()
  if result['category']=='PASS':
-  if result['stage']!='TORCH_IMPORT' or set(result['context'])!={'environment_sha256','python_isolated','cwd_sha256','file_sha256','sys_path_sha256'} or result['context']['python_isolated'] is not True or any(not isinstance(value,str) or not __import__('re').fullmatch('[0-9a-f]{64}',value) for key,value in result['context'].items() if key.endswith('_sha256')):
+  if result['stage']!='TORCH_IMPORT' or set(result['context'])!={'environment_supplied_sha256','environment_observed_sha256','startup_env_delta','python_isolated','cwd_sha256','file_sha256','sys_path_sha256'} or result['context']['python_isolated'] is not True or result['context']['startup_env_delta'] not in ('NONE','LC_CTYPE_C_UTF8') or any(not isinstance(value,str) or not __import__('re').fullmatch('[0-9a-f]{64}',value) for key,value in result['context'].items() if key.endswith('_sha256')):
    raise ValueError()
  elif result['context']!={}:
   raise ValueError()
@@ -466,16 +494,22 @@ def _worker_context_identity(source_root: Path, expected_workload: str,
         "SYNAPTIC_MODEL_SNAPSHOT": _R2_ROOTS["cache"] + "/model/models--" +
         "--".join(ref.split("/")) + "/snapshots/" + revision,
         "WANDB_DISABLED": "true"})
+    child_env_lc_ctype = dict(child_env)
+    child_env_lc_ctype["LC_CTYPE"] = "C.UTF-8"
     return {"workload_sha256": expected_workload,
             "runtime_sha256": expected_runtime,
             "trainer_sha256": expected_trainer,
             "child_env_sha256": hashlib.sha256(json.dumps(
-                child_env, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+                child_env, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "child_env_lc_ctype_sha256": hashlib.sha256(json.dumps(
+                child_env_lc_ctype, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
 
 
 def _worker_probe(identity: dict[str, str], closure: str) -> str:
     child = _WORKER_PREFIX_CHILD.replace("EXPECTED_TRAINER_SHA256",
                                          identity["trainer_sha256"])
+    child = child.replace("EXPECTED_SUPPLIED_ENV_SHA256",
+                          identity["child_env_sha256"])
     probe = _WORKER_CONTEXT_PROBE
     replacements = {"EXPECTED_WORKLOAD_SHA256": identity["workload_sha256"],
                     "EXPECTED_CLOSURE_DIGEST": closure,
@@ -804,18 +838,26 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
                 or type(child["context"]) is not dict
                 or (child["category"] == "PASS" and
                     (child["stage"] != "TORCH_IMPORT" or
-                     set(child["context"]) != {"environment_sha256", "python_isolated",
-                        "cwd_sha256", "file_sha256", "sys_path_sha256"}
-                     or child["context"]["python_isolated"] is not True))
+                     set(child["context"]) != {"environment_supplied_sha256",
+                        "environment_observed_sha256", "startup_env_delta",
+                        "python_isolated", "cwd_sha256", "file_sha256", "sys_path_sha256"}
+                     or child["context"]["python_isolated"] is not True
+                     or child["context"]["startup_env_delta"] not in
+                        {"NONE", "LC_CTYPE_C_UTF8"}))
                 or (child["category"] != "PASS" and child["context"] != {})
                 or any(type(value) is not str or not re.fullmatch(r"[0-9a-f]{64}", value)
                        for key, value in child["context"].items() if key.endswith("_sha256"))))
             or (source_root is not None and not worker_context and child["stage"] not in {"IMPORT_WORKER", "READ_MANIFEST",
                 "LOAD_CLOSURE", "VERIFY_ORIGINS", "INSTALL_GUARD", "BOOTSTRAP_ENV", "TORCH_IMPORT"})):
         raise ValueError("CHILD_OUTPUT_INVALID")
-    if (worker_context and child["category"] == "PASS"
-            and child["context"]["environment_sha256"] != context_identity["child_env_sha256"]):
-        raise ValueError("CHILD_OUTPUT_INVALID")
+    if worker_context and child["category"] == "PASS":
+        context = child["context"]
+        expected_observed = (context_identity["child_env_sha256"]
+            if context["startup_env_delta"] == "NONE"
+            else context_identity["child_env_lc_ctype_sha256"])
+        if (context["environment_supplied_sha256"] != context_identity["child_env_sha256"]
+                or context["environment_observed_sha256"] != expected_observed):
+            raise ValueError("CHILD_OUTPUT_INVALID")
     if _inspect_owned(authority, cid, name=name, label=label, image=image,
                       daemon_id=daemon_id)[0] not in {"exited", "dead"}:
         raise ValueError("CONTAINER_STATE_INVALID")

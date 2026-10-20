@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import subprocess
 import sys
 import ast
 from pathlib import Path
@@ -186,7 +187,8 @@ def test_worker_context_program_is_isolated_and_excludes_trainer_main(tmp_path: 
     probe = diagnostic._worker_probe(identity, flags["expected_closure_digest"])
     ast.parse(probe)
     ast.parse(diagnostic._WORKER_PREFIX_CHILD.replace(
-        "EXPECTED_TRAINER_SHA256", flags["expected_trainer_sha256"]))
+        "EXPECTED_TRAINER_SHA256", flags["expected_trainer_sha256"]).replace(
+        "EXPECTED_SUPPLIED_ENV_SHA256", identity["child_env_sha256"]))
     assert "EXPECTED_" not in probe
     assert "CHILD_SOURCE_B64" not in probe
     assert "process=subprocess.Popen([sys.executable,'-I','-c'" in probe
@@ -195,6 +197,54 @@ def test_worker_context_program_is_isolated_and_excludes_trainer_main(tmp_path: 
     assert "exec(compile(tree,str(trainer),'exec'),namespace)" in diagnostic._WORKER_PREFIX_CHILD
     assert "lines[:positions[2]]" in diagnostic._WORKER_PREFIX_CHILD
     assert identity["child_env_sha256"] != hashlib.sha256(b"").hexdigest()
+    assert identity["child_env_lc_ctype_sha256"] != identity["child_env_sha256"]
+
+
+@pytest.mark.parametrize("mutation,expected", [
+    ("none", "LC_CTYPE_C_UTF8"),
+    ("no_coercion", "NONE"),
+    ("extra", "REJECTED"),
+    ("changed", "REJECTED"),
+    ("locale_value", "REJECTED"),
+])
+def test_real_isolated_python_startup_environment_evidence(mutation: str,
+                                                           expected: str) -> None:
+    """Run the exact child classifier after a real -I interpreter startup."""
+    source = diagnostic._WORKER_PREFIX_CHILD
+    tree = ast.parse(source)
+    function = next(node for node in tree.body
+                    if isinstance(node, ast.FunctionDef) and
+                    node.name == "_environment_evidence")
+    lines = source.splitlines(keepends=True)
+    classifier = "".join(lines[function.lineno - 1:function.end_lineno])
+    program = ("import hashlib,json,os,sys\n" + classifier +
+        "\nsupplied=json.loads(sys.stdin.buffer.read(8193))\n" +
+        ("os.environ['UNEXPECTED_DIAGNOSTIC_KEY']='x'\n" if mutation == "extra" else "") +
+        ("os.environ['PATH']='/tampered'\n" if mutation == "changed" else "") +
+        ("os.environ['LC_CTYPE']='C.utf8'\n" if mutation == "locale_value" else "") +
+        "try:\n evidence=_environment_evidence(supplied,dict(os.environ))\n"
+        "except BaseException:\n print(json.dumps({'status':'REJECTED'}))\n"
+        "else:\n print(json.dumps({'status':'PASS','delta':evidence['startup_env_delta'],"
+        "'supplied_sha256':evidence['environment_supplied_sha256'],"
+        "'observed_sha256':evidence['environment_observed_sha256']}))\n")
+    supplied = {"PATH": "/usr/bin:/bin", "PYTHONNOUSERSITE": "1",
+                "PYTHONSAFEPATH": "1"}
+    if mutation == "no_coercion":
+        supplied["LC_ALL"] = "C"
+    result = subprocess.run([sys.executable, "-I", "-c", program],
+        input=json.dumps(supplied, sort_keys=True, separators=(",", ":")),
+        text=True, capture_output=True, env=supplied, timeout=5, check=True)
+    assert result.stderr == ""
+    report = json.loads(result.stdout)
+    if expected == "REJECTED":
+        assert report == {"status": "REJECTED"}
+    else:
+        assert report["status"] == "PASS"
+        assert report["delta"] == expected
+        expected_sha = hashlib.sha256(json.dumps(
+            supplied, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        assert report["supplied_sha256"] == expected_sha
+        assert (report["observed_sha256"] == expected_sha) == (expected == "NONE")
 
 
 def test_worker_context_requires_independent_r2_hashes_before_docker(tmp_path: Path,

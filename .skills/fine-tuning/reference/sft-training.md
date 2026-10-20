@@ -534,6 +534,14 @@ nor loads a model; a PASS or failure cannot retrospectively diagnose an
 earlier trainer attempt. See the exact proposed command and remaining
 environment/user/filesystem gaps in the r2 diagnosis note.
 
+For the worker-context child, keep supplied environment bytes distinct from
+the environment observed after isolated Python startup. Require every
+supplied key unchanged; the only reviewed addition is
+`LC_CTYPE=C.UTF-8`, recorded as a closed delta with separate digests.
+Any other addition or change rejects. Do not reset the observed environment
+or reinterpret it as a historical capture of the failed r2 child. See the r10
+repair and exact unexecuted command in the diagnosis note.
+
 The optional `--worker-context` mode requires independently reviewed
 `--expected-workload-sha256`, `--expected-runtime-sha256`, and
 `--expected-trainer-sha256` alongside guarded source commitments. It
