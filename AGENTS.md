@@ -37,6 +37,21 @@ This repository has a few cloud-training constraints that are easy to relearn th
 - If a process requirement is important enough to affect how generation/eval work is done repeatedly, encode it in `AGENTS.md`, the canonical skill under `.skills/`, and the relevant checked-in config/docs before continuing.
 - For new unsteered local batch generation, prefer `batch-generate --engine vllm`. Set `VLLM_BATCH_INVARIANT=1` before process startup and pin the exact vLLM version, documented minimum CUDA compute capability, model and tokenizer revisions, dtype, tensor parallel size, scheduler limits, structured-output backend, model context limit, multimodal limits, decode settings, and JSON Schema when formatting is incidental. Keep generated rows and token artifacts in the consuming project's private output directory.
 
+## Native MLX candidate
+
+- Native SFT consumes the shared preprocessor's exact token IDs and per-token
+  labels with host-declared split/row identities. Never route prepared rows
+  through MLX-LM text/chat loaders, a single-offset loss mask, implicit split,
+  truncation, or dropped tail batches. Reject unsupported attention layouts and
+  failed preprocessing diagnostics before ML imports.
+- The internal `tuner/runtime/native_mlx_sft.py` worker and candidate metadata
+  comparison are not a native provider, public runtime material, or launch
+  authority. A finite iteration count is not a wall-clock/process bound. Keep
+  model/optimizer preparation, exact runtime/source admission, private paths,
+  durable claims, child lifecycle and native artifact verification host-owned.
+  Do not enable native training in Syntunia before those joins and real Mac
+  qualification are complete. See `docs/plans/native-desktop-training-api-v1.md`.
+
 ## HF Jobs
 
 - For the protected paid A10G training smoke, use only `python tuner.py hf-training-smoke {preflight,approve,execute,recover,observe,verify}`: require the exact pushed-source, security/release, isolated CPython 3.12.7 launcher, live quote, and approval gates; allow one submission and one cancel attempt; keep credentials out of the remote job; and verify only the exact 15-file artifact inventory without bulk bucket sync.
