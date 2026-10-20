@@ -11,8 +11,13 @@ import hashlib
 import json
 import os
 import re
+import secrets
+import selectors
+import signal
+import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -24,12 +29,19 @@ _REASONS = frozenset({"DAEMON_ID_INVALID", "INPUT_INVALID", "DOCKER_INVALID",
     "DOCKER_CHANGED", "DOCKER_COMMAND_REJECTED", "DIAGNOSTIC_OUTPUT_INVALID",
     "RELEASE_INVALID", "RELEASE_HASH_INVALID", "OUTPUT_INVALID", "SOURCE_INVALID", "DAEMON_INVALID", "IMAGE_INVALID",
     "CHILD_OUTPUT_INVALID", "CONTAINER_ID_INVALID", "CONTAINER_IMAGE_INVALID",
-    "IMAGE_CHANGED"})
+    "IMAGE_CHANGED", "SOURCE_IDENTITY_INVALID", "CREATE_UNCERTAIN", "START_UNCERTAIN",
+    "DEADLINE_UNCERTAIN", "DEADLINE_STOPPED", "STOP_UNCONFIRMED", "CONTAINER_STATE_INVALID"})
+_CLI_BUDGET = 8192
+_RUN_SECONDS = 120
+_INSPECT = "{{json .Id}}\n{{json .Name}}\n{{json .Image}}\n{{json .Config.Labels}}\n{{json .State.Status}}\n{{json .State.ExitCode}}"
 
 # This fixed program never formats an exception, inspects its attributes, or
 # imports an engine/trainer module.  The exact packaged interpreter imports
 # Torch under the isolated, offline child environment.
 _PROBE = """import json,os,sys
+report_fd=os.dup(1)
+null_fd=os.open('/dev/null',os.O_WRONLY)
+os.dup2(null_fd,1);os.dup2(null_fd,2);os.close(null_fd)
 os.environ.clear()
 os.environ.update({'PATH':os.path.dirname(sys.executable)+':/usr/local/bin:/usr/bin:/bin','HOME':'/tmp','TMPDIR':'/tmp','LC_ALL':'C.UTF-8','PYTHONNOUSERSITE':'1','PYTHONSAFEPATH':'1','PYTHONDONTWRITEBYTECODE':'1','HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1','WANDB_DISABLED':'true','CUDA_VISIBLE_DEVICES':'','NVIDIA_VISIBLE_DEVICES':'void'})
 try:
@@ -45,10 +57,14 @@ except RuntimeError:
  category='RUNTIME'
 except BaseException:
  category='OTHER'
-print(json.dumps({'schema_version':'synaptic-docker-torch-import-child/v1','category':category},sort_keys=True,separators=(',',':')))
+os.write(report_fd,(json.dumps({'schema_version':'synaptic-docker-torch-import-child/v1','category':category},sort_keys=True,separators=(',',':'))+'\\n').encode('ascii'))
+os.close(report_fd)
 """
 
 _GUARDED_PROBE = """import json,os,sys
+report_fd=os.dup(1)
+null_fd=os.open('/dev/null',os.O_WRONLY)
+os.dup2(null_fd,1);os.dup2(null_fd,2);os.close(null_fd)
 from pathlib import Path
 os.environ.clear()
 os.environ.update({'PATH':os.path.dirname(sys.executable)+':/usr/local/bin:/usr/bin:/bin','HOME':'/tmp','TMPDIR':'/tmp','LC_ALL':'C.UTF-8','PYTHONNOUSERSITE':'1','PYTHONSAFEPATH':'1','PYTHONDONTWRITEBYTECODE':'1','HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1','WANDB_DISABLED':'true','CUDA_VISIBLE_DEVICES':'','NVIDIA_VISIBLE_DEVICES':'void'})
@@ -59,14 +75,14 @@ try:
  from tuner.runtime.offline_sft_worker import load_offline_sft_worker_closure,install_owned_module_guard,verify_loaded_owned_module_origins
  stage='READ_MANIFEST'
  manifest=Path('/source/control/offline-sft-worker-v1.json')
- declared=json.loads(manifest.read_bytes())['closure_digest']
+ declared='EXPECTED_CLOSURE_DIGEST'
  stage='LOAD_CLOSURE'
  closure=load_offline_sft_worker_closure(manifest,expected_digest=declared,engine_root=root)
  stage='VERIFY_ORIGINS'
  verify_loaded_owned_module_origins(closure,engine_root=root)
  stage='INSTALL_GUARD'
  install_owned_module_guard(closure,engine_root=root)
- sys.path[:0]=[str(root/'Trainers/sft'),str(root)]
+ sys.path[:0]=[str(root),str(root/'Trainers/sft/src'),str(root/'Trainers/sft'),str(root)]
  stage='BOOTSTRAP_ENV'
  from shared.env_bootstrap import init_trainer_env
  init_trainer_env()
@@ -83,7 +99,8 @@ except RuntimeError:
  category='RUNTIME'
 except BaseException:
  category='OTHER'
-print(json.dumps({'schema_version':'synaptic-docker-torch-import-child/v1','category':category,'stage':stage},sort_keys=True,separators=(',',':')))
+os.write(report_fd,(json.dumps({'schema_version':'synaptic-docker-torch-import-child/v1','category':category,'stage':stage},sort_keys=True,separators=(',',':'))+'\\n').encode('ascii'))
+os.close(report_fd)
 """
 
 
@@ -110,19 +127,53 @@ def _authority(docker: Path, docker_config: Path):
     return (docker, docker_config, _identity(docker), _identity(docker_config))
 
 
-def _run(authority, args: tuple[str, ...], *, timeout: int = 120):
+def _run(authority, args: tuple[str, ...], *, timeout: float = 15):
+    """Bound both CLI lifetime and combined bytes before they enter memory."""
     docker, config, exe_stat, config_stat = authority
     if (_identity(docker) != exe_stat or _identity(config) != config_stat):
         raise ValueError("DOCKER_CHANGED")
-    result = subprocess.run((str(docker), "--config", str(config),
+    process = subprocess.Popen((str(docker), "--config", str(config),
         "--host", "unix:///var/run/docker.sock", *args),
         env={"PATH": os.defpath, "DOCKER_CONTENT_TRUST": "1"},
-        stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout, check=False)
-    if (_identity(docker) != exe_stat or _identity(config) != config_stat):
-        raise ValueError("DOCKER_CHANGED")
-    if result.returncode != 0 or len(result.stdout) > 8192 or len(result.stderr) > 8192:
-        raise ValueError("DOCKER_COMMAND_REJECTED")
-    return result
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        start_new_session=True)
+    output = {process.stdout: bytearray(), process.stderr: bytearray()}
+    deadline = time.monotonic() + timeout
+    try:
+        with selectors.DefaultSelector() as selector:
+            for stream in output:
+                os.set_blocking(stream.fileno(), False)
+                selector.register(stream, selectors.EVENT_READ)
+            while selector.get_map() or process.poll() is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ValueError("DOCKER_COMMAND_REJECTED")
+                for key, _ in selector.select(min(remaining, 0.1)):
+                    chunk = os.read(key.fileobj.fileno(), _CLI_BUDGET + 1)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                    elif sum(map(len, output.values())) + len(chunk) > _CLI_BUDGET:
+                        raise ValueError("DOCKER_COMMAND_REJECTED")
+                    else:
+                        output[key.fileobj].extend(chunk)
+        if process.wait(timeout=max(0.01, deadline - time.monotonic())) != 0:
+            raise ValueError("DOCKER_COMMAND_REJECTED")
+        if (_identity(docker) != exe_stat or _identity(config) != config_stat):
+            raise ValueError("DOCKER_CHANGED")
+        return subprocess.CompletedProcess(args, 0, bytes(output[process.stdout]),
+                                           bytes(output[process.stderr]))
+    finally:
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
+        for stream in output:
+            stream.close()
 
 
 def _one_line(raw: bytes) -> str:
@@ -134,9 +185,120 @@ def _one_line(raw: bytes) -> str:
     return value.strip()
 
 
+def _append(output_dir: Path, event: dict[str, object]) -> None:
+    with (output_dir / "events.jsonl").open("ab") as stream:
+        stream.write(json.dumps(event, sort_keys=True, separators=(",", ":")).encode("ascii") + b"\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _source_identity(source_root: Path, source_lock: Path, expected_lock: str,
+                     expected_manifest: str, expected_closure: str) -> dict[str, str]:
+    if (not source_root.is_absolute() or source_root.name != "engine"
+            or source_root.is_symlink() or not source_root.is_dir()
+            or not source_lock.is_absolute() or not re.fullmatch(r"[0-9a-f]{64}", expected_lock)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_manifest)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_closure)):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    lock_raw = _read(source_lock, 128 * 1024)
+    manifest = source_root.parent / "control/offline-sft-worker-v1.json"
+    manifest_raw = _read(manifest, 128 * 1024)
+    if (hashlib.sha256(lock_raw).hexdigest() != expected_lock
+            or hashlib.sha256(manifest_raw).hexdigest() != expected_manifest):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    lock = json.loads(lock_raw)
+    if (lock.get("schema_version") != "synaptic-source-lock/v1"
+            or lock.get("sources", {}).get("engine", {}).get("commit") !=
+            "0d515ae1ae235d0858802228ce4af8dba8fccd03"):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    # This trusted, checked-in verifier hashes every mounted worker member.
+    # It is imported from this checkout, never from the staged source.
+    checkout = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(checkout))
+    from tuner.runtime import offline_sft_worker
+    if Path(offline_sft_worker.__file__).resolve() != (
+            checkout / "tuner/runtime/offline_sft_worker.py").resolve():
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    try:
+        offline_sft_worker.load_offline_sft_worker_closure(
+            manifest, expected_digest=expected_closure, engine_root=source_root)
+    except Exception:
+        raise ValueError("SOURCE_IDENTITY_INVALID") from None
+    return {"source_lock_sha256": expected_lock, "manifest_sha256": expected_manifest,
+            "closure_digest": expected_closure,
+            "engine_commit": "0d515ae1ae235d0858802228ce4af8dba8fccd03"}
+
+
+def _path_custody(path: Path) -> tuple[tuple[int, int, int], ...]:
+    if not path.is_absolute():
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    observed = []
+    for member in (path, *path.parents):
+        info = member.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            raise ValueError("SOURCE_IDENTITY_INVALID")
+        observed.append((info.st_dev, info.st_ino, info.st_mode))
+    return tuple(observed)
+
+
+def _require_daemon(authority, expected: str, *, timeout: float = 5) -> None:
+    result = _run(authority, ("info", "--format", "{{.ID}}"), timeout=timeout)
+    if result.stderr or _one_line(result.stdout) != expected:
+        raise ValueError("DAEMON_INVALID")
+
+
+def _inspect_owned(authority, identifier: str, *, name: str, label: str, image: str,
+                   daemon_id: str | None = None, timeout: float = 15):
+    if not _CID.fullmatch(identifier):
+        raise ValueError("CONTAINER_ID_INVALID")
+    deadline = time.monotonic() + timeout
+    if daemon_id is not None:
+        _require_daemon(authority, daemon_id, timeout=max(0.05, min(5, timeout / 2)))
+    result = _run(authority, ("container", "inspect", "--format", _INSPECT, identifier),
+                  timeout=max(0.05, deadline - time.monotonic()))
+    if result.stderr:
+        raise ValueError("CONTAINER_STATE_INVALID")
+    rows = result.stdout.decode("ascii").splitlines()
+    if len(rows) != 6:
+        raise ValueError("CONTAINER_STATE_INVALID")
+    cid, actual_name, actual_image, labels, status, code = map(json.loads, rows)
+    if (cid != identifier or actual_name != "/" + name or actual_image != image
+            or type(labels) is not dict or labels.get("ai.synapticlabs.torch-import.claim") != label
+            or status not in {"created", "running", "exited", "dead"} or type(code) is not int):
+        raise ValueError("CONTAINER_STATE_INVALID")
+    return status, code
+
+
+def _stop_once(authority, identifier: str, *, name: str, label: str,
+               image: str, daemon_id: str, output_dir: Path) -> bool:
+    """One stop request; only a separate exact inspection can prove terminal state."""
+    try:
+        status, _ = _inspect_owned(authority, identifier, name=name, label=label,
+                                   image=image, daemon_id=daemon_id)
+        if status in {"exited", "dead"}:
+            _append(output_dir, {"phase": "TERMINAL_OBSERVED", "container_id": identifier})
+            return True
+        if status != "running":
+            return False
+        _append(output_dir, {"phase": "STOP_CLAIMED", "container_id": identifier})
+        _run(authority, ("container", "stop", "--timeout", "2", identifier), timeout=10)
+        status, _ = _inspect_owned(authority, identifier, name=name, label=label,
+                                   image=image, daemon_id=daemon_id)
+        if status in {"exited", "dead"}:
+            _append(output_dir, {"phase": "TERMINAL_OBSERVED", "container_id": identifier})
+            return True
+    except Exception:
+        pass
+    _append(output_dir, {"phase": "STOP_UNCONFIRMED", "container_id": identifier})
+    return False
+
+
 def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
              daemon_id: str, output_dir: Path, expected_release_sha256: str,
-             source_root: Path | None = None) -> dict[str, object]:
+             source_root: Path | None = None, source_lock: Path | None = None,
+             expected_source_lock_sha256: str | None = None,
+             expected_manifest_sha256: str | None = None,
+             expected_closure_digest: str | None = None) -> dict[str, object]:
     if not re.fullmatch(r"[0-9a-f-]{36}", daemon_id):
         raise ValueError("DAEMON_ID_INVALID")
     release_raw = _read(release_path, 128 * 1024)
@@ -155,13 +317,25 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
             or type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest)
             or release["image"]["reference"].split("@")[-1] != image):
         raise ValueError("RELEASE_INVALID")
-    if output_dir.exists() or output_dir.is_symlink() or not output_dir.parent.is_dir():
+    parent_info = output_dir.parent.stat() if output_dir.parent.is_dir() else None
+    if (output_dir.exists() or output_dir.is_symlink() or parent_info is None
+            or output_dir.parent.is_symlink() or parent_info.st_uid != os.getuid()
+            or stat.S_IMODE(parent_info.st_mode) != 0o700):
         raise ValueError("OUTPUT_INVALID")
-    if source_root is not None and (not source_root.is_absolute() or source_root.is_symlink()
-            or not source_root.is_dir()
-            or source_root.name != "engine"
-            or not (source_root.parent / "control/offline-sft-worker-v1.json").is_file()):
+    try:
+        _path_custody(output_dir.parent)
+    except Exception:
+        raise ValueError("OUTPUT_INVALID") from None
+    source_values = (source_lock, expected_source_lock_sha256,
+                     expected_manifest_sha256, expected_closure_digest)
+    if (source_root is None and any(value is not None for value in source_values)) or (
+            source_root is not None and any(value is None for value in source_values)):
         raise ValueError("SOURCE_INVALID")
+    source_identity = ({} if source_root is None else _source_identity(
+        source_root, source_lock, expected_source_lock_sha256,
+        expected_manifest_sha256, expected_closure_digest))
+    custody = (() if source_root is None else tuple(_path_custody(path) for path in
+        (source_root, source_root.parent / "control/offline-sft-worker-v1.json", source_lock)))
     authority = _authority(docker, docker_config)
     info = _run(authority, ("info", "--format", "{{.ID}}"))
     if info.stderr or _one_line(info.stdout) != daemon_id:
@@ -170,22 +344,114 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     if before.stderr or _one_line(before.stdout) != image:
         raise ValueError("IMAGE_INVALID")
     output_dir.mkdir(mode=0o700)
-    cidfile = output_dir / "container.id"
+    nonce = secrets.token_hex(16)
+    name = "synaptic-torch-import-" + nonce
+    probe = _PROBE if source_root is None else _GUARDED_PROBE.replace(
+        "EXPECTED_CLOSURE_DIGEST", expected_closure_digest)
+    claim = {"schema_version": SCHEMA, "daemon_id": daemon_id, "image_id": image,
+             "release_sha256": expected_release_sha256, "source_identity": source_identity,
+             "name": name, "scope": "bare" if source_root is None else "guarded",
+             "helper_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+             "probe_sha256": hashlib.sha256(probe.encode("utf-8")).hexdigest(),
+             "docker_file_identity": list(authority[2]),
+             "docker_config_identity": list(authority[3])}
+    claim_raw = json.dumps(claim, sort_keys=True, separators=(",", ":")).encode("ascii")
+    label = hashlib.sha256(claim_raw).hexdigest()
+    with (output_dir / "claim.json").open("xb") as stream:
+        stream.write(claim_raw + b"\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    _append(output_dir, {"phase": "CREATE_CLAIMED", "claim_sha256": label})
     mount = (() if source_root is None else
              ("--mount", f"type=bind,src={source_root.parent},dst=/source,readonly"))
     user = (() if source_root is None else
             ("--user", f"{source_root.stat().st_uid}:{source_root.stat().st_gid}"))
     command = (
-        "run", "--cidfile", str(cidfile), "--pull=never", "--network=none",
+        "container", "create", "--name", name, "--label", "ai.synapticlabs.torch-import.claim=" + label,
+        "--pull=never", "--network=none", "--log-driver", "json-file",
+        "--log-opt", "max-size=1m", "--log-opt", "max-file=1",
         "--read-only", "--cap-drop=ALL", "--runtime=runc",
         "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=4g",
         "--cpus=2", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
         *mount, *user,
         "--env=NVIDIA_VISIBLE_DEVICES=void", "--env=CUDA_VISIBLE_DEVICES=",
         "--workdir=/tmp", "--entrypoint", python,
-        image, "-I", "-c", _PROBE if source_root is None else _GUARDED_PROBE,
+        image, "-I", "-c", probe,
     )
-    result = _run(authority, command)
+    if source_root is not None and tuple(_path_custody(path) for path in
+            (source_root, source_root.parent / "control/offline-sft-worker-v1.json",
+             source_lock)) != custody:
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    _require_daemon(authority, daemon_id)
+    try:
+        created = _run(authority, command)
+    except Exception:
+        _append(output_dir, {"phase": "CREATE_UNCERTAIN"})
+        raise ValueError("CREATE_UNCERTAIN") from None
+    if created.stderr:
+        _append(output_dir, {"phase": "CREATE_UNCERTAIN"})
+        raise ValueError("CREATE_UNCERTAIN")
+    cid = _one_line(created.stdout)
+    if not _CID.fullmatch(cid):
+        _append(output_dir, {"phase": "CREATE_UNCERTAIN"})
+        raise ValueError("CREATE_UNCERTAIN")
+    _append(output_dir, {"phase": "CREATED", "container_id": cid})
+    if _inspect_owned(authority, cid, name=name, label=label, image=image,
+                      daemon_id=daemon_id)[0] != "created":
+        raise ValueError("CONTAINER_STATE_INVALID")
+    # Recheck the exact source bytes immediately before starting mounted code.
+    if source_root is not None and _source_identity(source_root, source_lock,
+            expected_source_lock_sha256, expected_manifest_sha256,
+            expected_closure_digest) != source_identity:
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    if source_root is not None and tuple(_path_custody(path) for path in
+            (source_root, source_root.parent / "control/offline-sft-worker-v1.json",
+             source_lock)) != custody:
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    deadline = time.monotonic() + _RUN_SECONDS
+    _append(output_dir, {"phase": "START_CLAIMED", "container_id": cid})
+    cleanup_attempted = False
+    start_acknowledged = False
+    try:
+        started = _run(authority, ("container", "start", cid), timeout=15)
+        if started.stderr or _one_line(started.stdout) != cid:
+            raise ValueError("START_UNCERTAIN")
+        start_acknowledged = True
+        _append(output_dir, {"phase": "STARTED", "container_id": cid})
+        while True:
+            if time.monotonic() >= deadline:
+                cleanup_attempted = True
+                confirmed = _stop_once(authority, cid, name=name, label=label,
+                    image=image, daemon_id=daemon_id, output_dir=output_dir)
+                raise ValueError("DEADLINE_STOPPED" if confirmed else "DEADLINE_UNCERTAIN")
+            status, exit_code = _inspect_owned(authority, cid, name=name, label=label,
+                image=image, daemon_id=daemon_id,
+                timeout=max(0.1, min(5, deadline - time.monotonic())))
+            if status in {"exited", "dead"}:
+                _append(output_dir, {"phase": "TERMINAL_OBSERVED", "container_id": cid,
+                                     "exit_code": exit_code})
+                break
+            if time.monotonic() >= deadline:
+                cleanup_attempted = True
+                confirmed = _stop_once(authority, cid, name=name, label=label,
+                    image=image, daemon_id=daemon_id, output_dir=output_dir)
+                raise ValueError("DEADLINE_STOPPED" if confirmed else "DEADLINE_UNCERTAIN")
+            time.sleep(min(0.5, max(0, deadline - time.monotonic())))
+    except BaseException as error:
+        if not cleanup_attempted:
+            cleanup_attempted = True
+            confirmed = _stop_once(authority, cid, name=name, label=label,
+                image=image, daemon_id=daemon_id, output_dir=output_dir)
+            if not confirmed:
+                raise ValueError("DEADLINE_UNCERTAIN") from None
+        if isinstance(error, KeyboardInterrupt):
+            raise
+        if isinstance(error, ValueError) and error.args and error.args[0] in {"DEADLINE_UNCERTAIN", "DEADLINE_STOPPED"}:
+            raise
+        raise ValueError("DEADLINE_UNCERTAIN" if start_acknowledged else "START_UNCERTAIN") from None
+    if exit_code != 0:
+        raise ValueError("CHILD_OUTPUT_INVALID")
+    result = _run(authority, ("container", "logs", cid))
     if result.stderr:
         raise ValueError("CHILD_OUTPUT_INVALID")
     child = json.loads(_one_line(result.stdout))
@@ -196,12 +462,9 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
             or (source_root is not None and child["stage"] not in {"IMPORT_WORKER", "READ_MANIFEST",
                 "LOAD_CLOSURE", "VERIFY_ORIGINS", "INSTALL_GUARD", "BOOTSTRAP_ENV", "TORCH_IMPORT"})):
         raise ValueError("CHILD_OUTPUT_INVALID")
-    cid = _one_line(_read(cidfile, 80))
-    if not _CID.fullmatch(cid):
-        raise ValueError("CONTAINER_ID_INVALID")
-    inspected = _run(authority, ("container", "inspect", "--format", "{{.Image}}", cid))
-    if inspected.stderr or _one_line(inspected.stdout) != image:
-        raise ValueError("CONTAINER_IMAGE_INVALID")
+    if _inspect_owned(authority, cid, name=name, label=label, image=image,
+                      daemon_id=daemon_id)[0] not in {"exited", "dead"}:
+        raise ValueError("CONTAINER_STATE_INVALID")
     after = _run(authority, ("image", "inspect", "--format", "{{.Id}}", image))
     if after.stderr or _one_line(after.stdout) != image:
         raise ValueError("IMAGE_CHANGED")
@@ -209,7 +472,9 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
               "container_id": cid, "image_id": image, "daemon_id": daemon_id,
               "runtime_release_digest": digest,
               "training_executed": False, "gpu_used": False,
-              "scope": "bare" if source_root is None else "guarded"}
+              "scope": "bare" if source_root is None else "guarded",
+              "claim_sha256": label, "source_identity": source_identity,
+              "terminal_observed": True}
     if source_root is not None:
         report["stage"] = child["stage"]
     with (output_dir / "result.json").open("x", encoding="ascii") as stream:
@@ -225,13 +490,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--daemon-id", required=True)
     parser.add_argument("--expected-release-sha256", required=True)
     parser.add_argument("--source-root", type=Path)
+    parser.add_argument("--source-lock", type=Path)
+    parser.add_argument("--expected-source-lock-sha256")
+    parser.add_argument("--expected-manifest-sha256")
+    parser.add_argument("--expected-closure-digest")
     args = parser.parse_args(argv)
     try:
         report = diagnose(docker=args.docker, docker_config=args.docker_config,
                           release_path=args.release, daemon_id=args.daemon_id,
                           output_dir=args.output_dir,
                           expected_release_sha256=args.expected_release_sha256,
-                          source_root=args.source_root)
+                          source_root=args.source_root, source_lock=args.source_lock,
+                          expected_source_lock_sha256=args.expected_source_lock_sha256,
+                          expected_manifest_sha256=args.expected_manifest_sha256,
+                          expected_closure_digest=args.expected_closure_digest)
     except BaseException as error:
         reason = error.args[0] if type(error) is ValueError and len(error.args) == 1 else None
         if type(reason) is not str or reason not in _REASONS:

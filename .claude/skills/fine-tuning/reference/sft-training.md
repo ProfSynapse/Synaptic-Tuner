@@ -492,24 +492,33 @@ the consumed claim, roots, container and retained logs; the diagnostics never
 authorize replay. See `docs/review/offline-sft-worker-diagnostics.md` for the
 October 20 evidence boundary, CPU regressions and fresh-run prerequisites.
 
-For a fresh, credential-free Docker Torch import reproduction against an exact
-retained packaged release, use the checked-in
-`scripts/diagnose_docker_torch_import.py` with `--docker`, `--docker-config`,
-`--release`, the exact `--expected-release-sha256`, `--daemon-id`, and a
-nonexistent private `--output-dir`. It
-requires the release's image ID to be present locally, starts one retained
-read-only container with at most 2 CPUs, 4 GiB, 120 seconds, no network or GPU,
-and no model mount. The bare mode has no source mount. Its result and stdout contain only closed import
-categories and identities. Keep the new container and `container.id`; do not
-replay the original training claim. `PASS` only says Torch imports in that
-reduced environment; a rejection class is a reproduction boundary, not proof
-of a dependency or repair. Review the pinned package/runtime source before any
-change to profile, image, or runtime policy.
-When the bare probe passes, an optional `--source-root` binds the exact retained
-staged engine read-only and repeats Torch import after the offline worker's
-closure validation, owned-module guard, and trainer environment bootstrap.
-Use a fresh output directory for each probe. The guarded result adds the last
-closed stage; it still runs no trainer or model code.
+For a fresh, credential-free Docker Torch import reproduction, review the exact
+command before effects. The checked-in `scripts/diagnose_docker_torch_import.py`
+requires `--docker`, an empty `--docker-config`, `--release`, independently
+verified `--expected-release-sha256`, `--daemon-id`, and a nonexistent private
+`--output-dir`. Guarded mode additionally requires `--source-root`,
+`--source-lock`, independently reviewed `--expected-source-lock-sha256`,
+`--expected-manifest-sha256`, and `--expected-closure-digest` from the retained
+attempt. It validates every staged worker member before executing mounted code;
+the result records those commitments. Run from the reviewed checkout so its
+trusted closure verifier is the one checked in with the helper.
+
+The helper claims a unique name before Docker create, authenticates the exact
+new container before start, and retains it. Docker CLI output is capped at 8 KiB
+in memory; the container requests JSON log rotation at 1 MiB with one file.
+The import execution has a
+120-second host deadline. At expiry the helper issues at most one stop request
+to the authenticated new container and separately inspects terminal state;
+cleanup takes additional bounded time, and a stop acknowledgment alone is not
+quiescence. An uncertain create/start/stop remains consumed in `claim.json` and
+`events.jsonl`, with no automatic replay or container removal. The probe asks
+for at most 2 CPUs, 4 GiB, no network/GPU/model mount, and a read-only root.
+Bare mode mounts no source. Guarded mode mounts the independently authenticated
+retained source and runs the worker closure check, module guard, trainer path
+setup, environment bootstrap and Torch import. Neither runs training. `PASS`
+only says Torch imports in the reduced probe; it does not diagnose an earlier
+failure. Review the pinned package/runtime source before changing a profile,
+image or runtime policy.
 The exact r2 CPU evidence and its unresolved runtime difference are in
 `docs/review/docker-torch-import-r2-diagnosis.md`.
 
