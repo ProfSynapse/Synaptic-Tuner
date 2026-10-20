@@ -51,6 +51,14 @@ This repository has a few cloud-training constraints that are easy to relearn th
   durable claims, child lifecycle and native artifact verification host-owned.
   Do not enable native training in Syntunia before those joins and real Mac
   qualification are complete. See `docs/plans/native-desktop-training-api-v1.md`.
+- For Mac qualification preparation, preserve the original 50-package MLX lock
+  and use the reviewed four-wheel additive/flat 54-package lock for the current
+  host and child import graph. Prepare a new owner-private interpreter/runtime
+  through the checked-in bounded `native_runtime_preparation.py`; never chmod
+  Homebrew or treat cache metadata as selected wheel archive provenance. Capture
+  narrow `shared`, `tuner`, and `synaptic_tuner` sources on the final pushed
+  commit. Model metadata and weights remain separate reviewed effects through
+  `native_model_preparation.py`; its candidate and receipts grant no admission.
 - Capture native runtime files and linked libraries, including the Homebrew
   Python framework, startup files and bytecode. A stub executable hash or package
   metadata match cannot attest this closure. Treat the OS shared cache as an

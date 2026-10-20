@@ -9,7 +9,7 @@ workspace on any uncertain failure and never retries automatically.
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack, redirect_stderr, redirect_stdout
+from contextlib import ExitStack, contextmanager, redirect_stderr, redirect_stdout
 import hashlib
 import json
 import os
@@ -18,6 +18,8 @@ import re
 import stat
 import sys
 import unicodedata
+from urllib.parse import quote, urlsplit
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -31,6 +33,10 @@ _SCHEMA = "synaptic-native-model-acquisition/v1"
 _ENDPOINT = "https://huggingface.co"
 _MAX_BYTES = 512 * 1024 * 1024
 _MAX_FILES = 128
+_MAX_METADATA_RESPONSE = 2 * 1024 * 1024
+_CHUNK = 64 * 1024
+_REDIRECT_HOSTS = frozenset({"huggingface.co", "cdn-lfs.huggingface.co",
+                             "cas-bridge.xethub.hf.co"})
 _MEMBER_FIELDS = {"path", "size", "kind", "upstream_digest"}
 
 
@@ -141,11 +147,74 @@ def _upstream(member, raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+def _url_host(url, allowed):
+    parsed = urlsplit(url)
+    if (parsed.scheme != "https" or parsed.hostname not in allowed
+            or parsed.port not in (None, 443) or parsed.username or parsed.password
+            or parsed.fragment):
+        raise ValueError("model HTTPS destination differs")
+
+
+class _RestrictedRedirect(HTTPRedirectHandler):
+    def __init__(self, hosts, maximum):
+        self.hosts, self.maximum, self.count = hosts, maximum, 0
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        self.count += 1
+        if self.count > self.maximum:
+            raise ValueError("model redirect count differs")
+        _url_host(newurl, self.hosts)
+        return super().redirect_request(request, fp, code, msg, headers, newurl)
+
+
+@contextmanager
+def _response(url, *, hosts, redirects, opener=None):
+    _url_host(url, hosts)
+    request = Request(url, headers={"Accept-Encoding": "identity",
+                                    "User-Agent": "synaptic-native-model-preparation/1"})
+    if opener is None:
+        opener = build_opener(ProxyHandler({}), _RestrictedRedirect(hosts, redirects)).open
+    with opener(request, timeout=20) as response:
+        _url_host(response.geturl(), hosts)
+        if (response.status != 200 or response.headers.get("Content-Encoding", "identity") != "identity"):
+            raise ValueError("model HTTP response differs")
+        yield response
+
+
+def _bounded_metadata(config, *, opener=None):
+    url = (f"{_ENDPOINT}/api/models/{config['repository']}/revision/"
+           f"{config['revision']}?blobs=true")
+    with _response(url, hosts=frozenset({"huggingface.co"}), redirects=0,
+                   opener=opener) as response:
+        declared = response.headers.get("Content-Length")
+        if declared is not None and (not declared.isdecimal() or int(declared) > _MAX_METADATA_RESPONSE):
+            raise ValueError("model metadata response exceeds bound")
+        chunks, count = [], 0
+        while True:
+            chunk = response.read(min(_CHUNK, _MAX_METADATA_RESPONSE + 1 - count))
+            if not chunk:
+                break
+            count += len(chunk)
+            if count > _MAX_METADATA_RESPONSE:
+                raise ValueError("model metadata response exceeds bound")
+            chunks.append(chunk)
+    raw = b"".join(chunks)
+    value = json.loads(raw, object_pairs_hook=_pairs,
+                       parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+    if type(value) is not dict:
+        raise ValueError("model metadata object differs")
+    from huggingface_hub.hf_api import ModelInfo
+    return ModelInfo(**value)
+
+
 def _observe_metadata(config, *, api_type):
-    info = api_type(endpoint=_ENDPOINT, token=False).model_info(
-        config["repository"], revision=config["revision"], files_metadata=True,
-        token=False, timeout=30,
-    )
+    if api_type is None:
+        info = _bounded_metadata(config)
+    else:
+        info = api_type(endpoint=_ENDPOINT, token=False).model_info(
+            config["repository"], revision=config["revision"], files_metadata=True,
+            token=False, timeout=30,
+        )
     if info.sha != config["revision"] or type(info.siblings) not in (list, tuple):
         raise ValueError("model metadata revision differs")
     observed = []
@@ -180,9 +249,6 @@ def _metadata_candidate(config, *, api_type=None):
             pass
         else:
             raise ValueError("metadata candidate already exists")
-    if api_type is None:
-        from huggingface_hub import HfApi
-        api_type = HfApi
     with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
         observed = _observe_metadata(config, api_type=api_type)
     names = tuple(item["path"] for item in observed)
@@ -225,6 +291,66 @@ def _publish_member(root, name, raw):
     root.check()
 
 
+@contextmanager
+def _member_parent(root, name):
+    parts = relative_member(name)
+    with ExitStack() as stack:
+        parent = root.fd
+        for part in parts[:-1]:
+            try:
+                os.mkdir(part, mode=0o700, dir_fd=parent)
+            except FileExistsError:
+                pass
+            fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            stack.callback(os.close, fd)
+            info = os.fstat(fd)
+            if info.st_uid != os.getuid() or not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o077:
+                raise ValueError("model SDK destination parent is not private")
+            parent = fd
+        root.check()
+        yield parent, parts[-1]
+        root.check()
+
+
+def _fetch_member(config, member, root, *, remaining, opener=None):
+    """One no-retry, no-cache HTTPS transfer; stop before any excess byte is written."""
+    if remaining < member["size"]:
+        raise ValueError("model aggregate transfer exceeds bound")
+    name = member["path"]
+    expected_url = (f"{_ENDPOINT}/{config['repository']}/resolve/{config['revision']}/"
+                    f"{quote(name, safe='/')}")
+    from huggingface_hub import hf_hub_url
+    url = hf_hub_url(config["repository"], name, revision=config["revision"], endpoint=_ENDPOINT)
+    if url != expected_url:
+        raise ValueError("model Hub resolve URL differs")
+    with _member_parent(root, name) as (parent, leaf):
+        fd = os.open(leaf, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=parent)
+        size = 0
+        digest = hashlib.sha256() if member["kind"] == "lfs" else hashlib.sha1()
+        if member["kind"] == "git":
+            digest.update(f"blob {member['size']}\0".encode())
+        with os.fdopen(fd, "wb") as output:
+            with _response(url, hosts=_REDIRECT_HOSTS, redirects=2, opener=opener) as response:
+                declared = response.headers.get("Content-Length")
+                if declared is not None and (not declared.isdecimal() or int(declared) != member["size"]):
+                    raise ValueError("model transfer declared size differs")
+                while True:
+                    chunk = response.read(min(_CHUNK, member["size"] + 1 - size))
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > member["size"] or size > remaining:
+                        raise ValueError("model transfer exceeds admitted bytes")
+                    output.write(chunk)
+                    digest.update(chunk)
+            output.flush()
+            os.fsync(output.fileno())
+    if size != member["size"] or digest.hexdigest() != member["upstream_digest"]:
+        raise ValueError("model transfer identity differs")
+    return size
+
+
 def _acquire(config, *, api_type=None, download=None):
     previous = os.umask(0o077)
     try:
@@ -239,26 +365,40 @@ def _acquire_private(config, *, api_type=None, download=None):
     with NativeTree(workspace, private=True) as root:
         os.mkdir("scratch", mode=0o700, dir_fd=root.fd)
         root.check()
-    if api_type is None or download is None:
-        from huggingface_hub import HfApi, snapshot_download
-        api_type = api_type or HfApi
-        download = download or snapshot_download
     with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
         _metadata(members, config, api_type=api_type)
     scratch = workspace / "scratch"
     with NativeTree(scratch, private=True) as held:
         os.mkdir("repository", mode=0o700, dir_fd=held.fd)
+        os.mkdir("sdk-cache", mode=0o700, dir_fd=held.fd)
         held.check()
     repository = scratch / "repository"
-    with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
-        result = download(
-            repo_id=config["repository"], revision=config["revision"], token=False,
-            endpoint=_ENDPOINT, local_dir=repository, cache_dir=scratch / "sdk-cache",
-            allow_patterns=[item["path"] for item in members], max_workers=1,
-            etag_timeout=10,
-        )
-    if Path(result) != repository:
-        raise ValueError("model SDK destination differs")
+    with NativeTree(repository, private=True) as source, NativeTree(scratch / "sdk-cache", private=True) as cache:
+        # Every selected nested destination exists at 0700 before a transport can write.
+        for member in members:
+            with _member_parent(source, member["path"]):
+                pass
+        cache.check()
+        if download is None:
+            transferred = 0
+            with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
+                for member in members:
+                    transferred += _fetch_member(config, member, source,
+                                                 remaining=config["maximum_bytes"] - transferred)
+        else:
+            # Injection is used by CPU publication fixtures only. The public CLI
+            # always uses the bounded transfer above.
+            with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
+                result = download(
+                    repo_id=config["repository"], revision=config["revision"], token=False,
+                    endpoint=_ENDPOINT, local_dir=repository, cache_dir=scratch / "sdk-cache",
+                    allow_patterns=[item["path"] for item in members], max_workers=1,
+                    etag_timeout=10,
+                )
+            if Path(result) != repository:
+                raise ValueError("model SDK destination differs")
+        source.check()
+        cache.check()
     bytes_by_name = {}
     content_hashes = {}
     with NativeTree(repository, private=True) as source:
@@ -323,7 +463,9 @@ def main(argv=None):
         else:
             environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C",
                            "HF_HOME": config["workspace_root"],
-                           "HF_HUB_DISABLE_TELEMETRY": "1", "TMPDIR": config["workspace_root"]}
+                           "HF_HUB_DISABLE_TELEMETRY": "1", "HF_HUB_DISABLE_IMPLICIT_TOKEN": "1",
+                           "XDG_CACHE_HOME": config["workspace_root"],
+                           "TMPDIR": config["workspace_root"]}
             status, output = run_bounded_command(
                 [sys.executable, "-I", "-B", str(Path(__file__).resolve()),
                  "_metadata_worker" if args.action == "metadata-candidate" else "_worker",
@@ -332,8 +474,10 @@ def main(argv=None):
             )
             if status != 0:
                 raise ValueError("model acquisition worker uncertain")
-            worker_result = json.loads(output, object_pairs_hook=_pairs)
-            if _canonical(worker_result) != output:
+            if not output.endswith(b"\n") or output.endswith(b"\n\n"):
+                raise ValueError("model acquisition worker framing differs")
+            worker_result = json.loads(output[:-1], object_pairs_hook=_pairs)
+            if _canonical(worker_result) + b"\n" != output:
                 raise ValueError("model acquisition worker result differs")
             if args.action == "metadata-candidate":
                 with NativeTree(Path(config["workspace_root"]), private=True) as root:

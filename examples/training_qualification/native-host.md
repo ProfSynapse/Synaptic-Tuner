@@ -75,6 +75,41 @@ composition through `tuner.project`; the existing venv was not modified.
 Resolve these exact closure/composition blockers and recapture on the final
 pushed source before any signed execution admission.
 
+The r7 proposal uses a single new owner-private interpreter and one 54-package
+environment for host and child. The original 50 lock remains unchanged. The
+four-wheel additive lock and exact combined lock are under
+`Trainers/mlx_sft_mac/runtime-candidate/`; the combined SHA-256 is
+`7c167018ee6bd61a3609971e3f834082c798e7bd2a3fa0c5c2564887da4fde4f`.
+The checked-in `native-private-runtime.example.json` binds 54 selected wheel
+URLs, filenames, sizes and hashes (146,218,037 bytes), the 20,051,753-byte
+Astral interpreter archive, and a new unused private root. These are upstream
+metadata selections awaiting actual archive and install readback.
+
+From the final clean pushed source, the reusable preparation CLI provides:
+
+```sh
+# Future effects, held until separate root review. Copy the exact reviewed
+# template to a NEW 0600 config file in this existing 0700 parent first.
+private_config=/Users/jrosenbaum/.local/share/synaptic-qualification/native-runtime-r7-reviewed.json
+python3 -B examples/training_qualification/native_runtime_preparation.py plan "$private_config"
+python3 -B examples/training_qualification/native_runtime_preparation.py acquire "$private_config"
+python3 -B examples/training_qualification/native_runtime_preparation.py install "$private_config"
+python3 -B examples/training_qualification/native_runtime_preparation.py verify "$private_config"
+```
+
+Select the CPU host Python used for `python3` explicitly before those commands.
+`plan` is local-only. `acquire` hard-bounds archive bytes before each write and
+retains them. `install` uses only the exact retained archives, a hashed private
+copy of uv, an offline local Python mirror and wheelhouse; both effectful phases
+create consumed private claims. Every owned process has a 300-second deadline
+and 4 KiB combined output cap. Temporary/cache paths remain under the private
+root. Archive expansion is checked before install, but uv's temporary disk use
+is not represented as a hard aggregate disk quota; the retained private tree
+has a 2 GiB postphase guard. No phase signs admission.
+Afterward review observed interpreter/framework/stdlib/packages, dylibs and
+source trees. The final capture must include narrow `source/shared` alongside
+`source/tuner` and `source/synaptic_tuner`.
+
 Two synthetic publications were made through the existing `ingest` and
 `prepare-dataset` CLIs, then copied into private Mac staging. Raw/full-sequence
 publication digest: `0e4951bb2e54ed0985e6ca0d4c9940f0f5d75ccb78821c14544ef44897580cbe`.
@@ -92,14 +127,17 @@ The model workspace is empty. Its adjacent `model-acquisition-draft.json` is
 incomplete by design: `members` and `tokenizer_members` are empty. No model
 metadata request, weights download or ML import has run. The reusable
 `native_model_preparation.py` action supports a later separately reviewed
-acquisition using exact complete upstream metadata, finite bounds and private
-create-only publication. Its observations never sign admission. The next
+acquisition using exact complete upstream metadata, a 2 MiB streaming response
+cap before Hub `ModelInfo` parsing, and exact prewrite bounded HTTPS transfers
+to explicitly precreated 0700 nested destinations. The SDK's unbounded
+`snapshot_download` cache/transfer path is not used. An unexpected redirect
+host rejects. Its observations never sign admission. The next
 reviewed sequence is:
 
 ```sh
-candidate_python=/Users/jrosenbaum/.local/share/synaptic-qualification/native-mlx-candidate-20261020/venv/bin/python
+candidate_python=/Users/jrosenbaum/.local/share/synaptic-qualification/native-mlx-private-runtime-r6-20261020/venv/bin/python
 stage=/Users/jrosenbaum/.local/share/synaptic-qualification/native-mlx-candidate-20261020/prep-r5-aba3c576-20261020
-# After explicit approval for an SDK metadata request, from the final clean source:
+# After separate approval for one bounded Hub metadata request, from final clean source:
 "$candidate_python" -B examples/training_qualification/native_model_preparation.py \
   metadata-candidate "$stage/model-acquisition-draft.json"
 # Independently review every candidate member and complete tokenizer selection;
@@ -123,20 +161,21 @@ The following capture/admission/start commands are for a **later reviewed
 stage**. The current source and runtime closure cannot pass capture yet.
 
 ```sh
-# From the clean pushed engine checkout, with the existing private 3.11.14 venv.
+# From final clean pushed source with the reviewed new private 3.11.14 venv.
 umask 077
 set -C  # Every shell redirection below creates a new file or fails.
-candidate_python=/Users/jrosenbaum/.local/share/synaptic-qualification/native-mlx-candidate-20261020/venv/bin/python
+candidate_python=/Users/jrosenbaum/.local/share/synaptic-qualification/native-mlx-private-runtime-r6-20261020/venv/bin/python
 private_root=/Users/jrosenbaum/.local/share/synaptic-qualification/native-mlx-candidate-20261020/reviewed-attempt-1
 # Create and inspect this fresh owner-only directory before writing any files.
 mkdir -m 700 "$private_root"
 
-# Prepare capture-config.json with exact stdlib, private package tree, narrow
-# engine/tuner source tree, executable/framework and system-library roots.
+# Prepare capture-config.json with observed exact stdlib, private package tree,
+# narrow source/tuner + source/synaptic_tuner + source/shared trees, and
+# executable/framework/system-library roots.
 # The capture command creates capture.json once and reports OBSERVED_NOT_ADMITTED.
 "$candidate_python" -B scripts/capture_native_mlx_runtime.py \
   --config "$private_root/capture-config.json" \
-  --dependency-lock Trainers/mlx_sft_mac/runtime-candidate/requirements.lock \
+  --dependency-lock Trainers/mlx_sft_mac/runtime-candidate/requirements.runtime.lock \
   --output "$private_root/capture.json"
 
 # Run separately for complete, already reviewed private model and tokenizer

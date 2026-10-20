@@ -221,11 +221,43 @@ ancestor is group-writable. The candidate venv lacks `jsonschema` required by
 the current host composition. Preserve both as blockers rather than changing
 shared Homebrew permissions, weakening native tree traversal, or claiming a
 capture. Existing wheel-cache metadata does not attest absent wheel archives.
+The current child also imports `jsonschema` through
+`tuner.training.contracts` → `tuner.project.execution_source` → the eager
+`tuner.project` initializer. The host and child need the same exact inventory
+under the current `verify_native_material` contract. The r7 candidate keeps
+the original 50 lock unchanged and adds four reviewed Mac wheel hashes in
+`requirements.host-additions.lock`. Its flat `requirements.runtime.lock` is
+exactly the original bytes plus those four lines (SHA-256
+`7c167018ee6bd61a3609971e3f834082c798e7bd2a3fa0c5c2564887da4fde4f`).
+The candidate proposal selects this 54-package lock; it grants no runtime or
+hardware authority.
+
+Use `examples/training_qualification/native_runtime_preparation.py plan` with
+the exact checked-in `native-private-runtime.example.json` to inspect the
+166,269,790-byte archive selection without effects. Only after independent
+review, copy that config to a new 0600 file in an existing 0700 private parent
+and use its `acquire`, `install`, and `verify` phases from a clean pushed source.
+The CLI retains the exact Astral 3.11.14+20260211 interpreter archive and 54
+wheel archives, checks hashes before an offline uv local-mirror install, binds
+the uv executable hash/version, confines caches and temporary paths to the
+private root, and retains consumed claims. HTTPS transfers stop before writing
+an excess byte; finite expansion checks are pre-install inventory bounds, not
+a hard aggregate filesystem quota for uv temporary files. A 2 GiB retained
+private-tree guard runs after each phase. Include narrow
+`source/shared` in the subsequent final-source static capture alongside
+`source/tuner` and `source/synaptic_tuner`. Do not chmod Homebrew or reuse the
+old venv/capture attempt.
+
 The checked-in `examples/training_qualification/native_model_preparation.py`
-is the later reviewed model-acquisition action: `inspect` is local, the bounded
-`metadata-candidate` requests only upstream metadata, and `acquire` requires a
-separately reviewed complete member/tokenizer selection. It verifies upstream
-hashes and publishes private create-only snapshots. Its receipt is
+is the later reviewed model-acquisition action: `inspect` is local,
+`metadata-candidate` reads at most 2 MiB of the exact Hub metadata response
+before JSON/SDK `ModelInfo` parsing, and `acquire` requires a separately
+reviewed complete member/tokenizer selection. Model files stream from the
+exact pinned Hub resolve URLs into precreated private 0700 nested parents;
+per-file and aggregate caps reject before excess writes. The SDK's unbounded
+snapshot/cache download path is not used. Unexpected redirect hosts fail
+closed. It verifies upstream hashes and publishes private create-only
+snapshots. Its receipt is
 `OBSERVED_NOT_ADMITTED`. No Mac model bytes or tokenizer labels have yet been
 acquired/reviewed. See `examples/training_qualification/native-host.md` for
 exact staging paths, publication digests and commands.
