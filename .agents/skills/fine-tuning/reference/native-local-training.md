@@ -93,7 +93,8 @@ reject. OS shared-cache dependencies are explicitly trusted through the recorded
 OS/kernel build, not falsely described as hashed ordinary files.
 
 For `@rpath` dependencies, inspect the complete captured load chain. Apple's
-dyld runpath list includes `LC_RPATH` entries from the chain leading to the
+[run-path guidance](https://developer.apple.com/library/archive/documentation/DeveloperTools/Conceptual/DynamicLibraries/100-Articles/RunpathDependentLibraries.html)
+and `dyld(1)` contract describe `LC_RPATH` entries from the chain leading to the
 dependent image; expand `@loader_path` relative to the image declaring each
 entry. The static checker requires one captured Mach-O target across every
 proven context and rejects ambiguous targets, paths outside the capture,
