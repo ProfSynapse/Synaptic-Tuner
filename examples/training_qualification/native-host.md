@@ -54,10 +54,73 @@ the publication when the consumer reads it. For the message attempt, review
 the actual shared preprocessor output; a `prompt_completion` label does not by
 itself prove assistant-only labels.
 
+## R5 Mac preparation and remaining boundary
+
+The authorized preparation used a new 0700 directory at
+`/Users/jrosenbaum/.local/share/synaptic-qualification/native-mlx-candidate-20261020/prep-r5-aba3c576-20261020`.
+Its `source/` is a clean isolated clone of pushed commit
+`aba3c57699f6617878440b3126d15e475e295651`; the user's dirty checkout
+was untouched. The existing private venv is CPython 3.11.14 with the original
+50-dependency lock (SHA-256 `f9a6298260cd17f2c3d567ae3674108a71efa68e99369906487a4d8c0feb7117`).
+`uv pip check` passes. Retained install logs and unpacked wheel-cache metadata
+are observations, not selected archive attestation: the original wheel archives
+are absent. The host reports M4, 24 GiB and macOS 27.0.1 (26A434).
+
+The checked-in static capture refused the actual Homebrew stdlib root because
+`/opt/homebrew/Cellar` has mode 0775, while `NativeTree` requires every runtime
+ancestor to be free of group/other write access. No capture was published. Do
+not change shared Homebrew permissions or weaken the capture check to pass it.
+The candidate venv also lacks `jsonschema`, imported by the current host
+composition through `tuner.project`; the existing venv was not modified.
+Resolve these exact closure/composition blockers and recapture on the final
+pushed source before any signed execution admission.
+
+Two synthetic publications were made through the existing `ingest` and
+`prepare-dataset` CLIs, then copied into private Mac staging. Raw/full-sequence
+publication digest: `0e4951bb2e54ed0985e6ca0d4c9940f0f5d75ccb78821c14544ef44897580cbe`.
+Prompt/completion publication digest:
+`d22b95afbf5e415fa6a363381fda7714cfd0d7817d3b98a5e44e3149250ee9a0`.
+Each has three training and two validation rows, with declared source IDs and
+split identities. Their private project is at `prep-r5-aba3c576-20261020/prepared-project/`.
+Mac content hashes matched the local publications; Mac API readback is blocked
+by the missing `jsonschema`. The complete rows were reviewed for their source
+shape, but exact tokenizer IDs, assistant-only label masks, and
+`enable_thinking=false` still require the pinned tokenizer and shared
+preprocessor before training. These data hashes do not grant training authority.
+
+The model workspace is empty. Its adjacent `model-acquisition-draft.json` is
+incomplete by design: `members` and `tokenizer_members` are empty. No model
+metadata request, weights download or ML import has run. The reusable
+`native_model_preparation.py` action supports a later separately reviewed
+acquisition using exact complete upstream metadata, finite bounds and private
+create-only publication. Its observations never sign admission. The next
+reviewed sequence is:
+
+```sh
+candidate_python=/Users/jrosenbaum/.local/share/synaptic-qualification/native-mlx-candidate-20261020/venv/bin/python
+stage=/Users/jrosenbaum/.local/share/synaptic-qualification/native-mlx-candidate-20261020/prep-r5-aba3c576-20261020
+# After explicit approval for an SDK metadata request, from the final clean source:
+"$candidate_python" -B examples/training_qualification/native_model_preparation.py \
+  metadata-candidate "$stage/model-acquisition-draft.json"
+# Independently review every candidate member and complete tokenizer selection;
+# copy the reviewed selection into a fresh private config and workspace. Inspect
+# is local-only. Acquire is a later bounded model download, not approved here.
+"$candidate_python" -B examples/training_qualification/native_model_preparation.py \
+  inspect /ABSOLUTE/REVIEWED/model-acquisition.json
+"$candidate_python" -B examples/training_qualification/native_model_preparation.py \
+  acquire /ABSOLUTE/REVIEWED/model-acquisition.json
+```
+
+The exact acquisition schema and pins are in
+[`native-model-acquisition.example.json`](native-model-acquisition.example.json).
+The template paths are placeholders, never execution authority. Review the
+complete metadata candidate, selected bytes, both snapshot manifests and
+tokenizer loadability before wiring them into the host config.
+
 ## Reusable preparation and review sequence
 
-These are commands for the **later approved Mac stage**. They have not been
-run against the Mac for this increment.
+The following capture/admission/start commands are for a **later reviewed
+stage**. The current source and runtime closure cannot pass capture yet.
 
 ```sh
 # From the clean pushed engine checkout, with the existing private 3.11.14 venv.

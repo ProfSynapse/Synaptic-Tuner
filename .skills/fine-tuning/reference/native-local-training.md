@@ -214,6 +214,22 @@ configured member archive from the verified snapshot. Lineage/metrics retain
 the exact worker bindings. Finite file/aggregate budgets and public 1 MiB
 stream chunks apply. CPU verification does not rerun the final evaluation.
 
+R5 Mac preparation retained a clean pushed `aba3c576` source clone and two
+genuine synthetic prepared publications under a fresh 0700 private stage.
+The selected Homebrew stdlib cannot currently pass static capture: its Cellar
+ancestor is group-writable. The candidate venv lacks `jsonschema` required by
+the current host composition. Preserve both as blockers rather than changing
+shared Homebrew permissions, weakening native tree traversal, or claiming a
+capture. Existing wheel-cache metadata does not attest absent wheel archives.
+The checked-in `examples/training_qualification/native_model_preparation.py`
+is the later reviewed model-acquisition action: `inspect` is local, the bounded
+`metadata-candidate` requests only upstream metadata, and `acquire` requires a
+separately reviewed complete member/tokenizer selection. It verifies upstream
+hashes and publishes private create-only snapshots. Its receipt is
+`OBSERVED_NOT_ADMITTED`. No Mac model bytes or tokenizer labels have yet been
+acquired/reviewed. See `examples/training_qualification/native-host.md` for
+exact staging paths, publication digests and commands.
+
 See `docs/plans/native-desktop-training-api-v1.md` for remaining review and
 real-Mac acceptance. The CPU facade tests substitute the ML child;
 they are not a hardware result and must never unlock the candidate.
