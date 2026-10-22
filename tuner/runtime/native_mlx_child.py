@@ -15,6 +15,8 @@ import os
 from pathlib import Path
 import stat
 import sys
+import tarfile
+import tempfile
 
 
 def _read(path, maximum):
@@ -60,6 +62,29 @@ def _json(raw):
 def _canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
                       allow_nan=False).encode()
+
+
+def _capture_document(raw):
+    capture = _json(raw)
+    if (type(capture) is not dict or capture.get("schema") not in (
+        "synaptic-native-mlx-capture/v1", "synaptic-native-mlx-capture/v2",
+    ) or _canonical(capture) != raw):
+        raise ValueError("native capture schema differs")
+    config = capture.get("config")
+    if type(config) is not dict:
+        raise ValueError("native capture configuration differs")
+    dynamic_fields = {
+        "dynamic_system_libraries", "required_builtin_modules", "expected_os_build",
+    }
+    observation_fields = {"dynamic_system_libraries", "builtin_modules", "dynamic_os_build"}
+    if capture["schema"].endswith("/v2"):
+        if (not dynamic_fields <= set(config) or not observation_fields <= set(capture)
+                or not config["dynamic_system_libraries"]
+                or not config["required_builtin_modules"]):
+            raise ValueError("native dynamic capture fields differ")
+    elif dynamic_fields & set(config) or observation_fields & set(capture):
+        raise ValueError("native legacy capture fields differ")
+    return capture
 
 
 class _PinnedSourceLoader(importlib.machinery.SourceFileLoader):
@@ -147,21 +172,51 @@ def _snapshot(value):
     )
 
 
+def _load_published_tokenizer(archive_bytes, *, request_root, expected_members, use_fast):
+    """Prove the exact role payload is loadable, before any optimizer work."""
+    from tuner.runtime.native_files import relative_member
+    from transformers import AutoTokenizer
+    with tempfile.TemporaryDirectory(prefix="tokenizer-publication-", dir=request_root) as name:
+        root = Path(name)
+        with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:") as archive:
+            members = archive.getmembers()
+            if (tuple(sorted(item.name for item in members))
+                    != tuple(sorted((*expected_members, "native_tokenizer.json")))
+                    or any(not item.isfile() for item in members)):
+                raise ValueError("native tokenizer archive inventory differs")
+            for member in members:
+                parts = relative_member(member.name)
+                parent = root.joinpath(*parts[:-1])
+                parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                raw = archive.extractfile(member).read()
+                if len(raw) != member.size:
+                    raise ValueError("native tokenizer archive member differs")
+                fd = os.open(root.joinpath(*parts), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(raw)
+        AutoTokenizer.from_pretrained(
+            str(root), local_files_only=True, trust_remote_code=False, use_fast=use_fast,
+        )
+
+
 def run_request(request, *, request_root):
     """After isolated import admission; all workload controls are recompiled."""
     from tuner.runtime.native_files import NativeTree
     from tuner.runtime.native_mlx_composition import execute_native_sft
     from tuner.runtime.native_mlx_input import prepare_native_input
+    from tuner.runtime.native_mlx_publication import NativeArtifactBudget, tokenizer_publication_bytes
     from tuner.training.contracts import RetainedTrainingInputStreamLease
     from tuner.training.native_mlx_compilation import parse_native_workload
 
     fields = {"schema", "workload", "runtime_capture", "dependency_lock", "dataset",
-              "model_snapshot", "tokenizer_snapshot", "output"}
+              "model_snapshot", "tokenizer_snapshot", "tokenizer_members", "artifact_budget", "output"}
     if type(request) is not dict or set(request) != fields or request["schema"] != "synaptic-native-child-request/v1":
         raise ValueError("native child request fields differ")
     projection = parse_native_workload(_canonical(request["workload"]))
     profile = projection.profile
     model, tokenizer = _snapshot(request["model_snapshot"]), _snapshot(request["tokenizer_snapshot"])
+    members = tuple(request["tokenizer_members"])
+    budget = NativeArtifactBudget(**request["artifact_budget"])
     if (model.repository, model.revision, tokenizer.repository, tokenizer.revision) != (
         profile.model_ref, profile.model_revision, profile.model_ref, profile.tokenizer_revision,
     ):
@@ -184,6 +239,15 @@ def run_request(request, *, request_root):
             tokenization=projection.tokenization, config=projection.controls,
             workload_digest=projection.workload.fingerprint,
             runtime_material=runtime, runtime_digest=profile.runtime_digest, dependency_lock=lock,
+        )
+        with NativeTree(Path(tokenizer.root), private=True) as token_tree:
+            published_tokenizer = tokenizer_publication_bytes(
+                tokenizer, members, projection.tokenization, budget, token_tree,
+            )
+            token_tree.check()
+        _load_published_tokenizer(
+            published_tokenizer, request_root=request_root, expected_members=members,
+            use_fast=projection.tokenization.use_fast,
         )
         result = execute_native_sft(
             bound=bound, model_snapshot=model, lora=projection.lora, optimizer=projection.optimizer,
@@ -212,9 +276,7 @@ def main():
         runtime = _read(runtime_path, 16 * 1024 * 1024)
         if hashlib.sha256(runtime).hexdigest() != request["workload"]["profile"]["runtime_digest"]:
             raise ValueError("native capture digest differs from workload")
-        capture = _json(runtime)
-        if capture["schema"] != "synaptic-native-mlx-capture/v1" or _canonical(capture) != runtime:
-            raise ValueError("native capture schema differs")
+        capture = _capture_document(runtime)
         phase = 121
         install_capture_imports(capture)
         phase = 122

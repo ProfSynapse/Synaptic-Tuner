@@ -5,13 +5,13 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
 from synaptic_tuner.api.v1.training_input import TrainingInputV1
 from synaptic_tuner.api.v1.training_sources import PreparedTrainingInputIdentity
-from tuner.runtime.native_mlx_child import _PinnedFinder, run_request
+from tuner.runtime.native_mlx_child import _PinnedFinder, _capture_document, run_request
 from tuner.runtime.native_mlx_material import canonical
 from tuner.training.native_mlx_compilation import NativeMLXProfile, compile_native_sft, parse_native_workload
 
@@ -133,16 +133,24 @@ def test_worker_recompiles_and_joins_workload_before_invoking_runtime(private_ro
     output.mkdir(mode=0o700)
     for name, content in (("capture.json", b"capture"), ("lock", b"lock"), ("dataset.jsonl", b"dataset")):
         (private_root / name).write_bytes(content)
-    snapshot = {
-        "repository": "configured/model", "revision": "c" * 40,
-        "root": str(private_root / "model"),
-        "files": [{"path": "config.json", "size": 2, "sha256": "f" * 64}],
-    }
+    from dataclasses import asdict
+    from tuner.runtime.native_files import NativeTree
+    from tuner.runtime.native_mlx_input import NativeModelSnapshot
+    model_root = private_root / "model"
+    model_root.mkdir(mode=0o700)
+    (model_root / "config.json").write_bytes(b"{}")
+    with NativeTree(model_root, private=True) as model_tree:
+        snapshot = asdict(NativeModelSnapshot(
+            "configured/model", "c" * 40, str(model_root), model_tree.inventory(),
+        ))
+        snapshot["files"] = list(snapshot["files"])
     request = {
         "schema": "synaptic-native-child-request/v1", "workload": projection.workload.document,
         "runtime_capture": str(private_root / "capture.json"),
         "dependency_lock": str(private_root / "lock"), "dataset": str(private_root / "dataset.jsonl"),
         "model_snapshot": snapshot, "tokenizer_snapshot": snapshot, "output": str(output),
+        "tokenizer_members": ["config.json"],
+        "artifact_budget": {"per_file": 1024 * 1024, "aggregate": 4 * 1024 * 1024},
     }
     observed = {}
 
@@ -157,6 +165,9 @@ def test_worker_recompiles_and_joins_workload_before_invoking_runtime(private_ro
 
     monkeypatch.setattr(native_mlx_input, "prepare_native_input", prepare)
     monkeypatch.setattr(native_mlx_composition, "execute_native_sft", execute)
+    from tuner.runtime import native_mlx_publication, native_mlx_child
+    monkeypatch.setattr(native_mlx_publication, "tokenizer_publication_bytes", lambda *a, **k: b"fixture")
+    monkeypatch.setattr(native_mlx_child, "_load_published_tokenizer", lambda *a, **k: None)
     assert run_request(request, request_root=private_root) == b"verified-fixture-result"
     assert observed["workload_digest"] == projection.workload.fingerprint
     assert observed["runtime_digest"] == projection.profile.runtime_digest
@@ -171,3 +182,47 @@ def test_child_requires_isolation_and_has_closed_diagnostics(private_root):
         capture_output=True, timeout=5,
     )
     assert result.returncode == 120 and result.stdout == result.stderr == b""
+
+
+def test_child_bootstrap_accepts_only_canonical_v1_or_v2_capture():
+    for version in ("v1", "v2"):
+        value = {"schema": f"synaptic-native-mlx-capture/{version}",
+                 "status": "OBSERVED_NOT_ADMITTED", "config": {}}
+        if version == "v2":
+            value.update(dynamic_system_libraries=["observed"], builtin_modules={},
+                         dynamic_os_build={})
+            value["config"].update(dynamic_system_libraries=["selected"],
+                                   required_builtin_modules=["_ctypes"],
+                                   expected_os_build={})
+        raw = canonical(value)
+        assert _capture_document(raw)["schema"].endswith(version)
+        with pytest.raises(ValueError, match="capture schema"):
+            _capture_document(raw + b"\n")
+        if version == "v2":
+            del value["config"]["expected_os_build"]
+            with pytest.raises(ValueError, match="dynamic capture fields"):
+                _capture_document(canonical(value))
+    with pytest.raises(ValueError, match="capture schema"):
+        _capture_document(canonical({"schema": "synaptic-native-mlx-capture/v3"}))
+
+
+def test_child_loads_only_complete_published_tokenizer_bytes(private_root, monkeypatch):
+    from tuner.runtime.native_mlx_child import _load_published_tokenizer
+    from tuner.runtime.native_mlx_publication import _archive, NativeArtifactBudget
+    loaded = []
+    transformers = ModuleType("transformers")
+    def from_pretrained(root, **kwargs):
+        loaded.append(((Path(root) / "tokenizer.json").read_bytes(), kwargs))
+        return object()
+    transformers.AutoTokenizer = SimpleNamespace(from_pretrained=from_pretrained)
+    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    payload = _archive({"tokenizer.json": b"complete", "native_tokenizer.json": b"{}"},
+                       NativeArtifactBudget(1024, 16384))
+    _load_published_tokenizer(payload, request_root=private_root,
+                              expected_members=("tokenizer.json",), use_fast=True)
+    assert loaded == [(b"complete", {"local_files_only": True,
+                                      "trust_remote_code": False, "use_fast": True})]
+    with pytest.raises(ValueError, match="archive inventory"):
+        _load_published_tokenizer(payload, request_root=private_root,
+                                  expected_members=("tokenizer.json", "missing.json"), use_fast=True)
+    assert not list(private_root.glob("tokenizer-publication-*"))

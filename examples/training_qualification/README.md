@@ -7,6 +7,10 @@ and synthetic trainer payloads with real compilers, SQLite, original host
 signatures, native verification and public five-role downloads. They do not
 qualify an image, model, GPU, account, bill or real SFT update.
 
+The separate [native CPU process probe](native-cpu-process.md) uses the actual
+owned guardian and SQLite port with a fixed stdlib worker. It observes one
+normal process exit without composing a public training provider.
+
 Use an installed engine interpreter and the absolute consumer script from a
 neutral working directory. The script exposes only its own directory for fixed
 sibling adapters, never the checkout engine root:

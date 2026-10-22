@@ -86,12 +86,25 @@ def resolve_links(
     inventories: dict[str, MachOLinks],
     *, executable: str, admitted_files: set[str], system_libraries: tuple[str, ...],
 ) -> tuple[tuple[str, str, str], ...]:
-    """Resolve every observed native dependency into captured bytes or OS trust."""
+    """Resolve captured load chains, including their inherited dyld runpaths.
+
+    dyld builds the run path list from LC_RPATH commands in the dependency
+    chain. Expand each entry relative to the image that *declared* it, then
+    carry that directory into its dependent images. We reject ambiguous
+    targets even where dyld's search order might choose one: this observation
+    cannot approve an environmental or order-dependent library choice.
+    """
     if (len(system_libraries) != len(set(system_libraries))
             or any(not (p.startswith("/usr/lib/") or p.startswith("/System/Library/"))
                    for p in system_libraries)):
         raise ValueError("invalid native OS library trust set")
-    edges = []
+    if executable not in inventories or not set(inventories) <= admitted_files:
+        raise ValueError("native executable or inventory is outside captured files")
+    if (len(inventories) > 4096
+            or sum(len(links.dependencies) for links in inventories.values()) > 16384
+            or sum(len(links.rpaths) for links in inventories.values()) > 4096):
+        raise ValueError("native dependency inventory exceeds bound")
+    edges = set()
     used_system = set()
 
     def expand(value, loader):
@@ -103,34 +116,81 @@ def resolve_links(
             raise ValueError("unsupported native dependency resolution")
         return value
 
-    for loader, links in sorted(inventories.items()):
+    declared = {
+        loader: tuple(expand(path, loader) for path in links.rpaths)
+        for loader, links in inventories.items()
+    }
+    if any(len(paths) > 128 for paths in declared.values()):
+        raise ValueError("native runpath inventory exceeds bound")
+
+    def targets(candidates):
+        resolved = set()
+        for candidate in candidates:
+            path = Path(candidate)
+            if path.exists():
+                # Capture records the load spelling and canonical alias target.
+                # Revalidation repeats this resolution against the exact files.
+                canonical = str(path.resolve(strict=True))
+                if canonical not in admitted_files:
+                    raise ValueError("native dependency is outside captured files")
+                resolved.add(canonical)
+        return resolved
+
+    # An extension module can be a load-chain root even though the executable
+    # has no LC_LOAD_DYLIB edge to it. Determine possible incoming images only
+    # from declared paths and captured bytes; unreachable cycles then reject.
+    all_paths = tuple(sorted({path for paths in declared.values() for path in paths}))
+    possible_incoming = set()
+    for loader, links in inventories.items():
         for dependency in links.dependencies:
             if dependency in system_libraries:
-                used_system.add(dependency)
-                edges.append((loader, dependency, dependency))
                 continue
             candidates = (
-                [expand(rpath, loader) + dependency[len("@rpath"):] for rpath in links.rpaths]
+                (path + dependency[len("@rpath"):] for path in all_paths)
                 if dependency.startswith("@rpath/")
-                else [expand(dependency, loader)]
+                else (expand(dependency, loader),)
             )
-            resolved = set()
-            for candidate in candidates:
-                path = Path(candidate)
-                # Explicitly resolve Homebrew's stable aliases to reviewed bytes.
-                # The capture retains both the load spelling and canonical target;
-                # revalidation repeats resolution, detecting alias changes.
-                if path.exists():
-                    canonical = str(path.resolve(strict=True))
-                    if canonical not in admitted_files:
-                        raise ValueError("native dependency is outside captured files")
-                    resolved.add(canonical)
+            possible_incoming.update(targets(candidates) & inventories.keys())
+
+    roots = sorted((set(inventories) - possible_incoming) | {executable})
+    seen = set()
+    bindings = {}
+    pending = [(root, declared[root]) for root in roots]
+    while pending:
+        loader, inherited = pending.pop()
+        context = (loader, inherited)
+        if context in seen:
+            continue
+        seen.add(context)
+        if len(seen) > 8192 or len(inherited) > 4096:
+            raise ValueError("native load-chain context exceeds bound")
+        for dependency in inventories[loader].dependencies:
+            if dependency in system_libraries:
+                used_system.add(dependency)
+                edges.add((loader, dependency, dependency))
+                continue
+            candidates = (
+                (path + dependency[len("@rpath"):] for path in inherited)
+                if dependency.startswith("@rpath/")
+                else (expand(dependency, loader),)
+            )
+            resolved = targets(candidates)
             if len(resolved) != 1:
                 raise ValueError("native dependency is unresolved or ambiguous")
             target = resolved.pop()
             if target not in inventories:
                 raise ValueError("native dependency target is not arm64 Mach-O")
-            edges.append((loader, dependency, target))
+            binding = (loader, dependency)
+            if binding in bindings and bindings[binding] != target:
+                raise ValueError("native dependency differs across load chains")
+            bindings[binding] = target
+            edges.add((loader, dependency, target))
+            child_paths = tuple(dict.fromkeys((*declared[target], *inherited)))
+            pending.append((target, child_paths))
+            if len(pending) > 8192:
+                raise ValueError("native load-chain context exceeds bound")
+    if {name for name, _ in seen} != set(inventories):
+        raise ValueError("native dependency has no proven load chain")
     if used_system != set(system_libraries):
         raise ValueError("native OS library trust set contains unused members")
-    return tuple(edges)
+    return tuple(sorted(edges))

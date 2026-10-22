@@ -3,6 +3,7 @@
 from dataclasses import asdict, replace
 from datetime import datetime
 import hashlib
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +19,7 @@ from synaptic_tuner.api.v1.reference.stores import InMemoryDurableRecordStoreV1,
 from synaptic_tuner.api.v1.results import TrainingRunRef
 from synaptic_tuner.api.v1.runs_facade import RunArtifactRequest, RunLogsRequest, RunOperationError
 from synaptic_tuner.api.v1.secrets import SecretRef
+from synaptic_tuner.api.v1.training_input import TrainingInputV1
 from synaptic_tuner.api.v1.training_facade import TrainingRequest
 from tuner.execution.foundation_v2.references import ExecutionScopeV1
 from tuner.runtime.native_mlx_material import canonical, native_runtime_spec, strict_json
@@ -25,9 +27,11 @@ from tuner.runtime.native_process import NativeInvocation, NativeOwnedProcess, N
 from tuner.training.coordinator_material import _domain, _runtime
 from tuner.training.modal_host_authority import HMACAuthenticator
 from tuner.training.native_mlx_authority import NativeEvidenceAuthority, NativeMaterialAuthority
-from tuner.training.native_mlx_compilation import compile_native_sft
+from tuner.training.native_mlx_compilation import compile_native_sft, parse_native_workload
 from tuner.training.native_mlx_family import NativeCommandMaterialV1, NativeCommandCatalogV1, native_mlx_family
-from tuner.training.native_mlx_planning import NativePlanningV1, NativeQualificationV1
+from tuner.training.native_mlx_planning import (
+    NativePlanningV1, NativeQualificationV1, NativeRestrictedAdmissionV1,
+)
 
 
 publication = publication_fixtures.publication
@@ -85,6 +89,8 @@ def prepare(publication):
         "runtime_capture": str(root / "capture.json"), "dependency_lock": str(root / "dependency.lock"),
         "dataset": str(root / "dataset.jsonl"), "output": str(publication["output"]),
         "model_snapshot": asdict(publication["model"]), "tokenizer_snapshot": asdict(publication["tokenizer"]),
+        "tokenizer_members": publication["tokenizer_members"],
+        "artifact_budget": asdict(publication["budget"]),
     })
     (root / "request.json").write_bytes(request)
     resolved = ResolvedTrainingRequest(
@@ -121,7 +127,75 @@ def qualified_planning(state):
                             qualification_authority=TestQualificationAuthority())
 
 
+def test_restricted_admission_is_exact_run_and_does_not_qualify_profile(publication):
+    state = prepare(publication)
+    candidate = NativePlanningV1(**state.kwargs)
+    proof = NativeRestrictedAdmissionV1(
+        candidate.profile_digest, state.resolved.source_digest, state.resolved.runtime_digest,
+        "4" * 64, parse_native_workload(state.kwargs["workload"]).source.content_digest,
+        publication["model"].digest, publication["tokenizer"].digest,
+        state.resolved.workload_digest, "7" * 64,
+        "run", "attempt-1", 3, "2026-10-20T12:30:00Z",
+        "root-review", "root-public-key", "f" * 64,
+    )
+    admitted = NativePlanningV1(
+        **state.kwargs, restricted_admission=proof,
+        restricted_authority=TestQualificationAuthority(), selection_digest="7" * 64,
+    )
+    assert admitted.restricted() and admitted.admitted() and not admitted.qualified()
+    assert admitted.preflight(admitted.plan).ready
+    admitted.require_admitted(attempt="attempt-1", model_digest=publication["model"].digest,
+                             tokenizer_digest=publication["tokenizer"].digest)
+    with pytest.raises(ValueError, match="restricted_admission"):
+        admitted.require_admitted(attempt="attempt-2", model_digest=publication["model"].digest,
+                                 tokenizer_digest=publication["tokenizer"].digest)
+    with pytest.raises(ValueError, match="qualification"):
+        admitted.require_qualified()
+    changed = replace(proof, run_id="another-run")
+    assert not NativePlanningV1(**state.kwargs, restricted_admission=changed,
+                                restricted_authority=TestQualificationAuthority(),
+                                selection_digest="7" * 64).admitted()
+    training_document = state.training.to_dict()
+    training_document["hyperparameters"]["learning_rate"] = .0002
+    changed_training = TrainingInputV1.from_dict(training_document)
+    prior = parse_native_workload(state.kwargs["workload"])
+    changed_workload = compile_native_sft(changed_training, prior.source, prior.profile).workload
+    changed_kwargs = dict(state.kwargs)
+    changed_kwargs["workload"] = changed_workload.canonical_bytes
+    changed_kwargs["resolved"] = replace(
+        state.resolved,
+        resolved_config_digest=hashlib.sha256(changed_training.canonical_json().encode()).hexdigest(),
+        workload_digest=changed_workload.fingerprint,
+    )
+    substituted = NativePlanningV1(
+        **changed_kwargs, restricted_admission=proof,
+        restricted_authority=TestQualificationAuthority(), selection_digest="7" * 64,
+    )
+    assert substituted.profile_digest == admitted.profile_digest
+    assert not substituted.restricted_selection() and not substituted.preflight(substituted.plan).ready
+
+    class LateClock:
+        def now(self):
+            return "2026-10-20T14:00:00Z"
+
+    late_kwargs = {**state.kwargs, "clock": LateClock()}
+    retained = NativePlanningV1(
+        **late_kwargs, restricted_admission=proof,
+        restricted_authority=TestQualificationAuthority(), selection_digest="7" * 64,
+        retained_read=True,
+    )
+    assert retained.restricted_selection() and not retained.restricted()
+    assert retained.descriptor.descriptor_digest == admitted.descriptor.descriptor_digest
+    assert retained.plan == admitted.plan
+    assert not retained.preflight(retained.plan).ready
+    with pytest.raises(ValueError, match="no_dispatch_authority"):
+        retained.require_admitted(attempt="attempt-1", model_digest=publication["model"].digest,
+                                 tokenizer_digest=publication["tokenizer"].digest)
+
+
 def compose(state, publication, monkeypatch, *, fail=False):
+    from tuner.training import native_mlx_family as family_module
+    monkeypatch.setattr(family_module, "verify_native_material", lambda *a, **k: None)
     planning = qualified_planning(state)
     records, streams = InMemoryDurableRecordStoreV1(), InMemoryDurableStreamStoreV1()
     material_authority = NativeMaterialAuthority(
@@ -246,6 +320,39 @@ def test_consumed_uncertain_native_submission_is_not_replayed(publication, monke
     assert len(calls) == 1
 
 
+def test_snapshot_drift_rejects_before_owned_process_claim(publication, monkeypatch):
+    state = prepare(publication)
+    composition, _, planning, calls, _ = compose(state, publication, monkeypatch)
+    (Path(publication["tokenizer"].root) / "tokenizer.json").write_bytes(b"changed")
+    api = composition.api()
+    plan = api.training.plan(api.training.resolve(api.training.load(state.training.canonical_json())),
+                             planning.provider)
+    ready = api.training.preflight(plan)
+    try:
+        api.training.start(plan, ready)
+    except (ValueError, RunOperationError):
+        pass
+    assert calls == []
+
+
+def test_runtime_closure_drift_rejects_before_owned_process_claim(publication, monkeypatch):
+    state = prepare(publication)
+    composition, _, planning, calls, _ = compose(state, publication, monkeypatch)
+    from tuner.training import native_mlx_family as family_module
+    def drift(*args, **kwargs):
+        raise ValueError("native runtime closure differs")
+    monkeypatch.setattr(family_module, "verify_native_material", drift)
+    api = composition.api()
+    plan = api.training.plan(api.training.resolve(api.training.load(state.training.canonical_json())),
+                             planning.provider)
+    ready = api.training.preflight(plan)
+    try:
+        api.training.start(plan, ready)
+    except (ValueError, RunOperationError):
+        pass
+    assert calls == []
+
+
 def test_native_catalog_rejects_forged_envelope_and_authenticated_collision(publication, monkeypatch):
     state = prepare(publication)
     composition, _, planning, _, catalog = compose(state, publication, monkeypatch)
@@ -258,7 +365,9 @@ def test_native_catalog_rejects_forged_envelope_and_authenticated_collision(publ
     assert NativeCommandMaterialV1.parse(material.canonical_bytes) == material
     with pytest.raises(ValueError, match="unauthenticated"):
         catalog.publish_once(replace(material, tag="0" * 64))
-    changed = catalog.authority.issue(replace(material, tokenizer_members=("different.json",)))
+    changed = catalog.authority.issue(replace(
+        material, artifact_budget=replace(material.artifact_budget, aggregate=8 * 1024 * 1024),
+    ))
     with pytest.raises(ValueError, match="collision"):
         catalog.publish_once(changed)
 

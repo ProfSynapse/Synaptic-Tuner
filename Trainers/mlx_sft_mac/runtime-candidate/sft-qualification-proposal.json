@@ -8,10 +8,10 @@
     "python_version": "3.11.14",
     "mlx_version": "0.32.2",
     "mlx_lm_version": "0.32.2",
-    "dependency_lock_sha256": "f9a6298260cd17f2c3d567ae3674108a71efa68e99369906487a4d8c0feb7117",
+    "dependency_lock_sha256": "7c167018ee6bd61a3609971e3f834082c798e7bd2a3fa0c5c2564887da4fde4f",
     "hardware": "Apple M4",
     "physical_memory_bytes": 25769803776,
-    "capture_requirement": "Exact source, interpreter/framework, stdlib, 50-package candidate inventory, static native dependency graph, startup files, OS build and selected-wheel provenance; no self-issued promotion."
+    "capture_requirement": "Exact source including shared namespace, private interpreter/framework, stdlib, 54-package combined inventory, static native dependency graph, startup files, OS build and selected-wheel archive provenance; original 50 lock remains unchanged; no self-issued promotion."
   },
   "model": {
     "repository": "mlx-community/Qwen3-0.6B-4bit",

@@ -10,6 +10,7 @@ import hashlib
 import io
 import math
 from pathlib import Path
+import re
 import tarfile
 
 from synaptic_tuner.api.v1.results import VerifiedArtifact
@@ -56,6 +57,23 @@ def _archive(members, budget):
     return output.getvalue()
 
 
+def tokenizer_publication_bytes(tokenizer, tokenizer_members, tokenization, budget, tree):
+    """Build the exact portable tokenizer payload from the complete snapshot."""
+    if (type(tokenizer) is not NativeModelSnapshot or type(budget) is not NativeArtifactBudget
+            or type(tokenizer_members) is not tuple
+            or tokenizer_members != tuple(item.path for item in tokenizer.files)
+            or "native_tokenizer.json" in tokenizer_members):
+        raise ValueError("native tokenizer publication selection differs")
+    tokenizer.verify(tree)
+    files = {name: tree.read(name, maximum=budget.per_file) for name in tokenizer_members}
+    files["native_tokenizer.json"] = canonical({
+        "schema": "synaptic-native-tokenizer/v1", "repository": tokenizer.repository,
+        "revision": tokenizer.revision, "snapshot_digest": tokenizer.digest,
+        "tokenization": tokenization.to_dict(),
+    })
+    return _archive(files, budget)
+
+
 def verify_native_publication(
     *, output: Path, workload: bytes, model: NativeModelSnapshot,
     tokenizer: NativeModelSnapshot, tokenizer_members: tuple[str, ...],
@@ -73,15 +91,23 @@ def verify_native_publication(
     if (type(model) is not NativeModelSnapshot or type(tokenizer) is not NativeModelSnapshot
             or type(budget) is not NativeArtifactBudget
             or type(tokenizer_members) is not tuple or not tokenizer_members
-            or tokenizer_members != tuple(sorted(set(tokenizer_members)))):
+            or tokenizer_members != tuple(item.path for item in tokenizer.files)
+            or "native_tokenizer.json" in tokenizer_members):
         raise ValueError("native artifact projection inputs differ")
     profile = projection.profile
     if (model.repository, model.revision, tokenizer.repository, tokenizer.revision) != (
         profile.model_ref, profile.model_revision, profile.model_ref, profile.tokenizer_revision,
     ):
         raise ValueError("native artifact snapshot pins differ")
-    with NativeTree(output, private=True) as tree, NativeTree(Path(tokenizer.root), private=True) as token_tree:
+    with (NativeTree(output, private=True) as tree,
+          NativeTree(Path(tokenizer.root), private=True) as token_tree,
+          NativeTree(Path(model.root), private=True) as model_tree):
         tokenizer.verify(token_tree)
+        model.verify(model_tree)
+        model_config = strict_json(model_tree.read("config.json", maximum=1024 * 1024))
+        layer_count = model_config.get("num_hidden_layers")
+        if type(layer_count) is not int or not projection.lora.layers <= layer_count <= 4096:
+            raise ValueError("native model layer count differs")
         # Checkpoint spelling is the pinned upstream MLX-LM trainer contract.
         checkpoints = tuple(f"{step:07d}_adapters.safetensors" for step in range(
             projection.controls.steps_per_save, projection.controls.iterations + 1,
@@ -149,15 +175,25 @@ def verify_native_publication(
         initial, final = files["initial-adapters.safetensors"], files["adapters.safetensors"]
         tensors = adapter_tensors(initial)
         shapes = tuple((tensor.name, tensor.shape) for tensor in tensors)
-        # Actual target realization was checked inside the admitted worker.
-        # Check pair coverage and explicit layer/target count independently.
+        # Independently require every configured target in the exact final
+        # layer set. Pair count and suffix matching permit target substitution.
         names = {tensor.name for tensor in tensors}
         stems = {name.rsplit(".", 1)[0] for name in names}
-        if (len(stems) != projection.lora.layers * len(projection.lora.targets)
-                or any({stem + ".lora_a", stem + ".lora_b"} - names for stem in stems)
+        parsed_stems = [re.fullmatch(r"((?:[A-Za-z_][A-Za-z0-9_]*\.)*layers)\.(0|[1-9][0-9]*)\.(.+)", stem)
+                        for stem in stems]
+        prefixes = {match.group(1) for match in parsed_stems if match is not None}
+        expected_stems = {
+            f"{prefix}.{layer}.{target}"
+            for prefix in prefixes
+            for layer in range(layer_count - projection.lora.layers, layer_count)
+            for target in projection.lora.targets
+        }
+        if (len(prefixes) != 1 or any(match is None for match in parsed_stems)
+                or stems != expected_stems
+                or names != {stem + "." + suffix for stem in expected_stems
+                             for suffix in ("lora_a", "lora_b")}
                 or any(projection.lora.rank not in shape for _, shape in shapes)
-                or any(not any(stem.endswith("." + target) for target in projection.lora.targets)
-                       for stem in stems)):
+                ):
             raise ValueError("native saved adapter target layout differs")
         delta = verify_adapter_delta(initial, final, expected_shapes=shapes)
         if result["parameter_delta"] != delta:
@@ -187,24 +223,12 @@ def verify_native_publication(
             "snapshot_digest": model.digest, "workload_digest": projection.workload.fingerprint,
             "runtime_digest": profile.runtime_digest,
         })
-        tokenizer_files = {}
-        available = {item.path for item in tokenizer.files}
-        for name in tokenizer_members:
-            if name not in available or name == "native_tokenizer.json":
-                raise ValueError("native tokenizer publication member differs")
-            raw = token_tree.read(name, maximum=budget.per_file)
-            total += len(raw)
-            if total > budget.aggregate:
-                raise ValueError("native tokenizer aggregate exceeds budget")
-            tokenizer_files[name] = raw
-        tokenizer_files["native_tokenizer.json"] = canonical({
-            "schema": "synaptic-native-tokenizer/v1", "repository": tokenizer.repository,
-            "revision": tokenizer.revision, "snapshot_digest": tokenizer.digest,
-            "tokenization": projection.tokenization.to_dict(),
-        })
+        tokenizer_archive = tokenizer_publication_bytes(
+            tokenizer, tokenizer_members, projection.tokenization, budget, token_tree,
+        )
         roles = {
             "final_model": _archive(model_members, budget),
-            "tokenizer": _archive(tokenizer_files, budget),
+            "tokenizer": tokenizer_archive,
             "workload_record": workload,
             "training_metrics": files["native_result.json"],
             "training_lineage": canonical({
@@ -217,6 +241,7 @@ def verify_native_publication(
                 or any(len(raw) > budget.per_file for raw in roles.values())):
             raise ValueError("native public role byte budget exceeded")
         token_tree.check()
+        model_tree.check()
         tree.check()
         return tuple(NativePublishedArtifact(
             VerifiedArtifact(role, hashlib.sha256(raw).hexdigest(), len(raw)), raw,

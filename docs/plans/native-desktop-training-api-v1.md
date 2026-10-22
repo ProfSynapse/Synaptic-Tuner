@@ -207,6 +207,10 @@ The next reviewable source increment adds:
   dependency parsing, explicit Homebrew alias/OS-shared-cache treatment and
   comparison against a host-reviewed capture digest. This is observed installed
   material, not independent wheel-origin or dynamic-loader attestation.
+  For nested `@rpath` links, carry only declared `LC_RPATH` paths along each
+  captured dependency chain, expanding `@loader_path` at the declaring image.
+  Reject ambiguous, outside-capture and unproven load contexts; never infer a
+  global search path from the presence of a library file.
 - `native_mlx_input.py`: retained prepared-lease hash/size/identity verification,
   shared tokenization over the exact declared rows, and private local tokenizer
   snapshot binding. Semantic publication provenance remains host-owned.
