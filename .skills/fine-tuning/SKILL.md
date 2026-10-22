@@ -57,6 +57,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | Check SFT loss masking (tokenizer only) | `python tuner.py doctor sft-mask --dataset-path <jsonl> --model <tokenizer>` |
 | Inspect native training host candidate | `python tuner.py doctor native-training --json` — read-only platform/Python/package metadata; see `reference/native-local-training.md` |
 | Diagnose an offline SFT worker rejection | Read the exact retained `trainer.stderr.log`; closed phase/category/milestone labels locate a boundary, not a cause or retry authority; see `reference/sft-training.md` |
+| Diagnose Torch import in a retained Docker image | `python scripts/diagnose_docker_torch_import.py --help` for bounded guarded, worker-context prefix, and worker-entry probes; each live command needs exact review; see `reference/sft-training.md` |
 | Native MLX prepared SFT candidate | Internal exact-token batch/loss and runtime comparison only; no native launch CLI or API provider yet; see `reference/native-local-training.md` |
 | Plan a derived training image | `python scripts/qualify_derived_training_image.py plan --config Trainers/image_profiles/<profile>.yaml` |
 | Warm Space scaffold | `python3 Trainers/cloud/scripts/manage_space.py render --template vllm_warm --output-dir /tmp/my-space --base-image ghcr.io/<org>/<image>:<tag>` |
