@@ -601,6 +601,14 @@ rules. No command in a diagnosis note is live authority without separate
 one-use review; successful import cannot identify the cause of an earlier
 failed public run. See the r32 proposal in the diagnosis note.
 
+The r34 public-parent attempt created its container but stopped before start:
+Docker omitted the optional `HostConfig.Tmpfs` map key, and direct access to
+that key made the combined inspect template fail. The helper now uses Go
+template `index` for that one optional key and still checks every declared
+context field under the original bounded CLI read. Keep the r34 claim and
+created container; any new probe requires a fresh reviewed output name. See
+the r34 evidence and r35 proposal in the diagnosis note.
+
 After an intentional worker source change, check and refresh existing
 manifests with the checked-in maintainers in dependency order:
 `regenerate_offline_sft_worker_closure.py`,

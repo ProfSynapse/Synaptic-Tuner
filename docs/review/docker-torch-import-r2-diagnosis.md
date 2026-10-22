@@ -993,4 +993,83 @@ trainer log files use the original writable artifact behavior; file
 production is bounded by the container deadline and resources, while only
 fixed closed bytes are admitted as evidence. The diagnostic differs from r6
 in its derivative closure, fresh artifact root and readonly nested model/data
-mounts. No live probe has run under this proposal.
+mounts. At proposal time no live probe had run; see r34 below.
+
+### r34 pre-start inspection failure and r35 repair proposal; no live authority
+
+The separately admitted r34 command consumed one claim and created container
+`658a1a2a3dcdb3ea6d60a83a634c57a6f92c7e73787f7cf11140ea7d20a63f7f`.
+Its exact retained events are `CREATE_CLAIMED`, `CREATED`; `claim.json` SHA-256
+`3236fdfa0fe5ad37813db848917ece459b20be6304a74edb99258debefe2f632`
+and `events.jsonl` SHA-256
+`5a6068a92a33963a611d1feb6745e50e206f655d21483d4a28bee8336837dee4`.
+The container remains authenticated in `created` state. There was no start,
+Torch import, worker label, result file, or terminal execution. The original
+source, 14-file model inventory, prepared input and derivative remained
+verified after the rejection. The r34 claim and output remain consumed.
+
+The helper's combined context inspect returned `DOCKER_COMMAND_REJECTED` before
+start. Read-only inspection of the retained container found that Docker's
+`HostConfig` map omits `Tmpfs` when unset. The combined Go template's direct
+`.HostConfig.Tmpfs` access then exits nonzero with a closed missing-map-key
+classification; each individual field is readable. Docker documents
+[`inspect --format` and map `index` as Go templates](https://docs.docker.com/reference/cli/docker/inspect/)
+and its [`json` function](https://docs.docker.com/engine/cli/formatting/).
+The helper now uses `{{json (index .HostConfig "Tmpfs")}}` for only that
+optional key. Against the existing created container, this fixed 24-field
+projection returned 5,962 bytes inside the existing 8-KiB CLI budget, with
+all fields present in order and `Tmpfs` represented as null; its SHA-256 was
+`87f5e4434f22e95a3a1884887b5514930b9e63797fefb028c5e2bfa4b588e889`.
+Every original context predicate remains. The failure is in diagnostic
+inspection, with no evidence about r4/r6's historical Torch cause.
+
+The following command is a **fresh proposal for separate root review and
+one-use admission**, not execution authority. Its parent
+`/home/profsynapse/.local/share/synaptic-qualification/torch-import-public-parent-r35-20261022`
+must be newly created mode 0700, and child `public-parent-gpu0-1` must be absent.
+Immediately recheck the clean pushed helper, trusted verifier, source and
+model custody and bytes, empty original project, no writer, release, daemon,
+image C, disk and idle GPU 0. Preserve r34's created container and all older
+claims; a collision or uncertain create/start consumes this new name. The
+command block SHA-256 is `351aa3f8824590e552f3d01ceee21d9fe40a05cfa64faaf67f002073116dc0a7`. Helper SHA-256 is
+`ef143a16a5ec45c704cf949ca3acc6d7b4e0d5fd1d1ada84f9fba61e3b594139`;
+trusted verifier SHA-256 remains
+`2304eeb00667954510c34cc4aacaa818532a301fbeabf04c2fb165d6cd1d70b5`.
+
+```sh
+timeout -k 30s 900s python3 -I scripts/diagnose_docker_torch_import.py \
+  --docker /usr/bin/docker \
+  --docker-config /home/profsynapse/.local/share/synaptic-qualification/docker-sft-stable-image-c/docker-config \
+  --release /home/profsynapse/.local/share/synaptic-qualification/docker-sft-stable-image-c/evidence/runtime-release.json \
+  --expected-release-sha256 5f65824ceb5e250a58314da0233b9c07f1d63f1b0a39892d9b36af694938bfe6 \
+  --daemon-id 24805003-b125-469b-8080-9da4daacd364 \
+  --source-root /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-ba228-20261022/attempt-r6/source/engine \
+  --source-lock /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-ba228-20261022/attempt-r6/material/source-lock.json \
+  --expected-source-lock-sha256 47173f8571738b2e756c3ae0c3df4fbc16b5287a5e6ca804fd5988538c0c0d26 \
+  --expected-engine-commit ba228d6c0e8859288b246c4b140774fa29c567a3 \
+  --expected-project-commit 9f7799659565481f05d3bc1ecfa8174c87cf1508 \
+  --expected-manifest-sha256 3842689403abc5b42e28d58545b88616b81cd8fc738ee5557e97159df65d00ef \
+  --expected-closure-digest 8465ff2b7cedb352337e7cedc5bb17cc169892c2eedae0b280569f4a0cde5002 \
+  --worker-context --worker-direct --public-parent --gpu-device 0 \
+  --expected-workload-sha256 18009cf4a68cdcd0ee6251632117852eca35d1afb2b94d4834bb6976e6dd6913 \
+  --expected-runtime-sha256 460121aaee3eb83764f67d9307cfb57a3b25c117611d987577b9631b6956a1b3 \
+  --expected-trainer-sha256 75c2ab22fbc5dd80b8ddd5e6d0da816d1451cda0cd620c34717336a39a8a7644 \
+  --expected-direct-trainer-sha256 a7a8585e2a4607c7c0b49614260fda2814f29887a3b61e4b8b5df6f71f52639a \
+  --expected-direct-manifest-sha256 c6c90c366f3b4043dc0cd651ae9ba130c05d76c370ac1570fab918dea25c31d1 \
+  --expected-direct-closure-digest eb1b679c294462603f792cf2c66d8c0080443309b25e5114df654fb88b71ccce \
+  --expected-parent-environment-sha256 900a0d6ca23915a506494fa3ad8e0af767fe6fcebb1cd155f5c500c8bba5041c \
+  --expected-parent-command-sha256 d83e9718a4ffb75998b2d0b69d8da56016a4cea7939f6eba990ab416afe0e61b \
+  --artifact-root /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-ba228-20261022/attempt-r6/artifacts \
+  --model-receipt /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-ba228-20261022/attempt-r6/model/model-preparation.json \
+  --expected-model-receipt-sha256 0c57668e67f5fbd4245c7dc66cb9b942ec8f2d01143fbd1a813cd49f60997920 \
+  --output-dir /home/profsynapse/.local/share/synaptic-qualification/torch-import-public-parent-r35-20261022/public-parent-gpu0-1
+```
+
+The existing one-create/start claim, exact source/model/derivative commitments,
+2-CPU/16-GiB/GPU0/network-none scope, 120-second container execution deadline,
+finite owned stop and independent terminal inspection, 8-KiB combined CLI
+output per operation, 1-MiB rotated Docker log, 300-second bounded model
+inventory, and 900-second caller plus 30-second tail remain unchanged. Only a
+fixed closed worker label of at most 256 bytes may be admitted. The helper
+still does not cap aggregate native trainer log bytes physically. No r35
+container has been created or started under this proposal.

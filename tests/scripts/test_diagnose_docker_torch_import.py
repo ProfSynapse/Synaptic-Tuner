@@ -229,6 +229,25 @@ def _stage_public_parent_inputs(root: Path):
     return flags, workload_path, snapshot, prepared, command
 
 
+def _public_parent_inspect_rows(created, expected_command):
+    mounts = []
+    for index, token in enumerate(created[:-1]):
+        if token == "--mount":
+            parts = dict(part.split("=", 1) if "=" in part else (part, "")
+                         for part in created[index + 1].split(","))
+            mounts.append({"Type": "bind", "Source": parts["src"],
+                           "Destination": parts["dst"], "RW": "readonly" not in parts})
+    env = [created[index + 1] for index, token in enumerate(created[:-1])
+           if token == "--env"]
+    return ([created[created.index("--entrypoint") + 1]], list(expected_command),
+            "root", "/workspace", env, "none", 16 * 1024**3, 2 * 10**9,
+            False, False, None, None, None, None, [], "runc",
+            {"Type": "json-file", "Config": {"max-size": "1m", "max-file": "1"}},
+            None, 64 * 1024**2, [], [{"Driver": "", "Count": 0,
+                "DeviceIDs": ["0"], "Capabilities": [["gpu"]], "Options": {}}],
+            "private", "", mounts)
+
+
 def test_public_parent_command_and_closed_terminal_use_real_entry(tmp_path: Path,
                                                                   monkeypatch) -> None:
     flags, _workload, snapshot, prepared, expected_command = _stage_public_parent_inputs(tmp_path)
@@ -242,24 +261,11 @@ def test_public_parent_command_and_closed_terminal_use_real_entry(tmp_path: Path
         if args[:2] == ("container", "create"):
             creates.append(args)
         if args[:2] == ("container", "inspect") and "Config.Entrypoint" in args[3]:
-            created = creates[0]
-            mounts = []
-            for index, token in enumerate(created[:-1]):
-                if token == "--mount":
-                    parts = dict(part.split("=", 1) if "=" in part else (part, "")
-                                 for part in created[index + 1].split(","))
-                    mounts.append({"Type": "bind", "Source": parts["src"],
-                                   "Destination": parts["dst"], "RW": "readonly" not in parts})
-            env = [created[index + 1] for index, token in enumerate(created[:-1])
-                   if token == "--env"]
-            values = ([created[created.index("--entrypoint") + 1]], list(expected_command),
-                      "root", "/workspace", env, "none", 16 * 1024**3, 2 * 10**9,
-                      False, False, None, None, None, None, [], "runc",
-                      {"Type": "json-file", "Config": {"max-size": "1m", "max-file": "1"}},
-                      None, 64 * 1024**2, [], [{"Driver": "", "Count": 0,
-                          "DeviceIDs": ["0"], "Capabilities": [["gpu"]], "Options": {}}],
-                      "private", "",
-                      mounts)
+            # The retained daemon rejects the combined dotted lookup when the
+            # optional Tmpfs key is absent from HostConfig.
+            if '{{json (index .HostConfig "Tmpfs")}}' not in args[3]:
+                raise ValueError("DOCKER_COMMAND_REJECTED")
+            values = _public_parent_inspect_rows(creates[0], expected_command)
             return subprocess.CompletedProcess(args, 0,
                 ("\n".join(json.dumps(value) for value in values) + "\n").encode(), b"")
         if args[:2] == ("container", "start"):
@@ -291,6 +297,50 @@ def test_public_parent_command_and_closed_terminal_use_real_entry(tmp_path: Path
     assert any(f"src={snapshot}," in value and value.endswith(",readonly") for value in mounts)
     assert any(f"src={prepared}," in value and value.endswith(",readonly") for value in mounts)
     assert report["parent_identity"]["project_commit"] == R6_PROJECT_COMMIT
+
+
+@pytest.mark.parametrize("drift", ["incomplete", "malformed", "memory", "mount", "env",
+                                   "missing_required"])
+def test_public_parent_inspect_rejects_before_start(tmp_path: Path, monkeypatch,
+                                                     drift: str) -> None:
+    flags, _workload, _snapshot, _prepared, expected_command = _stage_public_parent_inputs(tmp_path)
+    docker, config, state = _fake_docker(tmp_path)
+    original_run = diagnostic._run
+    creates = []
+
+    def run(authority, args, **kwargs):
+        if args[:2] == ("image", "inspect") and "Config.Env" in args[3]:
+            return subprocess.CompletedProcess(args, 0, b"[]\n", b"")
+        if args[:2] == ("container", "create"):
+            creates.append(args)
+        if args[:2] == ("container", "inspect") and "Config.Entrypoint" in args[3]:
+            assert '{{json (index .HostConfig "Tmpfs")}}' in args[3]
+            if drift == "missing_required":
+                raise ValueError("DOCKER_COMMAND_REJECTED")
+            values = list(_public_parent_inspect_rows(creates[0], expected_command))
+            if drift == "memory":
+                values[6] = 8 * 1024**3
+            elif drift == "mount":
+                values[-1][0]["RW"] = not values[-1][0]["RW"]
+            elif drift == "env":
+                values[4].append("UNEXPECTED=1")
+            rows = [json.dumps(value) for value in values]
+            if drift == "incomplete":
+                rows.pop()
+            elif drift == "malformed":
+                rows[6] = "{"
+            return subprocess.CompletedProcess(args, 0,
+                ("\n".join(rows) + "\n").encode(), b"")
+        if args[:2] == ("container", "start"):
+            pytest.fail("invalid parent context started")
+        return original_run(authority, args, **kwargs)
+
+    monkeypatch.setattr(diagnostic, "_run", run)
+    with pytest.raises(ValueError):
+        _call(tmp_path, docker, config, **flags)
+    assert len(creates) == 1
+    assert json.loads(state.read_text())["status"] == "created"
+    assert (tmp_path / "out/claim.json").exists()
 
 
 @pytest.mark.parametrize("drift", ["project", "workload", "environment", "command"])

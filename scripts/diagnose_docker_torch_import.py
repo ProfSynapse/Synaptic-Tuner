@@ -853,7 +853,11 @@ def _require_public_parent_scope(authority, cid: str, *, python: str,
               "HostConfig.LogConfig", "HostConfig.Tmpfs", "HostConfig.ShmSize",
               "HostConfig.Devices", "HostConfig.DeviceRequests",
               "HostConfig.IpcMode", "HostConfig.PidMode", "Mounts")
-    template = "\n".join("{{json ." + name + "}}" for name in fields)
+    # Docker omits HostConfig.Tmpfs when unset. Access that optional map key
+    # with Go template's index function; direct access aborts a combined render.
+    template = "\n".join(
+        '{{json (index .HostConfig "Tmpfs")}}' if name == "HostConfig.Tmpfs"
+        else "{{json ." + name + "}}" for name in fields)
     observed = _run(authority, ("container", "inspect", "--format", template, cid))
     if observed.stderr:
         raise ValueError("CONTAINER_STATE_INVALID")
