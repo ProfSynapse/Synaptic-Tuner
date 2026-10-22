@@ -51,7 +51,12 @@ the broad termination phase (code 126), but no process outcome. Its worker
 result file is not a supervised-exit receipt, and that state stays consumed.
 The guardian now distinguishes future termination failures with closed exit
 codes 128 (SIGTERM), 129 (grace observation), 130 (SIGKILL), and 131 (wait).
-Those codes do not reveal exception details or prove a historical cause. Any
+The next CPU observation stopped at SIGTERM code 128, still without an errno.
+On a fresh attempt only, codes 132-135 classify SIGTERM and 136-139 classify
+SIGKILL as EPERM, other OS error, missing API, or non-OS failure respectively.
+An EPERM result may reflect an empty group or a denied live member; it does not
+authorize skipping cleanup or reporting a supervised outcome. These codes do
+not reveal exception details or prove a historical cause. Any
 fresh CPU attempt needs its own reviewed clean source, config, unused root and
 one-use admission; the existing `inspect` and `run` actions remain the only
 consumer commands.

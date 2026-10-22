@@ -7,6 +7,7 @@ This is POSIX/Darwin process supervision, not a sandbox or Linux pidfd guarantee
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import resource
@@ -33,6 +34,14 @@ _FAILURE_CODES = {
     "termination_grace": 129,
     "termination_kill": 130,
     "termination_wait": 131,
+    "termination_term_eperm": 132,
+    "termination_term_other_os": 133,
+    "termination_term_missing_api": 134,
+    "termination_term_non_os": 135,
+    "termination_kill_eperm": 136,
+    "termination_kill_other_os": 137,
+    "termination_kill_missing_api": 138,
+    "termination_kill_non_os": 139,
 }
 
 
@@ -77,15 +86,39 @@ class _ExitObserver:
             self.queue.close()
 
 
+def _signal_owned_group(pgid, sig, phase):
+    # Keep the first failed operation and a closed error class. An EPERM can
+    # also mean an unauthorized live member, so it is never treated as success.
+    operation = phase["name"] if phase is not None else None
+    signal_group = getattr(os, "killpg", None)
+    if not callable(signal_group):
+        if phase is not None:
+            phase["name"] = operation + "_missing_api"
+        raise RuntimeError
+    try:
+        signal_group(pgid, sig)
+    except ProcessLookupError:
+        pass
+    except PermissionError as failure:
+        if phase is not None:
+            phase["name"] = operation + ("_eperm" if failure.errno == errno.EPERM else "_other_os")
+        raise
+    except OSError:
+        if phase is not None:
+            phase["name"] = operation + "_other_os"
+        raise
+    except BaseException:
+        if phase is not None:
+            phase["name"] = operation + "_non_os"
+        raise
+
+
 def _terminate(child, grace, observer=None, phase=None):
     # Do not poll/reap before signalling the still-owned group: its leader PID
     # cannot be recycled while retained as our unreaped child.
     if phase is not None:
         phase["name"] = "termination_term"
-    try:
-        os.killpg(child.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    _signal_owned_group(child.pid, signal.SIGTERM, phase)
     if phase is not None:
         phase["name"] = "termination_grace"
     deadline = time.monotonic() + grace
@@ -100,10 +133,7 @@ def _terminate(child, grace, observer=None, phase=None):
         time.sleep(min(.02, max(0, deadline - time.monotonic())))
     if phase is not None:
         phase["name"] = "termination_kill"
-    try:
-        os.killpg(child.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    _signal_owned_group(child.pid, signal.SIGKILL, phase)
     if phase is not None:
         phase["name"] = "termination_wait"
     try:

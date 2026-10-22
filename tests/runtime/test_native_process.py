@@ -1,5 +1,7 @@
 from dataclasses import replace
+import errno
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -239,9 +241,34 @@ def test_empty_owned_group_still_reaps_child_after_both_signals_miss(monkeypatch
     assert phase["name"] == "termination_wait"
 
 
+def test_exited_leader_does_not_skip_owned_descendant_cleanup(monkeypatch):
+    calls = []
+    descendant_live = True
+
+    class Child:
+        pid = 42
+
+        def wait(self, *, timeout):
+            assert descendant_live is False
+            calls.append("reap")
+            return 0
+
+    def signal_group(pid, sig):
+        nonlocal descendant_live
+        assert pid == 42
+        calls.append(sig)
+        if sig == signal.SIGKILL:
+            descendant_live = False
+
+    monkeypatch.setattr(guardian.os, "killpg", signal_group)
+    observer = type("Observer", (), {"exited": lambda self: True})()
+    assert guardian._terminate(Child(), 1, observer) == 0
+    assert calls == [signal.SIGTERM, signal.SIGKILL, "reap"]
+
+
 @pytest.mark.parametrize("failure,expected,code", [
-    ("term", "termination_term", 128),
-    ("kill", "termination_kill", 130),
+    ("term", "termination_term_other_os", 133),
+    ("kill", "termination_kill_other_os", 137),
     ("wait", "termination_wait", 131),
 ])
 def test_termination_failure_subphase_is_closed(monkeypatch, failure, expected, code):
@@ -267,12 +294,72 @@ def test_termination_failure_subphase_is_closed(monkeypatch, failure, expected, 
     assert guardian._FAILURE_CODES[expected] == code
 
 
-def test_cleanup_preserves_first_termination_failure_and_reaps_owned_child(monkeypatch, invocation):
+@pytest.mark.parametrize("sig,prefix", [
+    (signal.SIGTERM, "termination_term"),
+    (signal.SIGKILL, "termination_kill"),
+])
+@pytest.mark.parametrize("failure,suffix", [
+    (PermissionError(errno.EPERM, "private detail"), "eperm"),
+    (PermissionError(errno.EACCES, "private detail"), "other_os"),
+    (OSError(errno.EIO, "private detail"), "other_os"),
+    (RuntimeError("private detail"), "non_os"),
+])
+def test_owned_group_signal_failure_class_is_closed(monkeypatch, sig, prefix, failure, suffix):
+    calls = []
+
+    def fail(pid, actual_sig):
+        calls.append((pid, actual_sig))
+        raise failure
+
+    monkeypatch.setattr(guardian.os, "killpg", fail)
+    phase = {"name": prefix}
+    with pytest.raises(type(failure)):
+        guardian._signal_owned_group(42, sig, phase)
+    assert calls == [(42, sig)]
+    assert phase["name"] == prefix + "_" + suffix
+    assert guardian._FAILURE_CODES[phase["name"]] in range(132, 140)
+
+
+@pytest.mark.parametrize("sig,prefix,code", [
+    (signal.SIGTERM, "termination_term", 134),
+    (signal.SIGKILL, "termination_kill", 138),
+])
+def test_missing_group_signal_api_is_closed(monkeypatch, sig, prefix, code):
+    monkeypatch.delattr(guardian.os, "killpg")
+    phase = {"name": prefix}
+    with pytest.raises(RuntimeError):
+        guardian._signal_owned_group(42, sig, phase)
+    assert guardian._FAILURE_CODES[phase["name"]] == code
+
+
+def test_guardian_emits_only_closed_signal_code(monkeypatch, capsys):
+    class Input:
+        buffer = io.BytesIO(b"{}\n")
+
+    def refused(spec, control_fd, phase):
+        phase["name"] = "termination_term_eperm"
+        raise PermissionError(errno.EPERM, "private path and argument")
+
+    monkeypatch.setattr(guardian.sys, "argv", ["guardian.py", "3"])
+    monkeypatch.setattr(guardian.sys, "stdin", Input())
+    monkeypatch.setattr(guardian, "supervise", refused)
+    assert guardian.main() == 132
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("failed_signal,expected_phase", [
+    (signal.SIGTERM, "termination_term_eperm"),
+    (signal.SIGKILL, "termination_kill_other_os"),
+])
+def test_cleanup_preserves_first_termination_failure_and_reaps_owned_child(
+    monkeypatch, invocation, failed_signal, expected_phase,
+):
     read_fd, write_fd = os.pipe()
     original_killpg = os.killpg
     original_popen = subprocess.Popen
     children = []
     failed = False
+    signals = []
 
     def own_child(*args, **kwargs):
         child = original_popen(*args, **kwargs)
@@ -281,9 +368,12 @@ def test_cleanup_preserves_first_termination_failure_and_reaps_owned_child(monke
 
     def fail_first_kill(pid, sig):
         nonlocal failed
-        if sig == signal.SIGKILL and not failed:
+        signals.append(sig)
+        if sig == failed_signal and not failed:
             failed = True
-            raise OSError("private signal detail")
+            if sig == signal.SIGTERM:
+                raise PermissionError(errno.EPERM, "private signal detail")
+            raise OSError(errno.EIO, "private signal detail")
         return original_killpg(pid, sig)
 
     monkeypatch.setattr(guardian.os, "killpg", fail_first_kill)
@@ -298,8 +388,10 @@ def test_cleanup_preserves_first_termination_failure_and_reaps_owned_child(monke
     try:
         with pytest.raises(OSError):
             guardian.supervise(spec, read_fd, phase)
-        assert failed and phase["name"] == "termination_kill"
+        assert failed and phase["name"] == expected_phase
         assert len(children) == 1 and children[0].returncode is not None
+        assert signals.count(signal.SIGTERM) >= 1
+        assert signal.SIGKILL in signals
     finally:
         os.close(read_fd)
         os.close(write_fd)

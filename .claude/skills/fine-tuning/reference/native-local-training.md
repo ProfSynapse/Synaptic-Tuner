@@ -157,6 +157,15 @@ worker's result file existed, but that does not prove guardian cleanup or a
 successful process outcome. The r23 cause is still unknown, and its consumed
 state must not be replayed. The new codes describe only a future, separately
 admitted CPU-only attempt; they do not broaden native training authority.
+The r25 CPU observation stopped at SIGTERM code 128 without an errno. The
+guardian now assigns codes 132-135 to SIGTERM and 136-139 to SIGKILL failures:
+EPERM, other OS error, missing API, and non-OS failure in that order. These
+fixed classes expose no exception text or errno value. Darwin's XNU source can
+return EPERM when an existing group has no counted signalable members, while
+EPERM may also mean denied access to a live member. Neither a worker result nor
+an EPERM class proves the group is empty. Keep the leader unreaped until group
+cleanup, never treat EPERM as success, and preserve the consumed claim on any
+missing outcome. The source hypothesis does not establish r25's actual errno.
 
 For a provider-free Darwin guardian check, use the private
 `examples/training_qualification/native_cpu_process.py` config-first
