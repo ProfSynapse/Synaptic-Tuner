@@ -151,6 +151,18 @@ argument, or environment data. A missing outcome remains uncertain and cannot
 authorize replay or signals to a persisted PID. These diagnostics describe a
 future attempt only; they cannot assign a phase to an earlier consumed claim.
 
+For a provider-free Darwin guardian check, use the private
+`examples/training_qualification/native_cpu_process.py` config-first
+`inspect`/one-shot `run` flow and its fixed stdlib worker. Bind the exact clean
+source commit, actual private launcher and regular interpreter target, all
+executable/guardian/worker/request hashes, unused 0700 state root, attempt and
+finite limits. It reuses `NativeOwnedProcess` and the host SQLite record port;
+no model, tokenizer, ML package, dataset or credential is needed. Review the
+local source/ref and config before effect, separately verify the pushed commit,
+and never adopt or replay a consumed root. This CPU observation is not a signed
+training admission or evidence of MLX updates. See
+`examples/training_qualification/native-cpu-process.md`.
+
 Before ML imports/training, independently review the isolated child bootstrap,
 authenticated compiled workload/native material, public provider-family
 composition and native artifact roles. The bounded next proposal is
@@ -211,9 +223,11 @@ clean pushed Git ref, full runtime recapture, private prepared publication,
 model snapshot inventories and M4 hardware before issuing command material.
 The proposal remains parameters, not an admission. See
 `examples/training_qualification/native-host.md` for exact config fields,
-preparation/readback commands, and the root signing boundary. No Mac training,
-ML import, model download or host qualification has been performed for this
-consumer yet.
+preparation/readback commands, and the root signing boundary. The first signed
+raw Mac attempt was consumed and returned `reconcile_required`; it produced an
+initial adapter but no retained process outcome or verified final artifact.
+Its historical exit cause and update count remain unknown. It grants no native
+qualification or replay authority.
 
 `NativeQualificationV1` contains exact selected profile/source/runtime/hardware
 and two distinct retained attempt-evidence references; its independent host
