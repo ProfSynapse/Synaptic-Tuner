@@ -679,3 +679,99 @@ and after reading. Tiny CPU public-start and transient-ancestor-swap fixtures
 exercise these boundaries; they do not qualify the desktop model or diagnose r2.
 Public plan authenticates the receipt commitment without reading weights; the
 sole live-byte recheck in the public consumer occurs on start before effects.
+
+## r21 public failure and r22 direct-entry comparison — 2026-10-22
+
+The fresh r4 public start was accepted once and the first public observe was
+terminal `failed` / `docker_run_failed`, with zero artifacts. Its retained
+container `03c1eed8634f7ae9d95c34dfaf2cce38ba6b95085602f341cd1813e02d529f85`
+exited 23. The exact 81-byte worker stderr has SHA-256
+`95d34d74eae9cb55a223eeda8428ee4387ee79095e5c0f39a0ceb60da9f45513`
+and contains only `OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=IMPORT
+milestone=TORCH_IMPORT`. The create-only private terminal evidence record is
+`attempt-r4/inputs/public-terminal-evidence.json`, SHA-256
+`5eda7a87855631c2109ae4237be533f6019c3762409841966dddaeb15d503e1d`.
+No second start, cancel, artifact download, or container cleanup occurred.
+
+Read-only comparison of the retained r4 container and r13 passing probe found:
+
+| Boundary | r13 PASS | r4 public failure |
+| --- | --- | --- |
+| Image, GPU, network | Same image C; GPU device 0; network none | Same image C; GPU device 0; network none |
+| Authenticated source | Worker `2304eeb0…`, runtime `460121aa…`, trainer `75c2ab22…`, bootstrap `4a8d3dd2…`; manifest `38426894…`, 68-member closure `8465ff2b…` | All six hashes identical; r4 source lock `f126c60f…` binds the new host/run, while r13 uses historical lock `d19aecb2…` |
+| Workload and child environment | r2 workload `1534308c…`; planned environment digest `a4e07446…`; reconstructed supplied child digest `1bb0e06d…` | r4 workload `0c28609e…`; same planned environment digest and roots; reconstructed child digest `4454b046…`. The **only differing reconstructed child environment key** is `SYNAPTIC_WORKLOAD_FINGERPRINT`. These are source/plan reconstructions, not retained historical child environments. |
+| Isolated entry | `-I -c` child imports a diagnostic wrapper, then `runpy.run_path` enters the worker; tracing and import hooks stop before Unsloth | Locked runtime invokes a separate `-I` process on the worker file directly; the worker then enters trainer through `runpy.run_path`. The actual r4 child argv and `sys.modules` were not retained. |
+| Host envelope | UID/GID 1000, capabilities dropped, read-only root, 4 GiB, 64-MiB tmpfs artifacts, PID limit 64 | Docker user `root`, default capabilities, writable root, 16 GiB, writable artifact bind with the verified model cache and prepared data; no PID limit. Both request 2 CPUs. |
+
+The r4 Docker mount still points to its retained source read-only and its
+artifact root writable; the configured model-snapshot alias points to the
+expected, currently unredirected directory. This point-in-time directory check
+does not refresh the earlier 14-file byte inventory. Neither container reports
+Docker OOM kill or an explicit ulimit. The worker classifies the caught Python
+exception by built-in type identity only: `IMPORT` means `ImportError` or a
+subclass, without a module name, message, native loader reason, or traceback.
+The same pinned source, guard, planned environment and image make a source or
+package-version mismatch a poor explanation for the r13/r4 contrast. The
+direct interpreter entry, its prior module cache and loader state, plus the
+different user/filesystem context remain testable differences; no current
+evidence ranks a particular one as the cause. CPython documents that `-I`
+excludes the script/current directory and user site from `sys.path`, while
+`runpy` leaves cached imports and other side effects in the process; the
+upstream Torch 2.11 source loads Python modules and global shared libraries
+during `import torch`. These are mechanisms to test, not a diagnosis:
+[CPython command line](https://docs.python.org/3.12/using/cmdline.html#cmdoption-I),
+[CPython runpy](https://docs.python.org/3.12/library/runpy.html#runpy.run_path),
+[upstream Torch 2.11 source](https://github.com/pytorch/pytorch/blob/v2.11.0/torch/__init__.py).
+
+### One proposed discriminating experiment; no live authority
+
+Extend the **existing** bounded diagnostic helper with a direct-worker mode.
+Its outer process may use the authenticated r4 runtime source to build the
+exact trainer arguments and one sealed descriptor, as r13 did, but must launch
+the isolated child as `/opt/unsloth-venv/bin/python3 -I
+/source/engine/tuner/runtime/offline_sft_worker.py -- ...` with the r4-derived
+environment. No `-c` wrapper, tracing, or import hook may run in that child.
+Use r4's prepared dataset bytes for the sealed descriptor, after a bounded
+digest check, and a fresh private writable artifact root containing a newly
+verified copy of the pinned model snapshot. Match r4's root user, default
+capabilities, writable root, 2 CPUs, 16 GiB, GPU 0 and network none. The
+artifact and source mounts must be fresh/private and independently checked;
+the consumed r4 root remains untouched.
+
+To make fallthrough impossible, stage a fresh diagnostic derivative of the
+already authenticated 68-member source closure. Copy every member byte for
+byte except `Trainers/sft/train_sft.py`; retain that file **through** the
+unique `UNSLOTH_IMPORT` marker at line 229, then replace the remaining suffix
+with the fixed `raise SystemExit(42)\n`. The Torch import and every earlier
+trainer byte remain identical. Expected derivative trainer SHA-256 is
+`a7a8585e2a4607c7c0b49614260fda2814f29887a3b61e4b8b5df6f71f52639a`,
+canonical derivative manifest SHA-256 is
+`4b5b0ac2b40b9daf85769d133fe16cfabf680b472d0f4b74c2d5cf65e66ccb4a`,
+and derivative closure digest is
+`eb1b679c294462603f792cf2c66d8c0080443309b25e5114df654fb88b71ccce`.
+Bind **both** the original r4 source lock/manifest/closure and these
+independently reviewed derivative values before create; recheck source bytes
+and custody immediately before start. The derivative never contains the
+Unsloth import, model load, trainer main or training code after the stop.
+
+The helper must accept only fixed worker output. `TRAINER/IMPORT/TORCH_IMPORT`
+would reproduce the failure boundary under direct child startup and the closer
+r4 context; `TRAINER/SYSTEM_EXIT/UNSLOTH_IMPORT` would establish that Torch
+returned and the planned stop ran. Any other label or missing terminal proof
+is inconclusive. Retain the existing 8-KiB Docker CLI output cap, one claimed
+create/start, 120-second execution deadline, exactly one owned stop request
+plus independent terminal inspection, and no retry after uncertainty. Use a
+fresh output claim such as `torch-import-direct-r22-20261022/direct-worker-gpu0-1`
+only after a separate review of the exact implemented command, helper hash,
+source and model receipts, fresh roots, idle GPU and one-use admission. The
+current helper does not implement this mode, so **there is no runnable live
+command or permission to create a container from this proposal**. Meaningful
+CPU tests must prove original-prefix equality, derivative closure validation,
+direct `-I` child entry with a non-ML Torch stub, the fixed stop before every
+Unsloth/model/trainer statement, source drift rejection before create, and
+uncertain claims never replaying.
+
+Even a future `UNSLOTH_IMPORT` stop would only narrow the r4 contrast. The
+derivative changes the trainer suffix and a fresh artifact root cannot prove
+the r4 process's historical module cache or exact filesystem state. Both r2
+and r4 failure causes remain unknown.
