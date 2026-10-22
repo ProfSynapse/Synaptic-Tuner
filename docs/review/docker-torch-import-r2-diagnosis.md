@@ -775,3 +775,91 @@ Even a future `UNSLOTH_IMPORT` stop would only narrow the r4 contrast. The
 derivative changes the trainer suffix and a fresh artifact root cannot prove
 the r4 process's historical module cache or exact filesystem state. Both r2
 and r4 failure causes remain unknown.
+
+### r23 direct-worker implementation for separate root review
+
+The existing bounded helper now has `--worker-context --worker-direct`. It
+authenticates the original r4 lock, 68-member closure and workload; stages a
+private derivative of that same closure; and separately checks the derivative
+trainer, manifest and closure against supplied independent hashes. The direct
+child is a fresh `/opt/unsloth-venv/bin/python3 -I
+/source/engine/tuner/runtime/offline_sft_worker.py -- ...` process. Its parent
+uses the authenticated runtime's existing argument builder and a sealed
+descriptor containing r4's 2,821-byte prepared input. The child has no
+diagnostic `-c` wrapper, trace function or import hook. The derivative retains
+the exact original trainer prefix through the `UNSLOTH_IMPORT` marker, followed
+only by `raise SystemExit(42)`; the original source remains untouched.
+
+The r22 proposed derivative manifest SHA-256 omitted the terminal newline
+required by the worker's canonical manifest parser. The verifier-valid
+manifest SHA-256 is
+`c6c90c366f3b4043dc0cd651ae9ba130c05d76c370ac1570fab918dea25c31d1`.
+The independently calculated trainer SHA-256
+`a7a8585e2a4607c7c0b49614260fda2814f29887a3b61e4b8b5df6f71f52639a`
+and closure digest
+`eb1b679c294462603f792cf2c66d8c0080443309b25e5114df654fb88b71ccce`
+are unchanged. The checked-in trusted verifier validates the derived manifest
+and all 68 copied members. The helper rechecks original and derivative source
+bytes and custody immediately before its sole start.
+
+The implementation creates a fresh private writable artifact root under its
+new output claim. It mounts the retained r4 model snapshot at the same
+container cache path through a **separate read-only nested bind**. It also
+binds the exact prepared dataset file read-only at the original state path.
+The helper checks the pinned model receipt and hashes its full file inventory
+through held directory descriptors with a 16-GiB/300-second preflight bound,
+both before create and before start; it checks the dataset digest and size.
+It never writes to the old r4 artifact, model, source, claim or container.
+This avoids the r22 proposal's unnecessary 9.3-GB model copy. The fresh
+artifact contents and read-only model bind remain a filesystem difference
+from r4; no historical r4 environment or module cache is claimed captured.
+
+This is the **review candidate only**, with no authority yet to launch. A
+clean pushed helper checkout and exact helper/verifier hashes must be reviewed
+and checked on WSL before any effect. The helper SHA-256 is
+`2b5ff5ff20202d93ca9751ccbb5c8c683a80dfd907eecac95686ed354a4770d4`;
+the trusted verifier remains
+`2304eeb00667954510c34cc4aacaa818532a301fbeabf04c2fb165d6cd1d70b5`.
+The focused local CPU suite passed 42 tests, targeted Ruff and diff checks.
+The parent
+`/home/profsynapse/.local/share/synaptic-qualification/torch-import-direct-r23-20261022`
+must be fresh, private mode 0700, and its `direct-worker-gpu0-1` child absent.
+Read-only preflight must confirm the current daemon and pinned image C, idle
+GPU 0, retained r4 source/model ownership and bytes, and no concurrent writer.
+Collision or drift rejects without choosing another name. The command below
+uses only the existing helper and has **not been executed**:
+
+```sh
+python3 -I scripts/diagnose_docker_torch_import.py \
+  --docker /usr/bin/docker \
+  --docker-config /home/profsynapse/.local/share/synaptic-qualification/docker-sft-stable-image-c/docker-config \
+  --release /home/profsynapse/.local/share/synaptic-qualification/docker-sft-stable-image-c/evidence/runtime-release.json \
+  --expected-release-sha256 5f65824ceb5e250a58314da0233b9c07f1d63f1b0a39892d9b36af694938bfe6 \
+  --daemon-id 24805003-b125-469b-8080-9da4daacd364 \
+  --source-root /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-4a8b-20261020/attempt-r4/source/engine \
+  --source-lock /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-4a8b-20261020/attempt-r4/material/source-lock.json \
+  --expected-source-lock-sha256 f126c60f3ed9f6131c6de6dba7ac032016a1a538db57ccd5499783008e8466b6 \
+  --expected-manifest-sha256 3842689403abc5b42e28d58545b88616b81cd8fc738ee5557e97159df65d00ef \
+  --expected-closure-digest 8465ff2b7cedb352337e7cedc5bb17cc169892c2eedae0b280569f4a0cde5002 \
+  --worker-context --worker-direct --gpu-device 0 \
+  --expected-workload-sha256 0c28609e2a73d2c649f5d8f6f963505dbc6e86a7bbee6b9a25b3477e9dfbd2d8 \
+  --expected-runtime-sha256 460121aaee3eb83764f67d9307cfb57a3b25c117611d987577b9631b6956a1b3 \
+  --expected-trainer-sha256 75c2ab22fbc5dd80b8ddd5e6d0da816d1451cda0cd620c34717336a39a8a7644 \
+  --expected-direct-trainer-sha256 a7a8585e2a4607c7c0b49614260fda2814f29887a3b61e4b8b5df6f71f52639a \
+  --expected-direct-manifest-sha256 c6c90c366f3b4043dc0cd651ae9ba130c05d76c370ac1570fab918dea25c31d1 \
+  --expected-direct-closure-digest eb1b679c294462603f792cf2c66d8c0080443309b25e5114df654fb88b71ccce \
+  --artifact-root /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-4a8b-20261020/attempt-r4/artifacts \
+  --model-receipt /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-4a8b-20261020/attempt-r4/model/model-preparation.json \
+  --expected-model-receipt-sha256 e1d2deff0a2a54ff2a5fdd24bdb8b22d55c1ed2d13b2c79307124db4b34b0ea6 \
+  --output-dir /home/profsynapse/.local/share/synaptic-qualification/torch-import-direct-r23-20261022/direct-worker-gpu0-1
+```
+
+The container envelope requests root, default capabilities, writable root,
+2 CPUs, 16 GiB, GPU device 0, network `none`, and the same image C. Existing
+helper ownership, 8-KiB Docker CLI output budget, one create/start claim,
+120-second execution deadline, one owned stop and independent terminal
+inspection remain in force. The only accepted direct child outcomes are its
+closed `TRAINER/IMPORT/TORCH_IMPORT` label or the planned
+`TRAINER/SYSTEM_EXIT/UNSLOTH_IMPORT` stop; anything else is inconclusive.
+Neither result identifies r2 or r4's original import cause by itself. There
+has been no r23 container, GPU, ML import or training effect.

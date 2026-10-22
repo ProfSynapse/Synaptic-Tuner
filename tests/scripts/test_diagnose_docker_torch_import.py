@@ -19,6 +19,9 @@ DAEMON = "24805003-b125-469b-8080-9da4daacd364"
 IMAGE = "sha256:" + "a" * 64
 CID = "b" * 64
 ROOT = Path(__file__).parents[2]
+DIRECT_TRAINER = "a7a8585e2a4607c7c0b49614260fda2814f29887a3b61e4b8b5df6f71f52639a"
+DIRECT_MANIFEST = "c6c90c366f3b4043dc0cd651ae9ba130c05d76c370ac1570fab918dea25c31d1"
+DIRECT_CLOSURE = "eb1b679c294462603f792cf2c66d8c0080443309b25e5114df654fb88b71ccce"
 
 
 def _release(root: Path) -> tuple[Path, str]:
@@ -148,6 +151,227 @@ def _stage_worker_context(root: Path):
         "expected_trainer_sha256": hashlib.sha256(
             (engine / "Trainers/sft/train_sft.py").read_bytes()).hexdigest()})
     return flags, path
+
+
+def _stage_direct_inputs(root: Path):
+    flags, workload_path = _stage_worker_context(root)
+    workload = json.loads(workload_path.read_bytes())
+    content = b'{"text":"stub"}\n'
+    digest = hashlib.sha256(content).hexdigest()
+    dataset = {"ref": "prepared://sha256/" + "d" * 64, "revision": "d" * 64,
+               "content_digest": digest, "size_bytes": len(content),
+               "format": "synaptic-conversation-sft-row/v1"}
+    workload["configuration"]["document"]["dataset"] = dataset
+    workload_path.write_text(json.dumps(workload, sort_keys=True, separators=(",", ":")))
+    flags["expected_workload_sha256"] = hashlib.sha256(workload_path.read_bytes()).hexdigest()
+    artifact = root / "old-artifacts"
+    snapshot = artifact / "run/cache/model/models--Example--Model/snapshots" / ("a" * 40)
+    snapshot.mkdir(parents=True)
+    (snapshot / "tiny.bin").write_bytes(b"model-byte")
+    prepared = artifact / "run/state/prepared-inputs" / digest / "private-dataset.jsonl"
+    prepared.parent.mkdir(parents=True)
+    prepared.write_bytes(content)
+    rows = diagnostic._readonly_snapshot_inventory(snapshot)
+    receipt = root / "old-model-receipt.json"
+    receipt.write_text(json.dumps({"schema_version": "synaptic-docker-model-preparation/v1",
+        "artifact_host_root": str(artifact), "snapshot": str(snapshot),
+        "model": workload["configuration"]["document"]["model"], "files": rows}))
+    flags.update({"worker_direct": True, "gpu_device": "0",
+        "expected_direct_trainer_sha256": DIRECT_TRAINER,
+        "expected_direct_manifest_sha256": DIRECT_MANIFEST,
+        "expected_direct_closure_digest": DIRECT_CLOSURE,
+        "artifact_root": artifact, "model_receipt": receipt,
+        "expected_model_receipt_sha256": hashlib.sha256(receipt.read_bytes()).hexdigest()})
+    return flags, workload_path, snapshot, prepared
+
+
+def test_direct_derivative_keeps_exact_prefix_and_verifies_closure(tmp_path: Path) -> None:
+    flags, _workload_path, _snapshot, _prepared = _stage_direct_inputs(tmp_path)
+    identity = diagnostic._stage_direct_source(flags["source_root"], tmp_path / "derived",
+        expected_trainer=DIRECT_TRAINER, expected_manifest=DIRECT_MANIFEST,
+        expected_closure=DIRECT_CLOSURE)
+    assert identity["closure_digest"] == DIRECT_CLOSURE
+    original = (flags["source_root"] / "Trainers/sft/train_sft.py").read_bytes()
+    actual = (tmp_path / "derived/engine/Trainers/sft/train_sft.py").read_bytes()
+    boundary = diagnostic._trainer_prefix_boundary(original)
+    assert actual == b"".join(original.splitlines(keepends=True)[:boundary + 1]) + b"raise SystemExit(42)\n"
+    assert b"from unsloth import" not in actual
+    assert b"TRAIN_CALL" not in actual
+    assert b"model_loader" not in actual
+    manifest = tmp_path / "derived/control/offline-sft-worker-v1.json"
+    assert hashlib.sha256(manifest.read_bytes()).hexdigest() == DIRECT_MANIFEST
+    context = diagnostic._worker_context_identity(tmp_path / "derived/engine",
+        flags["expected_workload_sha256"], flags["expected_runtime_sha256"],
+        DIRECT_TRAINER, DIRECT_CLOSURE, direct_stop=True)
+    probe = diagnostic._worker_probe(context, DIRECT_CLOSURE, direct_mode=True,
+        prepared_sha256=hashlib.sha256(b'{"text":"stub"}\n').hexdigest(),
+        prepared_size=len(b'{"text":"stub"}\n'))
+    ast.parse(probe)
+    assert "EXPECTED_" not in probe and "DIRECT_MODE" not in probe
+    assert "[sys.executable,'-I',str(worker_path),*arguments]" in probe
+    actual += b" "
+    (tmp_path / "derived/engine/Trainers/sft/train_sft.py").write_bytes(actual)
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        diagnostic._direct_source_identity(tmp_path / "derived/engine",
+            expected_trainer=DIRECT_TRAINER, expected_manifest=DIRECT_MANIFEST,
+            expected_closure=DIRECT_CLOSURE)
+
+
+@pytest.mark.parametrize("import_error", [False, True])
+def test_real_direct_isolated_child_stops_at_fixed_marker(tmp_path: Path,
+                                                           import_error: bool) -> None:
+    engine = tmp_path / "engine"
+    worker = engine / "tuner/runtime/offline_sft_worker.py"
+    worker.parent.mkdir(parents=True)
+    trainer = engine / "Trainers/sft/train_sft.py"
+    trainer.parent.mkdir(parents=True)
+    worker.write_text("""import runpy,sys
+from pathlib import Path
+phase=None
+def mark(value):
+ global phase
+ phase=value
+def main():
+ if sys.flags.isolated!=1 or sys.argv[1:]!=['--','--max-steps','1']:
+  return 3
+ root=Path(__file__).parents[2]
+ trainer=root/'Trainers/sft/train_sft.py'
+ sys.path[:0]=[str(trainer.parent),str(root)]
+ sys.argv=[str(trainer),'--max-steps','1']
+ try: runpy.run_path(str(trainer),run_name='__main__',init_globals={'__packaged_runtime_phase__':mark})
+ except SystemExit:
+  print('OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=SYSTEM_EXIT milestone='+str(phase),file=sys.stderr)
+  return 2
+ except ImportError:
+  print('OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=IMPORT milestone='+str(phase),file=sys.stderr)
+  return 2
+ return 0
+if __name__=='__main__': raise SystemExit(main())
+""")
+    original = b"""import sys
+def _mark_packaged_runtime_phase(value):
+ marker=globals().get('__packaged_runtime_phase__')
+ if marker is not None: marker(value)
+assert __name__=='__main__'
+assert sys.modules['__main__'].__dict__ is globals()
+_mark_packaged_runtime_phase("BOOTSTRAP_ENV")
+_mark_packaged_runtime_phase("TORCH_IMPORT")
+import torch  # noqa: E402
+_mark_packaged_runtime_phase("UNSLOTH_IMPORT")
+from unsloth import is_bfloat16_supported  # noqa: E402
+raise RuntimeError('TRAINER_FELL_THROUGH')
+"""
+    boundary = diagnostic._trainer_prefix_boundary(original)
+    trainer.write_bytes(b"".join(original.splitlines(keepends=True)[:boundary + 1])
+                        + diagnostic._DIRECT_STOP)
+    (trainer.parent / "torch.py").write_text(
+        "from pathlib import Path\nPath(__file__).with_name('TORCH_IMPORTED').write_text('yes')\n"
+        + ("raise ImportError('private detail')\n" if import_error else ""))
+    (trainer.parent / "unsloth.py").write_text(
+        "from pathlib import Path\nPath(__file__).with_name('UNSLOTH_IMPORTED').write_text('bad')\n")
+    completed = subprocess.run([sys.executable, "-I", str(worker), "--", "--max-steps", "1"],
+        cwd=tmp_path, env={"PATH": "/usr/bin:/bin", "PYTHONNOUSERSITE": "1",
+                           "PYTHONSAFEPATH": "1"}, capture_output=True, timeout=20)
+    assert completed.returncode == 2 and completed.stdout == b""
+    expected = (b"OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=IMPORT milestone=TORCH_IMPORT\n"
+                if import_error else
+                b"OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=SYSTEM_EXIT milestone=UNSLOTH_IMPORT\n")
+    assert completed.stderr == expected
+    assert (trainer.parent / "TORCH_IMPORTED").exists()
+    assert not (trainer.parent / "UNSLOTH_IMPORTED").exists()
+
+
+def test_direct_drift_rejects_before_create_and_claim_is_not_replayed(
+        tmp_path: Path, monkeypatch) -> None:
+    flags, _workload, snapshot, _prepared = _stage_direct_inputs(tmp_path)
+    docker, config, state = _fake_docker(tmp_path)
+    monkeypatch.setattr(diagnostic, "_run", lambda *args, **kwargs:
+                        pytest.fail("Docker touched"))
+    (snapshot / "tiny.bin").write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, **flags)
+    assert json.loads(state.read_text())["status"] == "absent"
+    assert not (tmp_path / "out").exists()
+
+    flags, _workload, _snapshot, _prepared = _stage_direct_inputs(tmp_path / "fresh")
+    (tmp_path / "fresh").chmod(0o700)
+    docker, config, state = _fake_docker(tmp_path / "fresh")
+    def uncertain_create(_authority, args, **_kwargs):
+        if args[:2] == ("container", "create"):
+            raise TimeoutError()
+        if args[0] == "info":
+            return subprocess.CompletedProcess(args, 0, DAEMON.encode() + b"\n", b"")
+        if args[:2] == ("image", "inspect"):
+            return subprocess.CompletedProcess(args, 0, IMAGE.encode() + b"\n", b"")
+        pytest.fail("unexpected Docker command")
+    monkeypatch.setattr(diagnostic, "_run", uncertain_create)
+    with pytest.raises(ValueError, match="CREATE_UNCERTAIN"):
+        _call(tmp_path / "fresh", docker, config, **flags)
+    assert (tmp_path / "fresh/out/claim.json").exists()
+    with pytest.raises(ValueError, match="OUTPUT_INVALID"):
+        _call(tmp_path / "fresh", docker, config, **flags)
+
+
+def test_direct_derivative_drift_after_create_never_starts(tmp_path: Path,
+                                                           monkeypatch) -> None:
+    flags, _workload, _snapshot, _prepared = _stage_direct_inputs(tmp_path)
+    docker, config, state = _fake_docker(tmp_path)
+    original_run = diagnostic._run
+    calls = []
+
+    def mutating_run(authority, args, **kwargs):
+        calls.append(args[:2])
+        result = original_run(authority, args, **kwargs)
+        if args[:2] == ("container", "create"):
+            trainer = tmp_path / "out/derived-source/engine/Trainers/sft/train_sft.py"
+            trainer.write_bytes(trainer.read_bytes() + b" ")
+        return result
+
+    monkeypatch.setattr(diagnostic, "_run", mutating_run)
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, **flags)
+    assert json.loads(state.read_text())["status"] == "created"
+    assert ("container", "create") in calls
+    assert ("container", "start") not in calls
+    assert (tmp_path / "out/claim.json").exists()
+
+
+def test_direct_fake_docker_scope_and_readonly_nested_mounts(tmp_path: Path,
+                                                             monkeypatch) -> None:
+    flags, _workload, snapshot, prepared = _stage_direct_inputs(tmp_path)
+    docker, config, state = _fake_docker(tmp_path)
+    original_run = diagnostic._run
+    creates = []
+
+    def run(authority, args, **kwargs):
+        if args[:2] == ("container", "create"):
+            creates.append(args)
+        if args[:2] == ("container", "logs"):
+            payload = {"schema_version": "synaptic-docker-torch-import-child/v1",
+                "category": "PASS", "stage": "UNSLOTH_IMPORT", "context": {},
+                "boundary": "BEFORE_UNSLOTH"}
+            return subprocess.CompletedProcess(args, 0,
+                (json.dumps(payload) + "\n").encode(), b"")
+        return original_run(authority, args, **kwargs)
+
+    def inspect(_authority, _identifier, **_kwargs):
+        return ("created", 0) if json.loads(state.read_text())["status"] == "created" else ("exited", 0)
+
+    monkeypatch.setattr(diagnostic, "_run", run)
+    monkeypatch.setattr(diagnostic, "_inspect_owned", inspect)
+    report = _call(tmp_path, docker, config, **flags)
+    assert report["scope"] == "worker_direct" and report["stage"] == "UNSLOTH_IMPORT"
+    assert report["direct_identity"]["manifest_sha256"] == DIRECT_MANIFEST
+    assert len(creates) == 1
+    command = creates[0]
+    assert "--network=none" in command and "--memory=16g" in command
+    assert "--cpus=2" in command and command[command.index("--gpus") + 1] == "device=0"
+    assert "--read-only" not in command and "--cap-drop=ALL" not in command
+    mounts = [command[i + 1] for i, value in enumerate(command[:-1]) if value == "--mount"]
+    assert any(f"src={snapshot}," in value and value.endswith(",readonly") for value in mounts)
+    assert any(f"src={prepared}," in value and value.endswith(",readonly") for value in mounts)
+    assert any("derived-source,dst=/source,readonly" in value for value in mounts)
+    assert (tmp_path / "out/claim.json").exists()
 
 
 def test_worker_prefix_excludes_unsloth_and_all_trainer_calls() -> None:

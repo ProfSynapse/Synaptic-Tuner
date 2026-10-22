@@ -15,6 +15,7 @@ import os
 import re
 import secrets
 import selectors
+import shutil
 import signal
 import stat
 import subprocess
@@ -47,6 +48,8 @@ _R2_ENV_KEYS = frozenset({"PATH", "PYTHONPATH", "PYTHONNOUSERSITE",
     "SYNAPTIC_TRACKING_ROOT", "SYNAPTIC_CACHE_ROOT", "SYNAPTIC_TMP_ROOT"})
 _ROOT_ENV = {name: "SYNAPTIC_" + name.upper() + "_ROOT" for name in _R2_ROOTS}
 _ROOT_ENV["artifacts"] = "SYNAPTIC_ARTIFACT_ROOT"
+_DIRECT_STOP = b"raise SystemExit(42)\n"
+_DIRECT_TRAINER = "Trainers/sft/train_sft.py"
 _INSPECT = "{{json .Id}}\n{{json .Name}}\n{{json .Image}}\n{{json .Config.Labels}}\n{{json .State.Status}}\n{{json .State.ExitCode}}"
 
 # This fixed program never formats an exception, inspects its attributes, or
@@ -391,14 +394,13 @@ try:
  snapshot=roots['cache']+'/model/models--'+'--'.join(ref.split('/'))+'/snapshots/'+revision
  environment.update({'SYNAPTIC_WORKLOAD_FINGERPRINT':hashlib.sha256(b'synaptic-training-workload/v1\\0'+raw).hexdigest(),'PYTHONNOUSERSITE':'1','PYTHONSAFEPATH':'1','HF_HOME':roots['cache']+'/huggingface','TRANSFORMERS_CACHE':roots['cache']+'/transformers','HF_HUB_OFFLINE':'1','TRANSFORMERS_OFFLINE':'1','SYNAPTIC_MODEL_SNAPSHOT':snapshot,'WANDB_DISABLED':'true'})
  os.umask(0o077)
- Path('/artifacts/run').mkdir(mode=0o700)
+ Path('/artifacts/run').mkdir(mode=0o700,exist_ok=DIRECT_MODE)
  for name in ('artifacts','state','tracking','cache','tmp'):
-  Path(roots[name]).mkdir(mode=0o700)
+  Path(roots[name]).mkdir(mode=0o700,exist_ok=DIRECT_MODE)
  for name in ('huggingface','transformers'):
   (Path(roots['cache'])/name).mkdir(mode=0o700,exist_ok=True)
  stage='ISOLATED_CHILD'
- child=base64.b64decode('CHILD_SOURCE_B64')
- if ENTRY_MODE:
+ if ENTRY_MODE or DIRECT_MODE:
   import fcntl,runpy
   runtime_path=Path('/source/engine/Trainers/sft/runtime_v1.py')
   with runtime_path.open('rb') as stream:
@@ -411,7 +413,19 @@ try:
    raise ValueError()
   descriptor=os.memfd_create('synaptic-diagnostic-input',os.MFD_CLOEXEC|os.MFD_ALLOW_SEALING)
   try:
-   os.write(descriptor,b'0')
+   if DIRECT_MODE:
+    with (Path(roots['state'])/'prepared-inputs'/'EXPECTED_PREPARED_SHA256'/'private-dataset.jsonl').open('rb') as stream:
+     content=stream.read(64*1024*1024+1)
+    if len(content)!=EXPECTED_PREPARED_SIZE or hashlib.sha256(content).hexdigest()!='EXPECTED_PREPARED_SHA256':
+     raise ValueError()
+   else:
+    content=b'0'
+   view=memoryview(content)
+   while view:
+    written=os.write(descriptor,view)
+    if written<=0: raise ValueError()
+    view=view[written:]
+   os.lseek(descriptor,0,os.SEEK_SET)
    seals=fcntl.F_SEAL_SEAL|fcntl.F_SEAL_SHRINK|fcntl.F_SEAL_GROW|fcntl.F_SEAL_WRITE
    fcntl.fcntl(descriptor,fcntl.F_ADD_SEALS,seals)
    arguments=['--','--model-name',ref,'--model-revision',revision,'--anonymous-model',
@@ -428,20 +442,44 @@ try:
     dataset_schema=dataset['format'] if dataset['format']=='synaptic-conversation-sft-row/v1' else None)
    trainer_argv=['/source/engine/Trainers/sft/train_sft.py',*arguments[1:]]
    argv_sha=hashlib.sha256(json.dumps(trainer_argv,sort_keys=True,separators=(',',':')).encode()).hexdigest()
-   token='EXPECTED'+'_'+'TRAINER_ARGV_SHA256'
-   child_text=child.decode('utf-8').replace(token,argv_sha)
-   if token in child_text:
-    raise ValueError()
+   if DIRECT_MODE:
+    worker_path=Path('/source/engine/tuner/runtime/offline_sft_worker.py')
+    with worker_path.open('rb') as stream:
+     worker_raw=stream.read(1024*1024+1)
+    trainer_path=Path('/source/engine/Trainers/sft/train_sft.py')
+    with trainer_path.open('rb') as stream:
+     trainer_raw=stream.read(1024*1024+1)
+    if (len(worker_raw)>1024*1024 or hashlib.sha256(worker_raw).hexdigest()!='EXPECTED_WORKER_SHA256'
+        or len(trainer_raw)>1024*1024 or hashlib.sha256(trainer_raw).hexdigest()!='EXPECTED_DIRECT_TRAINER_SHA256'
+        or not trainer_raw.endswith(b'raise SystemExit(42)\\n')):
+     raise ValueError()
+   else:
+    child=base64.b64decode('CHILD_SOURCE_B64')
+    token='EXPECTED'+'_'+'TRAINER_ARGV_SHA256'
+    child_text=child.decode('utf-8').replace(token,argv_sha)
+    if token in child_text:
+     raise ValueError()
    stdout_path=Path(roots['tracking'])/'worker-entry.stdout'
    stderr_path=Path(roots['tracking'])/'worker-entry.stderr'
    with stdout_path.open('xb') as stdout,stderr_path.open('xb') as stderr:
-    process=subprocess.Popen([sys.executable,'-I','-c',child_text,*arguments],cwd=roots['tmp'],env=environment,stdin=subprocess.DEVNULL,stdout=stdout,stderr=stderr,pass_fds=(descriptor,))
-    if process.wait()!=0:
+    command=([sys.executable,'-I',str(worker_path),*arguments] if DIRECT_MODE else
+             [sys.executable,'-I','-c',child_text,*arguments])
+    process=subprocess.Popen(command,cwd=roots['tmp'],env=environment,stdin=subprocess.DEVNULL,stdout=stdout,stderr=stderr,pass_fds=(descriptor,))
+    returncode=process.wait()
+   with stdout_path.open('rb') as stream: payload=stream.read(4097)
+   if len(payload)>4096: raise ValueError()
+   if DIRECT_MODE:
+    with stderr_path.open('rb') as stream: stderr_raw=stream.read(257)
+    if (returncode!=2 or payload or len(stderr_raw)>256):
      raise ValueError()
-   with stdout_path.open('rb') as stream:
-    payload=stream.read(4097)
-   if len(payload)>4096:
-    raise ValueError()
+    if stderr_raw==b'OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=SYSTEM_EXIT milestone=UNSLOTH_IMPORT\\n':
+     result={'schema_version':'synaptic-docker-torch-import-child/v1','category':'PASS','stage':'UNSLOTH_IMPORT','context':{},'boundary':'BEFORE_UNSLOTH'}
+    elif stderr_raw==b'OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=IMPORT milestone=TORCH_IMPORT\\n':
+     result={'schema_version':'synaptic-docker-torch-import-child/v1','category':'IMPORT','stage':'TORCH_IMPORT','context':{},'boundary':'BEFORE_UNSLOTH'}
+    else:
+     result={'schema_version':'synaptic-docker-torch-import-child/v1','category':'OTHER','stage':'ISOLATED_CHILD','context':{},'boundary':'BEFORE_UNSLOTH'}
+    payload=json.dumps(result,sort_keys=True,separators=(',',':')).encode()
+   elif returncode!=0: raise ValueError()
   finally:
    os.close(descriptor)
  else:
@@ -458,9 +496,13 @@ try:
   if process.wait()!=0:
    raise ValueError()
  result=json.loads(payload)
- if set(result)!={'schema_version','category','stage','context','boundary'} or result['schema_version']!='synaptic-docker-torch-import-child/v1' or result['boundary']!='BEFORE_UNSLOTH' or result['category'] not in ('PASS','MODULE_NOT_FOUND','IMPORT','OS','RUNTIME','OTHER') or result['stage'] not in ('WORKER_IMPORT','WORKER_CLOSURE','WORKER_GUARD','TRAINER_PREFIX','BOOTSTRAP_ENV','TORCH_IMPORT','ENTRY_ADMISSION','WORKER_MAIN','WORKER_ORIGIN','WORKER_ARGUMENTS','WORKER_POSTCHECK') or not isinstance(result['context'],dict):
+ if set(result)!={'schema_version','category','stage','context','boundary'} or result['schema_version']!='synaptic-docker-torch-import-child/v1' or result['boundary']!='BEFORE_UNSLOTH' or result['category'] not in ('PASS','MODULE_NOT_FOUND','IMPORT','OS','RUNTIME','OTHER') or result['stage'] not in ('WORKER_IMPORT','WORKER_CLOSURE','WORKER_GUARD','TRAINER_PREFIX','BOOTSTRAP_ENV','TORCH_IMPORT','ENTRY_ADMISSION','WORKER_MAIN','WORKER_ORIGIN','WORKER_ARGUMENTS','WORKER_POSTCHECK','ISOLATED_CHILD','UNSLOTH_IMPORT') or not isinstance(result['context'],dict):
   raise ValueError()
- if result['category']=='PASS':
+ if DIRECT_MODE:
+  if (result['context']!={} or
+      (result['category']=='PASS' and result['stage']!='UNSLOTH_IMPORT') or
+      (result['category']=='IMPORT' and result['stage']!='TORCH_IMPORT')): raise ValueError()
+ elif result['category']=='PASS':
   expected_context={'environment_supplied_sha256','environment_observed_sha256','startup_env_delta','python_isolated','cwd_sha256','file_sha256','sys_path_sha256'}
   if ENTRY_MODE:
    expected_context.update(('argv_sha256','runpy_main_bound','environment_before_torch_sha256','environment_after_torch_sha256'))
@@ -633,7 +675,7 @@ def _trainer_prefix_boundary(raw: bytes) -> int:
 
 def _worker_context_identity(source_root: Path, expected_workload: str,
                              expected_runtime: str, expected_trainer: str,
-                             expected_closure: str) -> dict[str, str]:
+                             expected_closure: str, *, direct_stop: bool = False) -> dict[str, str]:
     if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in
            (expected_workload, expected_runtime, expected_trainer, expected_closure)):
         raise ValueError("SOURCE_IDENTITY_INVALID")
@@ -658,7 +700,11 @@ def _worker_context_identity(source_root: Path, expected_workload: str,
             or planned["TRANSFORMERS_OFFLINE"] != "1"
             or runtime["interpreter"]["executable"] != "/opt/unsloth-venv/bin/python3"):
         raise ValueError("SOURCE_IDENTITY_INVALID")
-    _trainer_prefix_boundary(trainer_raw)
+    if direct_stop:
+        if not trainer_raw.endswith(_DIRECT_STOP):
+            raise ValueError("SOURCE_IDENTITY_INVALID")
+    else:
+        _trainer_prefix_boundary(trainer_raw)
     model = workload["configuration"]["document"]["model"]
     ref, revision = model["ref"], model["revision"]
     if (type(ref) is not str or type(revision) is not str
@@ -694,8 +740,195 @@ def _worker_context_identity(source_root: Path, expected_workload: str,
                 child_env_lc_ctype, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
 
 
-def _worker_probe(identity: dict[str, str], closure: str, *, entry_mode: bool = False) -> str:
-    child = (_WORKER_ENTRY_CHILD if entry_mode else _WORKER_PREFIX_CHILD)
+def _direct_source_identity(source_root: Path, *, expected_trainer: str,
+                            expected_manifest: str, expected_closure: str) -> dict[str, str]:
+    """Authenticate the staged stop derivative with the trusted worker verifier."""
+    manifest = source_root.parent / "control/offline-sft-worker-v1.json"
+    raw = _read(manifest, 128 * 1024)
+    trainer = _read(source_root / _DIRECT_TRAINER, 1024 * 1024)
+    if (hashlib.sha256(raw).hexdigest() != expected_manifest
+            or hashlib.sha256(trainer).hexdigest() != expected_trainer
+            or not trainer.endswith(_DIRECT_STOP)):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    from tuner.runtime.offline_sft_worker import load_offline_sft_worker_closure
+    try:
+        load_offline_sft_worker_closure(
+            manifest, expected_digest=expected_closure, engine_root=source_root)
+    except Exception:
+        raise ValueError("SOURCE_IDENTITY_INVALID") from None
+    return {"trainer_sha256": expected_trainer, "manifest_sha256": expected_manifest,
+            "closure_digest": expected_closure}
+
+
+def _stage_direct_source(original: Path, destination: Path, *, expected_trainer: str,
+                         expected_manifest: str, expected_closure: str) -> dict[str, str]:
+    """Copy only the authenticated closure and replace the post-Torch suffix."""
+    original_manifest = json.loads(_read(
+        original.parent / "control/offline-sft-worker-v1.json", 128 * 1024))
+    trainer_raw = _read(original / _DIRECT_TRAINER, 1024 * 1024)
+    lines = trainer_raw.splitlines(keepends=True)
+    boundary = _trainer_prefix_boundary(trainer_raw)
+    derived = b"".join(lines[:boundary + 1]) + _DIRECT_STOP
+    if hashlib.sha256(derived).hexdigest() != expected_trainer:
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    document = json.loads(json.dumps(original_manifest))
+    for member in document["members"]:
+        if member["path"] == _DIRECT_TRAINER:
+            member["sha256"] = expected_trainer
+            member["size_bytes"] = len(derived)
+            break
+    else:
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    document["payload_bytes"] = sum(member["size_bytes"] for member in document["members"])
+    from tuner.runtime.offline_sft_worker import closure_digest
+    document["closure_digest"] = closure_digest(document)
+    encoded = json.dumps(document, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False, allow_nan=False).encode("utf-8") + b"\n"
+    if (document["closure_digest"] != expected_closure
+            or hashlib.sha256(encoded).hexdigest() != expected_manifest):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    engine = destination / "engine"
+    control = destination / "control"
+    engine.mkdir(parents=True, mode=0o700)
+    control.mkdir(mode=0o700)
+    for member in document["members"]:
+        target = engine / member["path"]
+        target.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        if member["path"] == _DIRECT_TRAINER:
+            target.write_bytes(derived)
+        else:
+            shutil.copyfile(original / member["path"], target)
+        target.chmod(int(member["git_mode"], 8) & 0o777)
+    (control / "offline-sft-worker-v1.json").write_bytes(encoded)
+    shutil.copyfile(original.parent / "control/workload.json", control / "workload.json")
+    return _direct_source_identity(engine, expected_trainer=expected_trainer,
+                                   expected_manifest=expected_manifest,
+                                   expected_closure=expected_closure)
+
+
+def _direct_retained_inputs(source_root: Path, artifact_root: Path, receipt_path: Path,
+                            expected_receipt: str, expected_workload: str) -> dict[str, object]:
+    """Verify the retained prepared input and snapshot without writing either."""
+    if (not artifact_root.is_absolute() or artifact_root.is_symlink()
+            or not artifact_root.is_dir() or not receipt_path.is_absolute()
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_receipt)):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    receipt_raw = _read(receipt_path, 1024 * 1024)
+    workload_raw = _read(source_root.parent / "control/workload.json", 1024 * 1024)
+    if (hashlib.sha256(receipt_raw).hexdigest() != expected_receipt
+            or hashlib.sha256(workload_raw).hexdigest() != expected_workload):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    receipt = json.loads(receipt_raw)
+    workload = json.loads(workload_raw)
+    model = workload["configuration"]["document"]["model"]
+    dataset = workload["configuration"]["document"]["dataset"]
+    snapshot = artifact_root / "run/cache/model" / (
+        "models--" + model["ref"].replace("/", "--")) / "snapshots" / model["revision"]
+    prepared = artifact_root / "run/state/prepared-inputs" / dataset["content_digest"] / "private-dataset.jsonl"
+    if (receipt.get("schema_version") != "synaptic-docker-model-preparation/v1"
+            or receipt.get("artifact_host_root") != str(artifact_root)
+            or receipt.get("snapshot") != str(snapshot)
+            or receipt.get("model") != model
+            or not re.fullmatch(r"[0-9a-f]{64}", dataset["content_digest"])
+            or dataset.get("ref") != "prepared://sha256/" + dataset["revision"]
+            or type(dataset.get("size_bytes")) is not int
+            or not 0 < dataset["size_bytes"] <= 64 * 1024 * 1024):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    try:
+        if _readonly_snapshot_inventory(snapshot) != receipt["files"]:
+            raise ValueError("SOURCE_IDENTITY_INVALID")
+    except Exception:
+        raise ValueError("SOURCE_IDENTITY_INVALID") from None
+    content = _read(prepared, 64 * 1024 * 1024)
+    if (len(content) != dataset["size_bytes"]
+            or hashlib.sha256(content).hexdigest() != dataset["content_digest"]):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    custody = tuple(_path_custody(path) for path in (artifact_root, snapshot, prepared, receipt_path))
+    return {"snapshot": snapshot, "prepared": prepared,
+            "prepared_sha256": dataset["content_digest"],
+            "prepared_size_bytes": dataset["size_bytes"],
+            "receipt_sha256": expected_receipt, "custody": custody}
+
+
+def _readonly_snapshot_inventory(snapshot: Path) -> list[dict[str, object]]:
+    """Hash bounded model bytes through held directory descriptors."""
+    custody = _path_custody(snapshot)
+    deadline = time.monotonic() + 300
+    rows: list[dict[str, object]] = []
+    total = 0
+    directories = 0
+    root_fd = os.open(snapshot, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        def walk(directory_fd: int, prefix: str) -> None:
+            nonlocal total, directories
+            if time.monotonic() >= deadline:
+                raise ValueError("SOURCE_IDENTITY_INVALID")
+            with os.scandir(directory_fd) as entries:
+                names = sorted(entry.name for entry in entries)
+            for name in names:
+                if name in {"", ".", ".."} or "/" in name:
+                    raise ValueError("SOURCE_IDENTITY_INVALID")
+                info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode):
+                    directories += 1
+                    if directories > 256:
+                        raise ValueError("SOURCE_IDENTITY_INVALID")
+                    child_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                       dir_fd=directory_fd)
+                    try:
+                        walk(child_fd, prefix + name + "/")
+                    finally:
+                        os.close(child_fd)
+                elif stat.S_ISREG(info.st_mode):
+                    if len(rows) >= 64 or total + info.st_size > 16 * 1024 ** 3:
+                        raise ValueError("SOURCE_IDENTITY_INVALID")
+                    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+                    try:
+                        before = os.fstat(fd)
+                        if ((before.st_dev, before.st_ino, before.st_size,
+                             before.st_mtime_ns) !=
+                            (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)):
+                            raise ValueError("SOURCE_IDENTITY_INVALID")
+                        digest = hashlib.sha256()
+                        size = 0
+                        while True:
+                            if time.monotonic() >= deadline:
+                                raise ValueError("SOURCE_IDENTITY_INVALID")
+                            chunk = os.read(fd, min(1024 * 1024, info.st_size - size + 1))
+                            if not chunk:
+                                break
+                            size += len(chunk)
+                            if size > info.st_size:
+                                raise ValueError("SOURCE_IDENTITY_INVALID")
+                            digest.update(chunk)
+                        after = os.fstat(fd)
+                        if (size != info.st_size or _identity_from_stat(after) !=
+                                _identity_from_stat(before)):
+                            raise ValueError("SOURCE_IDENTITY_INVALID")
+                    finally:
+                        os.close(fd)
+                    rows.append({"path": prefix + name, "size_bytes": size,
+                                 "sha256": digest.hexdigest()})
+                    total += size
+                else:
+                    raise ValueError("SOURCE_IDENTITY_INVALID")
+        walk(root_fd, "")
+    finally:
+        os.close(root_fd)
+    if not rows or _path_custody(snapshot) != custody:
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    return sorted(rows, key=lambda row: row["path"])
+
+
+def _identity_from_stat(info: os.stat_result) -> tuple[int, int, int, int]:
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
+def _worker_probe(identity: dict[str, str], closure: str, *, entry_mode: bool = False,
+                  direct_mode: bool = False, prepared_sha256: str = "0" * 64,
+                  prepared_size: int = 0) -> str:
+    child = ("" if direct_mode else
+             (_WORKER_ENTRY_CHILD if entry_mode else _WORKER_PREFIX_CHILD))
     child = child.replace("EXPECTED_TRAINER_SHA256", identity["trainer_sha256"])
     child = child.replace("EXPECTED_SUPPLIED_ENV_SHA256",
                           identity["child_env_sha256"])
@@ -714,12 +947,17 @@ def _worker_probe(identity: dict[str, str], closure: str, *, entry_mode: bool = 
                     "EXPECTED_ENV_KEYS": repr(sorted(_R2_ENV_KEYS)),
                     "ROOT_BINDINGS": repr({_ROOT_ENV[name]: value
                                           for name, value in _R2_ROOTS.items()}),
-                    "CHILD_SOURCE_B64": base64.b64encode(child.encode()).decode()}
+                    "CHILD_SOURCE_B64": base64.b64encode(child.encode()).decode(),
+                    "EXPECTED_PREPARED_SHA256": prepared_sha256,
+                    "EXPECTED_PREPARED_SIZE": str(prepared_size),
+                    "EXPECTED_WORKER_SHA256": identity["worker_sha256"],
+                    "EXPECTED_DIRECT_TRAINER_SHA256": identity["trainer_sha256"]}
     for key, value in replacements.items():
-        if probe.count(key) != 1:
+        if probe.count(key) != (2 if key == "EXPECTED_PREPARED_SHA256" else 1):
             raise ValueError("SOURCE_IDENTITY_INVALID")
         probe = probe.replace(key, value)
     probe = probe.replace("ENTRY_MODE", "True" if entry_mode else "False")
+    probe = probe.replace("DIRECT_MODE", "True" if direct_mode else "False")
     return probe
 
 
@@ -830,14 +1068,29 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
              expected_manifest_sha256: str | None = None,
              expected_closure_digest: str | None = None,
              gpu_device: str | None = None, worker_context: bool = False,
-             worker_entry: bool = False,
+             worker_entry: bool = False, worker_direct: bool = False,
              expected_workload_sha256: str | None = None,
              expected_runtime_sha256: str | None = None,
-             expected_trainer_sha256: str | None = None) -> dict[str, object]:
+             expected_trainer_sha256: str | None = None,
+             expected_direct_trainer_sha256: str | None = None,
+             expected_direct_manifest_sha256: str | None = None,
+             expected_direct_closure_digest: str | None = None,
+             artifact_root: Path | None = None, model_receipt: Path | None = None,
+             expected_model_receipt_sha256: str | None = None) -> dict[str, object]:
     worker_values = (expected_workload_sha256, expected_runtime_sha256,
                      expected_trainer_sha256)
-    if (worker_entry and not worker_context) or ((worker_context and (source_root is None or any(value is None for value in worker_values)))
+    direct_values = (expected_direct_trainer_sha256, expected_direct_manifest_sha256,
+                     expected_direct_closure_digest, artifact_root, model_receipt,
+                     expected_model_receipt_sha256)
+    if (worker_entry and not worker_context) or (worker_direct and
+            (worker_entry or not worker_context or gpu_device != "0" or
+             any(value is None for value in direct_values))) or (
+            not worker_direct and any(value is not None for value in direct_values)) or (
+            (worker_context and (source_root is None or any(value is None for value in worker_values)))
             or (not worker_context and any(value is not None for value in worker_values))):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    if worker_direct and any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in
+                             direct_values[:3]):
         raise ValueError("SOURCE_IDENTITY_INVALID")
     if gpu_device not in (None, "0") or (gpu_device is not None and source_root is None):
         raise ValueError("GPU_SCOPE_INVALID")
@@ -878,7 +1131,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
         expected_manifest_sha256, expected_closure_digest))
     context_identity = ({} if not worker_context else _worker_context_identity(
         source_root, *worker_values, expected_closure_digest))
-    if worker_entry:
+    if worker_entry or worker_direct:
         try:
             workload = json.loads(_read(source_root.parent / "control/workload.json", 1024 * 1024))
             dataset_ref = workload["configuration"]["document"]["dataset"]["ref"]
@@ -890,6 +1143,9 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     custody = (() if source_root is None else tuple(_path_custody(path) for path in
         (source_root, source_root.parent / "control/offline-sft-worker-v1.json", source_lock,
          *((source_root.parent / "control/workload.json",) if worker_context else ()))))
+    direct_inputs = (None if not worker_direct else _direct_retained_inputs(
+        source_root, artifact_root, model_receipt, expected_model_receipt_sha256,
+        expected_workload_sha256))
     authority = _authority(docker, docker_config)
     info = _run(authority, ("info", "--format", "{{.ID}}"))
     if info.stderr or _one_line(info.stdout) != daemon_id:
@@ -898,9 +1154,41 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     if before.stderr or _one_line(before.stdout) != image:
         raise ValueError("IMAGE_INVALID")
     output_dir.mkdir(mode=0o700)
+    direct_identity = {}
+    direct_custody = ()
+    mounted_source = source_root
+    if worker_direct:
+        direct_identity = _stage_direct_source(source_root, output_dir / "derived-source",
+            expected_trainer=expected_direct_trainer_sha256,
+            expected_manifest=expected_direct_manifest_sha256,
+            expected_closure=expected_direct_closure_digest)
+        mounted_source = output_dir / "derived-source/engine"
+        # A new writable root retains the r4 layout while the old model and
+        # prepared input enter only through separate read-only nested mounts.
+        scratch = output_dir / "artifacts"
+        scratch.mkdir(mode=0o700)
+        for leaf in ("artifacts", "state", "tracking", "cache", "tmp"):
+            (scratch / "run" / leaf).mkdir(parents=True, mode=0o700)
+        model_relative = direct_inputs["snapshot"].relative_to(artifact_root)
+        (scratch / model_relative).mkdir(parents=True, mode=0o700)
+        input_relative = direct_inputs["prepared"].relative_to(artifact_root)
+        input_target = scratch / input_relative
+        input_target.parent.mkdir(parents=True, mode=0o700)
+        input_target.open("xb").close()
+        input_target.chmod(0o600)
+        direct_custody = tuple(_path_custody(path) for path in
+            (mounted_source, mounted_source.parent / "control/offline-sft-worker-v1.json",
+             scratch, direct_inputs["snapshot"], direct_inputs["prepared"]))
+        context_identity = _worker_context_identity(
+            mounted_source, expected_workload_sha256, expected_runtime_sha256,
+            expected_direct_trainer_sha256, expected_direct_closure_digest,
+            direct_stop=True)
     nonce = secrets.token_hex(16)
     name = "synaptic-torch-import-" + nonce
-    probe = (_worker_probe(context_identity, expected_closure_digest, entry_mode=worker_entry)
+    probe = (_worker_probe(context_identity, (expected_direct_closure_digest if worker_direct else
+             expected_closure_digest), entry_mode=worker_entry, direct_mode=worker_direct,
+             prepared_sha256=(direct_inputs["prepared_sha256"] if worker_direct else "0" * 64),
+             prepared_size=(direct_inputs["prepared_size_bytes"] if worker_direct else 0))
              if worker_context else (_PROBE if source_root is None else
              _GUARDED_PROBE.replace("EXPECTED_CLOSURE_DIGEST", expected_closure_digest)))
     if gpu_device is not None:
@@ -913,7 +1201,13 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     claim = {"schema_version": SCHEMA, "daemon_id": daemon_id, "image_id": image,
              "release_sha256": expected_release_sha256, "source_identity": source_identity,
              "context_identity": context_identity,
-             "name": name, "scope": ("worker_entry" if worker_entry else "worker_context") if worker_context else
+             "direct_identity": direct_identity,
+             "retained_input_identity": ({"receipt_sha256": direct_inputs["receipt_sha256"],
+                 "prepared_sha256": direct_inputs["prepared_sha256"],
+                 "prepared_size_bytes": direct_inputs["prepared_size_bytes"]}
+                 if worker_direct else {}),
+             "name": name, "scope": ("worker_direct" if worker_direct else
+             "worker_entry" if worker_entry else "worker_context") if worker_context else
              ("bare" if source_root is None else "guarded"),
              "helper_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
              "probe_sha256": hashlib.sha256(probe.encode("utf-8")).hexdigest(),
@@ -929,24 +1223,29 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
         os.fsync(stream.fileno())
     _append(output_dir, {"phase": "CREATE_CLAIMED", "claim_sha256": label})
     mount = (() if source_root is None else
-             ("--mount", f"type=bind,src={source_root.parent},dst=/source,readonly"))
-    user = (() if source_root is None else
+             ("--mount", f"type=bind,src={mounted_source.parent},dst=/source,readonly"))
+    user = (() if source_root is None or worker_direct else
             ("--user", f"{source_root.stat().st_uid}:{source_root.stat().st_gid}"))
     visibility = (("--env=NVIDIA_VISIBLE_DEVICES=void", "--env=CUDA_VISIBLE_DEVICES=")
                   if gpu_device is None else ("--gpus", "device=0"))
     artifact_tmpfs = (("--tmpfs", "/artifacts:rw,nosuid,nodev,size=64m,mode=1777")
-                      if worker_context else ())
+                      if worker_context and not worker_direct else ())
+    direct_mounts = (() if not worker_direct else (
+        "--mount", f"type=bind,src={scratch},dst=/artifacts",
+        "--mount", f"type=bind,src={direct_inputs['snapshot']},dst=/artifacts/{model_relative},readonly",
+        "--mount", f"type=bind,src={direct_inputs['prepared']},dst=/artifacts/{input_relative},readonly"))
+    limits = (("--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+               "--pids-limit=64", "--memory=4g", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777")
+              if not worker_direct else ("--memory=16g",))
     command = (
         "container", "create", "--name", name, "--label", "ai.synapticlabs.torch-import.claim=" + label,
         "--pull=never", "--network=none", "--log-driver", "json-file",
         "--log-opt", "max-size=1m", "--log-opt", "max-file=1",
-        "--read-only", "--cap-drop=ALL", "--runtime=runc",
-        "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=4g",
-        "--cpus=2", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777",
+        "--runtime=runc", *limits, "--cpus=2",
         *artifact_tmpfs,
-        *mount, *user,
+        *mount, *direct_mounts, *user,
         *visibility,
-        "--workdir=/tmp", "--entrypoint", python,
+        "--workdir=" + (_R2_ROOTS["tmp"] if worker_direct else "/tmp"), "--entrypoint", python,
         image, "-I", "-c", probe,
     )
     if source_root is not None and tuple(_path_custody(path) for path in
@@ -979,8 +1278,23 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
             expected_closure_digest) != source_identity:
         raise ValueError("SOURCE_IDENTITY_INVALID")
     if worker_context and _worker_context_identity(
-            source_root, *worker_values, expected_closure_digest) != context_identity:
+            (mounted_source if worker_direct else source_root),
+            expected_workload_sha256, expected_runtime_sha256,
+            (expected_direct_trainer_sha256 if worker_direct else expected_trainer_sha256),
+            (expected_direct_closure_digest if worker_direct else expected_closure_digest),
+            direct_stop=worker_direct) != context_identity:
         raise ValueError("SOURCE_IDENTITY_INVALID")
+    if worker_direct:
+        if (_direct_source_identity(mounted_source,
+                expected_trainer=expected_direct_trainer_sha256,
+                expected_manifest=expected_direct_manifest_sha256,
+                expected_closure=expected_direct_closure_digest) != direct_identity
+                or _direct_retained_inputs(source_root, artifact_root, model_receipt,
+                    expected_model_receipt_sha256, expected_workload_sha256) != direct_inputs
+                or tuple(_path_custody(path) for path in
+                    (mounted_source, mounted_source.parent / "control/offline-sft-worker-v1.json",
+                     scratch, direct_inputs["snapshot"], direct_inputs["prepared"])) != direct_custody):
+            raise ValueError("SOURCE_IDENTITY_INVALID")
     if source_root is not None and tuple(_path_custody(path) for path in
             (source_root, source_root.parent / "control/offline-sft-worker-v1.json",
              source_lock, *((source_root.parent / "control/workload.json",)
@@ -1044,9 +1358,14 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
                     "WORKER_IMPORT", "WORKER_CLOSURE", "WORKER_GUARD",
                     "TRAINER_PREFIX", "BOOTSTRAP_ENV", "TORCH_IMPORT",
                     "ENTRY_ADMISSION", "WORKER_MAIN", "WORKER_ORIGIN",
-                    "WORKER_ARGUMENTS", "WORKER_POSTCHECK"}
+                    "WORKER_ARGUMENTS", "WORKER_POSTCHECK", "ISOLATED_CHILD",
+                    "UNSLOTH_IMPORT"}
                 or type(child["context"]) is not dict
-                or (child["category"] == "PASS" and
+                or (worker_direct and (child["context"] != {} or
+                    (child["category"] == "PASS" and child["stage"] != "UNSLOTH_IMPORT") or
+                    (child["category"] == "IMPORT" and child["stage"] != "TORCH_IMPORT") or
+                    (child["category"] not in {"PASS", "IMPORT", "OTHER"})))
+                or (child["category"] == "PASS" and not worker_direct and
                     (child["stage"] != "TORCH_IMPORT" or
                      set(child["context"]) != ({"environment_supplied_sha256",
                         "environment_observed_sha256", "startup_env_delta",
@@ -1064,7 +1383,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
             or (source_root is not None and not worker_context and child["stage"] not in {"IMPORT_WORKER", "READ_MANIFEST",
                 "LOAD_CLOSURE", "VERIFY_ORIGINS", "INSTALL_GUARD", "BOOTSTRAP_ENV", "TORCH_IMPORT"})):
         raise ValueError("CHILD_OUTPUT_INVALID")
-    if worker_context and child["category"] == "PASS":
+    if worker_context and child["category"] == "PASS" and not worker_direct:
         context = child["context"]
         expected_observed = (context_identity["child_env_sha256"]
             if context["startup_env_delta"] == "NONE"
@@ -1082,10 +1401,13 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
               "container_id": cid, "image_id": image, "daemon_id": daemon_id,
               "runtime_release_digest": digest,
               "training_executed": False, "gpu_used": None if gpu_device is not None else False,
-              "scope": ("worker_entry" if worker_entry else "worker_context") if worker_context else
+              "scope": ("worker_direct" if worker_direct else
+              "worker_entry" if worker_entry else "worker_context") if worker_context else
               ("bare" if source_root is None else "guarded"),
               "claim_sha256": label, "source_identity": source_identity,
               "context_identity": context_identity,
+              "direct_identity": direct_identity,
+              "retained_input_identity": claim["retained_input_identity"],
               "terminal_observed": True}
     if source_root is not None:
         report["stage"] = child["stage"]
@@ -1114,9 +1436,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gpu-device")
     parser.add_argument("--worker-context", action="store_true")
     parser.add_argument("--worker-entry", action="store_true")
+    parser.add_argument("--worker-direct", action="store_true")
     parser.add_argument("--expected-workload-sha256")
     parser.add_argument("--expected-runtime-sha256")
     parser.add_argument("--expected-trainer-sha256")
+    parser.add_argument("--expected-direct-trainer-sha256")
+    parser.add_argument("--expected-direct-manifest-sha256")
+    parser.add_argument("--expected-direct-closure-digest")
+    parser.add_argument("--artifact-root", type=Path)
+    parser.add_argument("--model-receipt", type=Path)
+    parser.add_argument("--expected-model-receipt-sha256")
     args = parser.parse_args(argv)
     try:
         report = diagnose(docker=args.docker, docker_config=args.docker_config,
@@ -1128,10 +1457,15 @@ def main(argv: list[str] | None = None) -> int:
                           expected_manifest_sha256=args.expected_manifest_sha256,
                           expected_closure_digest=args.expected_closure_digest,
                           gpu_device=args.gpu_device, worker_context=args.worker_context,
-                          worker_entry=args.worker_entry,
+                          worker_entry=args.worker_entry, worker_direct=args.worker_direct,
                           expected_workload_sha256=args.expected_workload_sha256,
                           expected_runtime_sha256=args.expected_runtime_sha256,
-                          expected_trainer_sha256=args.expected_trainer_sha256)
+                          expected_trainer_sha256=args.expected_trainer_sha256,
+                          expected_direct_trainer_sha256=args.expected_direct_trainer_sha256,
+                          expected_direct_manifest_sha256=args.expected_direct_manifest_sha256,
+                          expected_direct_closure_digest=args.expected_direct_closure_digest,
+                          artifact_root=args.artifact_root, model_receipt=args.model_receipt,
+                          expected_model_receipt_sha256=args.expected_model_receipt_sha256)
     except BaseException as error:
         reason = error.args[0] if type(error) is ValueError and len(error.args) == 1 else None
         if type(reason) is not str or reason not in _REASONS:
