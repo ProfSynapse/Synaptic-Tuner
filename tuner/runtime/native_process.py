@@ -170,12 +170,27 @@ class NativeOwnedProcess:
                                                  "restart_signal_authority": False})
                 # communicate starts the guardian only after spawn is retained.
                 timeout = invocation.limits.timeout_seconds + 2 * invocation.limits.termination_grace_seconds + 10
-                stdout, _ = guardian.communicate(input=spec, timeout=timeout)
-                if guardian.returncode != 0 or len(stdout) > 4096:
+                try:
+                    stdout, _ = guardian.communicate(input=spec, timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    self._retain(invocation, "diagnostic", {"category": "guardian_response_timeout"})
+                    raise ValueError("native guardian outcome unavailable") from None
+                if guardian.returncode != 0:
+                    self._retain(invocation, "diagnostic", {
+                        "category": "guardian_exit", "exit_code": guardian.returncode,
+                    })
                     raise ValueError("native guardian outcome unavailable")
-                outcome = strict_json(stdout, maximum=4096)
+                if len(stdout) > 4096:
+                    self._retain(invocation, "diagnostic", {"category": "guardian_response_oversize"})
+                    raise ValueError("native guardian outcome unavailable")
+                try:
+                    outcome = strict_json(stdout, maximum=4096)
+                except (TypeError, ValueError, UnicodeError):
+                    self._retain(invocation, "diagnostic", {"category": "guardian_response_invalid"})
+                    raise ValueError("native guardian outcome unavailable") from None
                 if (type(outcome) is not dict or outcome.get("schema") != "synaptic-native-process-outcome/v1"
                         or outcome.get("termination_confirmed") is not True):
+                    self._retain(invocation, "diagnostic", {"category": "guardian_response_invalid"})
                     raise ValueError("native worker termination is uncertain")
                 self._retain(invocation, "outcome", outcome)
                 return outcome

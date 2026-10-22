@@ -18,6 +18,20 @@ import sys
 import time
 
 
+# Closed exit codes are the only guardian failure detail exposed to the parent.
+# They describe where supervision stopped, never an exception or worker output.
+_FAILURE_CODES = {
+    "protocol": 120,
+    "limits": 121,
+    "spawn": 122,
+    "exit_watch": 123,
+    "pipes": 124,
+    "monitor": 125,
+    "termination": 126,
+    "cleanup": 127,
+}
+
+
 class _ExitObserver:
     """Observe exit without reaping: Darwin kqueue or POSIX waitid where exposed."""
 
@@ -86,7 +100,10 @@ def _terminate(child, grace, observer=None):
         return None
 
 
-def supervise(spec, control_fd):
+def supervise(spec, control_fd, phase=None):
+    if phase is None:
+        phase = {"name": "limits"}
+    phase["name"] = "limits"
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     # This limits each file; the worker/artifact inventory enforces aggregate size.
     maximum_file = spec["maximum_file_bytes"]
@@ -98,19 +115,23 @@ def supervise(spec, control_fd):
     reason = "worker_exited"
     counts = {"stdout": 0, "stderr": 0}
     try:
+        phase["name"] = "spawn"
         child = subprocess.Popen(
             spec["argv"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, cwd=spec["cwd"], env=spec["environment"],
             start_new_session=True, close_fds=True,
         )
+        phase["name"] = "exit_watch"
         observer = _ExitObserver(child)
         # Only the guardian owns this live handle. Parent records refer to the
         # guardian; they cannot reacquire this child's cancellation authority.
+        phase["name"] = "pipes"
         for pipe, name in ((child.stdout, "stdout"), (child.stderr, "stderr")):
             os.set_blocking(pipe.fileno(), False)
             selector.register(pipe, selectors.EVENT_READ, name)
         os.set_blocking(control_fd, False)
         selector.register(control_fd, selectors.EVENT_READ, "control")
+        phase["name"] = "monitor"
         while True:
             if time.monotonic() - started >= spec["timeout_seconds"]:
                 reason = "deadline"
@@ -138,6 +159,7 @@ def supervise(spec, control_fd):
                 # pipe cannot keep this loop alive past the overall deadline.
                 if all(key.data == "control" for key in selector.get_map().values()):
                     break
+        phase["name"] = "termination"
         code = _terminate(child, spec["termination_grace_seconds"], observer)
         return {
             "schema": "synaptic-native-process-outcome/v1",
@@ -145,6 +167,9 @@ def supervise(spec, control_fd):
             "stdout_bytes": counts["stdout"], "stderr_bytes": counts["stderr"],
         }
     finally:
+        # Preserve the failed phase when cleanup follows an earlier exception.
+        if sys.exc_info()[0] is None:
+            phase["name"] = "cleanup"
         selector.close()
         if child is not None:
             # _terminate already reaps on normal return. Do not signal a reused
@@ -159,20 +184,22 @@ def supervise(spec, control_fd):
 
 def main():
     # Descriptor and JSON come only from the admitted launcher, not CLI users.
-    if len(sys.argv) != 2:
-        return 120
-    control_fd = int(sys.argv[1])
-    raw = sys.stdin.buffer.readline(65537)
-    if len(raw) > 65536 or not raw.endswith(b"\n"):
-        return 120
-    spec = json.loads(raw)
+    phase = {"name": "protocol"}
     try:
-        outcome = supervise(spec, control_fd)
+        if len(sys.argv) != 2:
+            return _FAILURE_CODES["protocol"]
+        control_fd = int(sys.argv[1])
+        raw = sys.stdin.buffer.readline(65537)
+        if len(raw) > 65536 or not raw.endswith(b"\n"):
+            return _FAILURE_CODES["protocol"]
+        spec = json.loads(raw)
+        outcome = supervise(spec, control_fd, phase)
+        phase["name"] = "protocol"
         sys.stdout.write(json.dumps(outcome, sort_keys=True, separators=(",", ":")))
         return 0
     except BaseException:
         # No exception values, library stderr or credential-bearing diagnostics.
-        return 121
+        return _FAILURE_CODES[phase["name"]]
 
 
 if __name__ == "__main__":

@@ -143,6 +143,13 @@ signal authority by reading them. Interrupted submission/publication retains
 uncertainty and never auto-replays. This is trusted-worker supervision, not an
 OS sandbox; escaped hostile descendants and guardian failure remain outside the
 current evidence. Real Darwin lifecycle tests remain required.
+If an owned guardian exits before an outcome is retained, the transport records
+only a closed diagnostic category and guardian exit code. Exit codes 120-127
+identify protocol, limits, spawn, exit watch, pipes, monitor, termination, and
+cleanup phases respectively; they contain no exception, worker output, path,
+argument, or environment data. A missing outcome remains uncertain and cannot
+authorize replay or signals to a persisted PID. These diagnostics describe a
+future attempt only; they cannot assign a phase to an earlier consumed claim.
 
 Before ML imports/training, independently review the isolated child bootstrap,
 authenticated compiled workload/native material, public provider-family

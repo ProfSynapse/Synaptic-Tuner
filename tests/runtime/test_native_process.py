@@ -50,6 +50,12 @@ def worker(invocation, text):
     return replace(invocation, worker_digest=hashlib.sha256(path.read_bytes()).hexdigest())
 
 
+def guardian_script(invocation, text):
+    path = Path(invocation.guardian)
+    path.write_text(text)
+    return replace(invocation, guardian_digest=hashlib.sha256(path.read_bytes()).hexdigest())
+
+
 def test_real_bounded_process_retains_claim_spawn_outcome_and_never_replays(invocation):
     records = InMemoryDurableRecordStoreV1()
     process = NativeOwnedProcess(records)
@@ -106,6 +112,53 @@ def test_spawn_retention_failure_preserves_uncertain_claim(invocation):
     assert process.observe(invocation) == {"state": "uncertain", "automatic_replay": False}
     with pytest.raises(ValueError, match="already exists"):
         NativeOwnedProcess(records).run_once(invocation)
+
+
+@pytest.mark.parametrize("script,expected", [
+    ("raise SystemExit(123)\n", {"category": "guardian_exit", "exit_code": 123}),
+    ("import sys\nsys.stdout.write('sensitive worker output')\n",
+     {"category": "guardian_response_invalid"}),
+    ("import sys\nsys.stdout.buffer.write(b'\\xff')\n",
+     {"category": "guardian_response_invalid"}),
+])
+def test_guardian_protocol_failure_retains_only_closed_diagnostic(invocation, script, expected):
+    invocation = guardian_script(invocation, script)
+    records = InMemoryDurableRecordStoreV1()
+    process = NativeOwnedProcess(records)
+    with pytest.raises(ValueError, match="native guardian outcome unavailable"):
+        process.run_once(invocation)
+    assert process.observe(invocation) == {"state": "uncertain", "automatic_replay": False}
+    raw = records.read(partition="effects", key=f"native-mlx/{invocation.attempt}/diagnostic").canonical
+    diagnostic = json.loads(raw)
+    assert diagnostic["value"] == expected
+    assert "sensitive" not in raw.decode()
+    assert records.read(partition="effects", key=f"native-mlx/{invocation.attempt}/outcome") is None
+    with pytest.raises(ValueError, match="already exists"):
+        process.run_once(invocation)
+
+
+def test_real_guardian_classifies_spawn_failure_without_exception_text(invocation):
+    read_fd, write_fd = os.pipe()
+    spec = {
+        "argv": ["/this-native-worker-does-not-exist"],
+        "cwd": invocation.private_root, "environment": {},
+        "timeout_seconds": 1, "termination_grace_seconds": 1,
+        "maximum_output_bytes": 1024, "maximum_file_bytes": 1024**2,
+    }
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-I", "-S", "-B", invocation.guardian, str(read_fd)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            pass_fds=(read_fd,),
+        )
+        os.close(read_fd)
+        read_fd = None
+        out, err = proc.communicate(json.dumps(spec).encode() + b"\n", timeout=5)
+        assert proc.returncode == 122 and out == b"" and err == b""
+    finally:
+        if read_fd is not None:
+            os.close(read_fd)
+        os.close(write_fd)
 
 
 def test_byte_drift_rejects_before_claim(invocation):
