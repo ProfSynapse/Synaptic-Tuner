@@ -60,3 +60,12 @@ not reveal exception details or prove a historical cause. Any
 fresh CPU attempt needs its own reviewed clean source, config, unused root and
 one-use admission; the existing `inspect` and `run` actions remain the only
 consumer commands.
+
+The r27 CPU observation classified SIGTERM EPERM and retained no outcome. The
+candidate guardian recovery on macOS 27.0.1 requires two complete bounded
+group selections and full zombie records for every member while the exited
+leader remains owned and unreaped. It rejects live descendants and every
+ambiguous result. A fresh reviewed CPU-only attempt is needed to observe this
+behavior; earlier consumed attempts retain their uncertainty. The candidate
+uses absolute Apple `libproc` and `libSystem` libraries plus `_ctypes`, so a
+later ML attempt needs a new reviewed static runtime capture.

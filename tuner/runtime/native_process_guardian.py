@@ -86,7 +86,115 @@ class _ExitObserver:
             self.queue.close()
 
 
-def _signal_owned_group(pgid, sig, phase):
+class _DarwinGroupQuery:
+    """Fixed-size libproc reads for the one still-owned process group."""
+
+    def __init__(self):
+        import ctypes
+
+        self.ctypes = ctypes
+        system = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+        self.sysctl = system.sysctlbyname
+        self.sysctl.argtypes = (ctypes.c_char_p, ctypes.c_void_p,
+                                ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p,
+                                ctypes.c_size_t)
+        self.sysctl.restype = ctypes.c_int
+        library = ctypes.CDLL("/usr/lib/libproc.dylib")
+        self.listpids = library.proc_listpids
+        self.listpids.argtypes = (ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_int)
+        self.listpids.restype = ctypes.c_int
+        self.pidinfo = library.proc_pidinfo
+        self.pidinfo.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_uint64,
+                                 ctypes.c_void_p, ctypes.c_int)
+        self.pidinfo.restype = ctypes.c_int
+
+    def version(self):
+        c = self.ctypes
+        buffer = c.create_string_buffer(32)
+        size = c.c_size_t(len(buffer))
+        if self.sysctl(b"kern.osproductversion", buffer, c.byref(size), None, 0) != 0:
+            return None
+        raw = buffer.raw[:size.value]
+        return raw[:-1] if 1 < size.value <= 32 and raw.endswith(b"\0") else None
+
+    def members(self, pgid):
+        c = self.ctypes
+        # XNU allocates min(nprocs + 20, supplied capacity) slots even for a
+        # group filter. Its NULL-buffer call returns that global allocation
+        # estimate without enumerating processes. Require it to cover our
+        # entire fixed buffer on both sides of the selection; otherwise a
+        # short result might conceal internal truncation. A full buffer may
+        # also be silently truncated. Zero can mean a libproc error.
+        buffer = (c.c_int32 * 65)()
+        capacity = c.sizeof(buffer)
+        if self.listpids(2, pgid, None, 0) < capacity:
+            return None
+        size = self.listpids(2, pgid, buffer, c.sizeof(buffer))
+        if (size <= 0 or size >= capacity or size % c.sizeof(c.c_int32)
+                or self.listpids(2, pgid, None, 0) < capacity):
+            return None
+        return tuple(buffer[:size // c.sizeof(c.c_int32)])
+
+    def status(self, pid):
+        c = self.ctypes
+
+        class ShortBsdInfo(c.Structure):
+            _fields_ = [("pid", c.c_uint32), ("ppid", c.c_uint32),
+                        ("pgid", c.c_uint32), ("status", c.c_uint32),
+                        ("comm", c.c_char * 16), ("flags", c.c_uint32),
+                        ("uid", c.c_uint32), ("gid", c.c_uint32),
+                        ("ruid", c.c_uint32), ("rgid", c.c_uint32),
+                        ("svuid", c.c_uint32), ("svgid", c.c_uint32),
+                        ("reserved", c.c_uint32)]
+
+        if c.sizeof(ShortBsdInfo) != 64:
+            return None
+        info = ShortBsdInfo()
+        # arg=1 permits XNU to find an unreaped zombie. Zero/short return
+        # includes denied reads and must never become empty-group evidence.
+        if self.pidinfo(pid, 13, 1, c.byref(info), c.sizeof(info)) != 64:
+            return None
+        return info.pid, info.ppid, info.pgid, info.status
+
+
+def _darwin_empty_owned_group(child, observer, query=None):
+    """Conservative EPERM recovery while the leader is still our zombie."""
+    if (sys.platform != "darwin" or os.uname().machine != "arm64"
+            or child is None or observer is None or child.returncode is not None
+            or not 1 < child.pid < 2**31 or getattr(observer, "child", None) is not child):
+        return False
+    try:
+        if not observer.exited():
+            return False
+        deadline = time.monotonic() + 1
+        query = query if query is not None else _DarwinGroupQuery()
+        # Only the reviewed macOS build uses this ABI/behavior. An upgrade
+        # needs renewed primary-source and runtime-capture review.
+        if query.version() != b"27.0.1" or time.monotonic() > deadline:
+            return False
+        previous = None
+        for _ in range(2):
+            members = query.members(child.pid)
+            if (time.monotonic() > deadline or type(members) is not tuple
+                    or not 1 <= len(members) <= 64 or child.pid not in members
+                    or len(set(members)) != len(members)
+                    or any(type(pid) is not int or not 1 < pid < 2**31 for pid in members)
+                    or previous is not None and set(members) != previous):
+                return False
+            for pid in members:
+                record = query.status(pid)
+                if (time.monotonic() > deadline or type(record) is not tuple
+                        or len(record) != 4 or any(type(value) is not int for value in record)
+                        or record[0] != pid or record[2] != child.pid or record[3] != 5
+                        or pid == child.pid and record[1] != os.getpid()):
+                    return False
+            previous = set(members)
+        return observer.exited() and child.returncode is None and time.monotonic() <= deadline
+    except Exception:
+        return False
+
+
+def _signal_owned_group(pgid, sig, phase, child=None, observer=None):
     # Keep the first failed operation and a closed error class. An EPERM can
     # also mean an unauthorized live member, so it is never treated as success.
     operation = phase["name"] if phase is not None else None
@@ -102,6 +210,10 @@ def _signal_owned_group(pgid, sig, phase):
     except PermissionError as failure:
         if phase is not None:
             phase["name"] = operation + ("_eperm" if failure.errno == errno.EPERM else "_other_os")
+        if failure.errno == errno.EPERM and _darwin_empty_owned_group(child, observer):
+            if phase is not None:
+                phase["name"] = operation
+            return
         raise
     except OSError:
         if phase is not None:
@@ -118,7 +230,7 @@ def _terminate(child, grace, observer=None, phase=None):
     # cannot be recycled while retained as our unreaped child.
     if phase is not None:
         phase["name"] = "termination_term"
-    _signal_owned_group(child.pid, signal.SIGTERM, phase)
+    _signal_owned_group(child.pid, signal.SIGTERM, phase, child, observer)
     if phase is not None:
         phase["name"] = "termination_grace"
     deadline = time.monotonic() + grace
@@ -133,7 +245,7 @@ def _terminate(child, grace, observer=None, phase=None):
         time.sleep(min(.02, max(0, deadline - time.monotonic())))
     if phase is not None:
         phase["name"] = "termination_kill"
-    _signal_owned_group(child.pid, signal.SIGKILL, phase)
+    _signal_owned_group(child.pid, signal.SIGKILL, phase, child, observer)
     if phase is not None:
         phase["name"] = "termination_wait"
     try:

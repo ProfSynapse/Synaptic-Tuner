@@ -1,17 +1,21 @@
 from dataclasses import replace
+import ctypes
 import errno
 import hashlib
 import io
+import itertools
 import json
 import os
 from pathlib import Path
 import shlex
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -345,6 +349,176 @@ def test_guardian_emits_only_closed_signal_code(monkeypatch, capsys):
     monkeypatch.setattr(guardian, "supervise", refused)
     assert guardian.main() == 132
     assert capsys.readouterr() == ("", "")
+
+
+def _darwin_group_case(monkeypatch, members=((42,), (42,)), statuses=None):
+    monkeypatch.setattr(guardian.sys, "platform", "darwin")
+    monkeypatch.setattr(guardian.os, "uname", lambda: SimpleNamespace(machine="arm64"))
+
+    class Child:
+        pid = 42
+        returncode = None
+
+    child = Child()
+    observer = SimpleNamespace(child=child, exited=lambda: True)
+
+    class Query:
+        def __init__(self):
+            self.snapshots = itertools.cycle(members)
+
+        def version(self):
+            return b"27.0.1"
+
+        def members(self, pgid):
+            assert pgid == child.pid
+            return next(self.snapshots)
+
+        def status(self, pid):
+            return (statuses or {}).get(pid, (pid, os.getpid(), child.pid, 5))
+
+    return child, observer, Query()
+
+
+def test_darwin_eperm_reaps_only_after_two_verified_zombie_group_snapshots(monkeypatch):
+    calls = []
+    child, observer, query = _darwin_group_case(monkeypatch, ((42, 43), (43, 42)),
+                                                {43: (43, 1, 42, 5)})
+
+    def wait(*, timeout):
+        calls.append(("reap", timeout))
+        child.returncode = 0
+        return 0
+
+    child.wait = wait
+    monkeypatch.setattr(guardian, "_DarwinGroupQuery", lambda: query)
+
+    def denied(pid, sig):
+        assert child.returncode is None
+        calls.append((pid, sig))
+        raise PermissionError(errno.EPERM, "must stay private")
+
+    monkeypatch.setattr(guardian.os, "killpg", denied)
+    phase = {"name": "termination"}
+    assert guardian._terminate(child, 0.01, observer, phase) == 0
+    assert calls == [(42, signal.SIGTERM), (42, signal.SIGKILL), ("reap", 0.01)]
+    assert phase["name"] == "termination_wait"
+
+
+@pytest.mark.parametrize("members,statuses", [
+    (((42, 43), (42, 43)), {43: (43, 1, 42, 2)}),  # exited leader, live descendant
+    (((42, 43), (42, 43)), {43: None}),  # denied/failed per-PID read
+    (((42,), (42, 43)), {43: (43, 1, 42, 5)}),  # concurrent membership change
+    (((42,) * 65, (42,)), None),  # potentially truncated
+    (((42, 42), (42,)), None),  # duplicate/malformed selection
+    (((43,), (43,)), {43: (43, 1, 42, 5)}),  # no retained leader
+    (((42,), (42,)), {42: (42, 999, 42, 5)}),  # wrong leader parent
+    (((42,), (42,)), {42: (42, 1, 42, 2)}),  # leader still live
+    (((42,), (42,)), {42: (42, 1, 99, 5)}),  # wrong group
+])
+def test_darwin_eperm_ambiguous_membership_never_reaps(monkeypatch, members, statuses):
+    child, observer, query = _darwin_group_case(monkeypatch, members, statuses)
+    monkeypatch.setattr(guardian, "_DarwinGroupQuery", lambda: query)
+    monkeypatch.setattr(guardian.os, "killpg", lambda *a: (_ for _ in ()).throw(
+        PermissionError(errno.EPERM, "private detail")))
+    child.wait = lambda **kwargs: pytest.fail("cannot reap before group cleanup")
+    phase = {"name": "termination"}
+    with pytest.raises(PermissionError):
+        guardian._terminate(child, 0.01, observer, phase)
+    assert phase["name"] == "termination_term_eperm"
+
+
+def test_darwin_second_signal_eperm_rechecks_and_rejects_live_descendant(monkeypatch):
+    child, observer, query = _darwin_group_case(monkeypatch, ((42, 43), (42, 43)),
+                                                {43: (43, 1, 42, 2)})
+    monkeypatch.setattr(guardian, "_DarwinGroupQuery", lambda: query)
+    signals = []
+
+    def signal_group(pid, sig):
+        signals.append(sig)
+        if sig == signal.SIGKILL:
+            raise PermissionError(errno.EPERM, "private detail")
+
+    monkeypatch.setattr(guardian.os, "killpg", signal_group)
+    child.wait = lambda **kwargs: pytest.fail("cannot reap with a live group member")
+    phase = {"name": "termination"}
+    with pytest.raises(PermissionError):
+        guardian._terminate(child, 0.01, observer, phase)
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+    assert phase["name"] == "termination_kill_eperm"
+
+
+def test_darwin_eperm_requires_owned_unreaped_exited_leader_and_supported_version(monkeypatch):
+    child, observer, query = _darwin_group_case(monkeypatch)
+    assert guardian._darwin_empty_owned_group(child, observer, query) is True
+    child.returncode = 0
+    assert guardian._darwin_empty_owned_group(child, observer, query) is False
+    child.returncode = None
+    observer.exited = lambda: False
+    assert guardian._darwin_empty_owned_group(child, observer, query) is False
+    observer.exited = lambda: True
+    observer.child = object()
+    assert guardian._darwin_empty_owned_group(child, observer, query) is False
+    observer.child = child
+    query.version = lambda: b"27.0.2"
+    assert guardian._darwin_empty_owned_group(child, observer, query) is False
+
+
+def test_darwin_libproc_fixed_buffer_rejects_zero_full_and_malformed_returns():
+    query = object.__new__(guardian._DarwinGroupQuery)
+    query.ctypes = ctypes
+
+    def result(length, estimate=400):
+        def listpids(kind, group, buffer, capacity):
+            assert (kind, group) == (2, 42)
+            if buffer is None:
+                assert capacity == 0
+                return estimate
+            assert capacity == 65 * 4
+            buffer[0] = 42
+            return length
+        query.listpids = listpids
+        return query.members(42)
+
+    assert result(0) is None  # libproc maps a syscall error to zero
+    assert result(65 * 4) is None  # XNU may silently truncate
+    assert result(4, estimate=64 * 4) is None  # hidden internal cap
+    assert result(3) is None
+    assert result(4) == (42,)
+
+    estimates = iter((400, 64 * 4))
+
+    def shrunk(kind, group, buffer, capacity):
+        if buffer is None:
+            return next(estimates)
+        buffer[0] = 42
+        return 4
+
+    query.listpids = shrunk
+    assert query.members(42) is None
+
+
+def test_darwin_libproc_zombie_info_requires_complete_struct():
+    query = object.__new__(guardian._DarwinGroupQuery)
+    query.ctypes = ctypes
+    query.pidinfo = lambda pid, flavor, arg, buffer, size: 0
+    assert query.status(42) is None
+
+    def exact_info(pid, flavor, arg, buffer, size):
+        assert (pid, flavor, arg, size) == (42, 13, 1, 64)
+        raw = struct.pack("=IIII16sIIIIIIII", 42, os.getpid(), 42, 5,
+                          b"worker", 0, 501, 20, 501, 20, 501, 20, 0)
+        ctypes.memmove(buffer, raw, len(raw))
+        return len(raw)
+
+    query.pidinfo = exact_info
+    assert query.status(42) == (42, os.getpid(), 42, 5)
+
+
+def test_linux_eperm_does_not_use_darwin_group_recovery(monkeypatch):
+    child, observer, query = _darwin_group_case(monkeypatch)
+    monkeypatch.setattr(guardian.sys, "platform", "linux")
+    monkeypatch.setattr(guardian, "_DarwinGroupQuery", lambda: pytest.fail("Linux query"))
+    assert guardian._darwin_empty_owned_group(child, observer, query) is False
 
 
 @pytest.mark.parametrize("failed_signal,expected_phase", [

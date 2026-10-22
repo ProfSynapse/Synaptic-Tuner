@@ -164,8 +164,27 @@ fixed classes expose no exception text or errno value. Darwin's XNU source can
 return EPERM when an existing group has no counted signalable members, while
 EPERM may also mean denied access to a live member. Neither a worker result nor
 an EPERM class proves the group is empty. Keep the leader unreaped until group
-cleanup, never treat EPERM as success, and preserve the consumed claim on any
-missing outcome. The source hypothesis does not establish r25's actual errno.
+cleanup and preserve the consumed claim on any missing outcome. The r27
+CPU-only probe subsequently classified SIGTERM `PermissionError`/`EPERM`,
+without a process outcome. It does not establish that the group was empty.
+For the reviewed Darwin arm64/macOS 27.0.1 candidate only, an owned guardian
+may recover from this exact EPERM when its kqueue observer confirms the still
+unreaped child exited and two bounded `libproc` `PROC_PGRP_ONLY` selections
+include the owned leader, are complete and identical, and every selected PID
+has a complete `PROC_PIDT_SHORTBSDINFO` record with the same group and zombie
+status. The leader record must identify this guardian as parent. A zero/full
+selection, denied or short PID record, changed membership, live descendant,
+unknown OS build, or any other uncertainty preserves EPERM and the claim.
+Each selection also brackets the fixed buffer with the kernel's no-buffer
+capacity estimate, because XNU can silently cap a short result at its own
+`nprocs + 20` allocation. No system process list is copied to userspace.
+The guardian signals the group again at SIGKILL, repeating proof if that also
+returns EPERM, and reaps the child only after the final signal/query. The
+system reads use pinned absolute `libproc.dylib` and `libSystem.B.dylib` paths
+and require `_ctypes`; a fresh runtime capture must include this newly loaded
+stdlib extension and library graph before any further ML qualification. This
+is a group-scoped observation for trusted workers, not proof about descendants
+which deliberately escaped the group or future OS builds.
 
 For a provider-free Darwin guardian check, use the private
 `examples/training_qualification/native_cpu_process.py` config-first
