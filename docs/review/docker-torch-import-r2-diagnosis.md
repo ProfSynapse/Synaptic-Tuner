@@ -820,15 +820,29 @@ This avoids the r22 proposal's unnecessary 9.3-GB model copy. The fresh
 artifact contents and read-only model bind remain a filesystem difference
 from r4; no historical r4 environment or module cache is claimed captured.
 
-This is the **review candidate only**, with no authority yet to launch. A
+The r26 admission stopped during read-only source preflight: the retained r4
+source lock names engine commit `4a8bb138672d60318479286797ffd75572407054`,
+while the then-pinned helper required the older r2 engine commit. Its exact
+source-lock and manifest hashes matched, and the trusted original closure
+verifier passed. No diagnostic output parent, claim or container was created;
+the model, Docker and GPU preflights were not reached. This was a helper
+source-binding mismatch, not evidence about the historical Torch failure.
+
+The r27 repair requires an independently supplied `--expected-engine-commit`
+for direct mode, checks that exact commit inside the authenticated source
+lock before Docker access, and repeats the check before container start.
+Other modes retain the pinned r2 default only when the option is absent.
+This is the **new review candidate only**, with no authority yet to launch. A
 clean pushed helper checkout and exact helper/verifier hashes must be reviewed
 and checked on WSL before any effect. The helper SHA-256 is
-`3153b65b6c9216dd4495d6e09dd6c57fece96e5d6bff395cd8b91a1c1df401a4`;
+`a8abfa1eb425460df1e6dbc39bfac2c3e6169ba45668e8e45f4a7dabc0cd67c9`;
 the trusted verifier remains
 `2304eeb00667954510c34cc4aacaa818532a301fbeabf04c2fb165d6cd1d70b5`.
-The focused local CPU suite passed 44 tests, including forced excessive-entry
-and mid-enumeration deadline rejection before file stat, hashing or Docker.
-Targeted Ruff and diff checks passed. The command below is unchanged from r23.
+The focused local CPU suite passed 47 tests, including r4 source admission,
+missing/wrong commit rejection before Docker, legacy r2 rejection of r4, and
+the r25 enumeration bounds. Targeted Ruff and diff checks passed.
+The command block below has SHA-256
+`3a3c345c558bc302e3c5cceead073f13b6c716c126ded490300b9f815a539f26`.
 The parent
 `/home/profsynapse/.local/share/synaptic-qualification/torch-import-direct-r23-20261022`
 must be fresh, private mode 0700, and its `direct-worker-gpu0-1` child absent.
@@ -847,6 +861,7 @@ python3 -I scripts/diagnose_docker_torch_import.py \
   --source-root /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-4a8b-20261020/attempt-r4/source/engine \
   --source-lock /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-4a8b-20261020/attempt-r4/material/source-lock.json \
   --expected-source-lock-sha256 f126c60f3ed9f6131c6de6dba7ac032016a1a538db57ccd5499783008e8466b6 \
+  --expected-engine-commit 4a8bb138672d60318479286797ffd75572407054 \
   --expected-manifest-sha256 3842689403abc5b42e28d58545b88616b81cd8fc738ee5557e97159df65d00ef \
   --expected-closure-digest 8465ff2b7cedb352337e7cedc5bb17cc169892c2eedae0b280569f4a0cde5002 \
   --worker-context --worker-direct --gpu-device 0 \

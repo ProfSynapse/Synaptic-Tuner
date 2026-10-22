@@ -50,6 +50,7 @@ _ROOT_ENV = {name: "SYNAPTIC_" + name.upper() + "_ROOT" for name in _R2_ROOTS}
 _ROOT_ENV["artifacts"] = "SYNAPTIC_ARTIFACT_ROOT"
 _DIRECT_STOP = b"raise SystemExit(42)\n"
 _DIRECT_TRAINER = "Trainers/sft/train_sft.py"
+_LEGACY_ENGINE_COMMIT = "0d515ae1ae235d0858802228ce4af8dba8fccd03"
 _INSPECT = "{{json .Id}}\n{{json .Name}}\n{{json .Image}}\n{{json .Config.Labels}}\n{{json .State.Status}}\n{{json .State.ExitCode}}"
 
 # This fixed program never formats an exception, inspects its attributes, or
@@ -612,12 +613,14 @@ def _append(output_dir: Path, event: dict[str, object]) -> None:
 
 
 def _source_identity(source_root: Path, source_lock: Path, expected_lock: str,
-                     expected_manifest: str, expected_closure: str) -> dict[str, str]:
+                     expected_manifest: str, expected_closure: str,
+                     expected_engine_commit: str) -> dict[str, str]:
     if (not source_root.is_absolute() or source_root.name != "engine"
             or source_root.is_symlink() or not source_root.is_dir()
             or not source_lock.is_absolute() or not re.fullmatch(r"[0-9a-f]{64}", expected_lock)
             or not re.fullmatch(r"[0-9a-f]{64}", expected_manifest)
-            or not re.fullmatch(r"[0-9a-f]{64}", expected_closure)):
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_closure)
+            or not re.fullmatch(r"[0-9a-f]{40}", expected_engine_commit)):
         raise ValueError("SOURCE_IDENTITY_INVALID")
     lock_raw = _read(source_lock, 128 * 1024)
     manifest = source_root.parent / "control/offline-sft-worker-v1.json"
@@ -628,7 +631,7 @@ def _source_identity(source_root: Path, source_lock: Path, expected_lock: str,
     lock = json.loads(lock_raw)
     if (lock.get("schema_version") != "synaptic-source-lock/v1"
             or lock.get("sources", {}).get("engine", {}).get("commit") !=
-            "0d515ae1ae235d0858802228ce4af8dba8fccd03"):
+            expected_engine_commit):
         raise ValueError("SOURCE_IDENTITY_INVALID")
     # This trusted, checked-in verifier hashes every mounted worker member.
     # It is imported from this checkout, never from the staged source.
@@ -645,7 +648,7 @@ def _source_identity(source_root: Path, source_lock: Path, expected_lock: str,
         raise ValueError("SOURCE_IDENTITY_INVALID") from None
     return {"source_lock_sha256": expected_lock, "manifest_sha256": expected_manifest,
             "closure_digest": expected_closure,
-            "engine_commit": "0d515ae1ae235d0858802228ce4af8dba8fccd03"}
+            "engine_commit": expected_engine_commit}
 
 
 def _trainer_prefix_boundary(raw: bytes) -> int:
@@ -1094,6 +1097,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
              daemon_id: str, output_dir: Path, expected_release_sha256: str,
              source_root: Path | None = None, source_lock: Path | None = None,
              expected_source_lock_sha256: str | None = None,
+             expected_engine_commit: str | None = None,
              expected_manifest_sha256: str | None = None,
              expected_closure_digest: str | None = None,
              gpu_device: str | None = None, worker_context: bool = False,
@@ -1113,6 +1117,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
                      expected_model_receipt_sha256)
     if (worker_entry and not worker_context) or (worker_direct and
             (worker_entry or not worker_context or gpu_device != "0" or
+             expected_engine_commit is None or
              any(value is None for value in direct_values))) or (
             not worker_direct and any(value is not None for value in direct_values)) or (
             (worker_context and (source_root is None or any(value is None for value in worker_values)))
@@ -1153,11 +1158,16 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     source_values = (source_lock, expected_source_lock_sha256,
                      expected_manifest_sha256, expected_closure_digest)
     if (source_root is None and any(value is not None for value in source_values)) or (
+            source_root is None and expected_engine_commit is not None) or (
             source_root is not None and any(value is None for value in source_values)):
         raise ValueError("SOURCE_INVALID")
+    bound_engine_commit = (expected_engine_commit if expected_engine_commit is not None
+                           else _LEGACY_ENGINE_COMMIT)
+    if source_root is not None and not re.fullmatch(r"[0-9a-f]{40}", bound_engine_commit):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
     source_identity = ({} if source_root is None else _source_identity(
         source_root, source_lock, expected_source_lock_sha256,
-        expected_manifest_sha256, expected_closure_digest))
+        expected_manifest_sha256, expected_closure_digest, bound_engine_commit))
     context_identity = ({} if not worker_context else _worker_context_identity(
         source_root, *worker_values, expected_closure_digest))
     if worker_entry or worker_direct:
@@ -1304,7 +1314,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     # Recheck the exact source bytes immediately before starting mounted code.
     if source_root is not None and _source_identity(source_root, source_lock,
             expected_source_lock_sha256, expected_manifest_sha256,
-            expected_closure_digest) != source_identity:
+            expected_closure_digest, bound_engine_commit) != source_identity:
         raise ValueError("SOURCE_IDENTITY_INVALID")
     if worker_context and _worker_context_identity(
             (mounted_source if worker_direct else source_root),
@@ -1460,6 +1470,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-root", type=Path)
     parser.add_argument("--source-lock", type=Path)
     parser.add_argument("--expected-source-lock-sha256")
+    parser.add_argument("--expected-engine-commit")
     parser.add_argument("--expected-manifest-sha256")
     parser.add_argument("--expected-closure-digest")
     parser.add_argument("--gpu-device")
@@ -1483,6 +1494,7 @@ def main(argv: list[str] | None = None) -> int:
                           expected_release_sha256=args.expected_release_sha256,
                           source_root=args.source_root, source_lock=args.source_lock,
                           expected_source_lock_sha256=args.expected_source_lock_sha256,
+                          expected_engine_commit=args.expected_engine_commit,
                           expected_manifest_sha256=args.expected_manifest_sha256,
                           expected_closure_digest=args.expected_closure_digest,
                           gpu_device=args.gpu_device, worker_context=args.worker_context,

@@ -505,7 +505,10 @@ verified `--expected-release-sha256`, `--daemon-id`, and a nonexistent private
 `--output-dir`. Guarded mode additionally requires `--source-root`,
 `--source-lock`, independently reviewed `--expected-source-lock-sha256`,
 `--expected-manifest-sha256`, and `--expected-closure-digest` from the retained
-attempt. It validates every staged worker member before executing mounted code;
+attempt. Direct-worker mode also requires `--expected-engine-commit` set to the
+independently reviewed engine gitlink from that source lock; legacy modes default
+to the pinned r2 commit when this option is absent. It validates every staged
+worker member before executing mounted code;
 the result records those commitments. Run from the reviewed checkout so its
 trusted closure verifier is the one checked in with the helper.
 

@@ -22,6 +22,7 @@ ROOT = Path(__file__).parents[2]
 DIRECT_TRAINER = "a7a8585e2a4607c7c0b49614260fda2814f29887a3b61e4b8b5df6f71f52639a"
 DIRECT_MANIFEST = "c6c90c366f3b4043dc0cd651ae9ba130c05d76c370ac1570fab918dea25c31d1"
 DIRECT_CLOSURE = "eb1b679c294462603f792cf2c66d8c0080443309b25e5114df654fb88b71ccce"
+R4_ENGINE_COMMIT = "4a8bb138672d60318479286797ffd75572407054"
 
 
 def _release(root: Path) -> tuple[Path, str]:
@@ -155,6 +156,12 @@ def _stage_worker_context(root: Path):
 
 def _stage_direct_inputs(root: Path):
     flags, workload_path = _stage_worker_context(root)
+    lock = flags["source_lock"]
+    source_lock = json.loads(lock.read_bytes())
+    source_lock["sources"]["engine"]["commit"] = R4_ENGINE_COMMIT
+    lock.write_text(json.dumps(source_lock))
+    flags["expected_source_lock_sha256"] = hashlib.sha256(lock.read_bytes()).hexdigest()
+    flags["expected_engine_commit"] = R4_ENGINE_COMMIT
     workload = json.loads(workload_path.read_bytes())
     content = b'{"text":"stub"}\n'
     digest = hashlib.sha256(content).hexdigest()
@@ -341,6 +348,14 @@ def test_direct_derivative_drift_after_create_never_starts(tmp_path: Path,
 def test_direct_fake_docker_scope_and_readonly_nested_mounts(tmp_path: Path,
                                                              monkeypatch) -> None:
     flags, _workload, snapshot, prepared = _stage_direct_inputs(tmp_path)
+    identity = diagnostic._source_identity(flags["source_root"], flags["source_lock"],
+        flags["expected_source_lock_sha256"], flags["expected_manifest_sha256"],
+        flags["expected_closure_digest"], R4_ENGINE_COMMIT)
+    assert identity["engine_commit"] == R4_ENGINE_COMMIT
+    assert diagnostic._worker_context_identity(flags["source_root"],
+        flags["expected_workload_sha256"], flags["expected_runtime_sha256"],
+        flags["expected_trainer_sha256"], flags["expected_closure_digest"])[
+            "workload_sha256"] == flags["expected_workload_sha256"]
     docker, config, state = _fake_docker(tmp_path)
     original_run = diagnostic._run
     creates = []
@@ -363,6 +378,7 @@ def test_direct_fake_docker_scope_and_readonly_nested_mounts(tmp_path: Path,
     monkeypatch.setattr(diagnostic, "_inspect_owned", inspect)
     report = _call(tmp_path, docker, config, **flags)
     assert report["scope"] == "worker_direct" and report["stage"] == "UNSLOTH_IMPORT"
+    assert report["source_identity"]["engine_commit"] == R4_ENGINE_COMMIT
     assert report["direct_identity"]["manifest_sha256"] == DIRECT_MANIFEST
     assert len(creates) == 1
     command = creates[0]
@@ -374,6 +390,39 @@ def test_direct_fake_docker_scope_and_readonly_nested_mounts(tmp_path: Path,
     assert any(f"src={prepared}," in value and value.endswith(",readonly") for value in mounts)
     assert any("derived-source,dst=/source,readonly" in value for value in mounts)
     assert (tmp_path / "out/claim.json").exists()
+
+
+@pytest.mark.parametrize("supplied", [None, "0d515ae1ae235d0858802228ce4af8dba8fccd03"])
+def test_direct_r4_source_commit_requires_correct_explicit_pin_before_docker(
+        tmp_path: Path, monkeypatch, supplied: str | None) -> None:
+    flags, _workload, _snapshot, _prepared = _stage_direct_inputs(tmp_path)
+    if supplied is None:
+        del flags["expected_engine_commit"]
+    else:
+        flags["expected_engine_commit"] = supplied
+    docker, config, state = _fake_docker(tmp_path)
+    monkeypatch.setattr(diagnostic, "_run",
+                        lambda *_args, **_kwargs: pytest.fail("Docker touched"))
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, **flags)
+    assert json.loads(state.read_text())["status"] == "absent"
+    assert not (tmp_path / "out").exists()
+
+
+def test_legacy_guarded_mode_keeps_r2_commit_default(tmp_path: Path, monkeypatch) -> None:
+    flags, _document, _manifest = _stage_source(tmp_path)
+    lock = flags["source_lock"]
+    source_lock = json.loads(lock.read_bytes())
+    source_lock["sources"]["engine"]["commit"] = R4_ENGINE_COMMIT
+    lock.write_text(json.dumps(source_lock))
+    flags["expected_source_lock_sha256"] = hashlib.sha256(lock.read_bytes()).hexdigest()
+    docker, config, state = _fake_docker(tmp_path)
+    monkeypatch.setattr(diagnostic, "_run",
+                        lambda *_args, **_kwargs: pytest.fail("Docker touched"))
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, **flags)
+    assert json.loads(state.read_text())["status"] == "absent"
+    assert not (tmp_path / "out").exists()
 
 
 @pytest.mark.parametrize("expire_during_enumeration", [False, True])
@@ -973,7 +1022,8 @@ def test_wrong_self_consistent_source_rejected_before_docker(tmp_path: Path, mon
     engine = flags["source_root"]
     assert diagnostic._source_identity(engine, flags["source_lock"],
         flags["expected_source_lock_sha256"], flags["expected_manifest_sha256"],
-        flags["expected_closure_digest"])["closure_digest"] == flags["expected_closure_digest"]
+        flags["expected_closure_digest"], diagnostic._LEGACY_ENGINE_COMMIT)[
+            "closure_digest"] == flags["expected_closure_digest"]
     # Alter a staged member and rewrite all its internal commitments coherently.
     target = engine / "shared/env_bootstrap.py"
     target.write_bytes(target.read_bytes() + b"\n# alternate closure\n")
