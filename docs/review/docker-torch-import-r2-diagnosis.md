@@ -1023,6 +1023,16 @@ all fields present in order and `Tmpfs` represented as null; its SHA-256 was
 Every original context predicate remains. The failure is in diagnostic
 inspection, with no evidence about r4/r6's historical Torch cause.
 
+After pushing helper `ef143a16a5ec45c704cf949ca3acc6d7b4e0d5fd1d1ada84f9fba61e3b594139`,
+a clean remote checkout ran the actual `_require_public_parent_scope` read-only
+against that same created r34 container. The complete predicate passed with
+observed context projection SHA-256
+`eea821b245b5d2778f5afc4eb816ace717e552994b6d3ed0681105d10bf6c10b`;
+authenticated ownership and `created` state matched before and after. No
+container start, exec, stop or removal occurred. This check authenticates the
+retained r34 context only; the proposed r35 context still requires fresh
+pre-start inspection.
+
 The following command is a **fresh proposal for separate root review and
 one-use admission**, not execution authority. Its parent
 `/home/profsynapse/.local/share/synaptic-qualification/torch-import-public-parent-r35-20261022`
