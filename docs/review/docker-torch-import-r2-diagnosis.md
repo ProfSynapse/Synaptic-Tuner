@@ -886,3 +886,111 @@ closed `TRAINER/IMPORT/TORCH_IMPORT` label or the planned
 `TRAINER/SYSTEM_EXIT/UNSLOTH_IMPORT` stop; anything else is inconclusive.
 Neither result identifies r2 or r4's original import cause by itself. There
 has been no r23 container, GPU, ML import or training effect.
+
+### r32 public-parent import boundary proposal; no live authority
+
+The retained r6 public container exited 23 with the closed
+`TRAINER/IMPORT/TORCH_IMPORT` worker label. The r28 direct-worker derivative
+reached its fixed `UNSLOTH_IMPORT` stop. Read-only Docker inspection found the
+same image C, GPU 0 request, 2 CPUs, 16 GiB, root user, default capabilities,
+writable root, network none, and no explicit ulimit in both containers. The
+r6 container started `Trainers/sft/runtime_v1.py` as the public parent with
+canonical file transport; r28 started a diagnostic `-I -c` parent. The
+authenticated trainer prefix through the `UNSLOTH_IMPORT` marker is byte
+identical, SHA-256
+`bf9c8ed1b50c836bb14b2cd660cea8b95599352b650e236c34609a5386fb75fd`.
+The r6 Docker parent environment matches its source reconstruction (19
+configured keys plus the pinned image environment); the historical isolated
+child environment and process rlimits were not captured. `IMPORT` includes
+`ModuleNotFoundError`, so no loader cause is established. The private r31
+Docker and source projections have SHA-256
+`c402cce8e110c3a5d197b51d6691c16a79e2d4b7cd780442b201db626e351593`
+and `fe55f49c91f66268ca2a07d2e23eddbb3c5c6817e1b42159ce4ed3b8b5151435`.
+
+The existing helper's `--public-parent` selection adds the real public
+`runtime_v1.py` file entry and complete canonical workload-file transport to
+`--worker-context --worker-direct`. It authenticates r6's **original** source
+lock, engine and project commits, full 68-member closure, workload, runtime,
+trainer, pinned model receipt and bounded snapshot inventory. It separately
+stages the reviewed derivative trainer and complete derived closure. The
+derivative preserves the original trainer through the unique
+`UNSLOTH_IMPORT` marker and contains only `raise SystemExit(42)` afterward.
+The normal runtime parent performs its usual workload admission and prepared
+input verification, then starts the normal `-I` worker subprocess with its
+normal sealed descriptor. No trainer dataset processing, Unsloth import,
+model load, optimizer or training code exists after that stop in the staged
+trainer. The parent has no diagnostic wrapper, trace or import hook. The
+original production runtime and source policy are unchanged.
+
+The container command SHA-256 is
+`d83e9718a4ffb75998b2d0b69d8da56016a4cea7939f6eba990ab416afe0e61b`,
+the same canonical command digest observed in r6. The derivative parent
+environment digest is
+`900a0d6ca23915a506494fa3ad8e0af767fe6fcebb1cd155f5c500c8bba5041c`;
+relative to r6's reconstructed public parent values, only the independently
+reviewed derivative closure digest changes. These are planned values. Before
+start the helper inspects the actual new Docker Config/HostConfig and bind
+mounts, records a closed projection hash, and requires it again at terminal.
+It reads the fixed worker label through held nonredirected directory FDs;
+raw trainer output is neither printed nor accepted. The normal parent must
+exit 23 with only its generic fixed marker. Only
+`TRAINER/IMPORT/TORCH_IMPORT` or
+`TRAINER/SYSTEM_EXIT/UNSLOTH_IMPORT` yields a classified result. Either
+outcome remains a narrow diagnostic, not proof of r6's historical cause.
+
+This exact command is **proposed for separate root review and one-use
+admission only**. Its output parent must be freshly created as private mode
+0700 and its child must be absent. Verify the clean pushed helper/ref and
+trusted verifier, exact daemon/image/release, r6 source and model bytes,
+private ancestry with no writer, original empty project root, and idle GPU 0
+immediately before one start. A collision or uncertain create/start consumes
+the name; preserve the claim and container, with no alternate name or retry.
+The command block below has SHA-256
+`dfcca094f29df2e858474d5c90eaa236b910da72bc3b1c5327e3b8c34afb5ef5`.
+The helper SHA-256 is
+`c8e89947a98fbf2516ba67f378a6caf16fdaa09ea9171d3d4afafcbe78c63c37`;
+the unchanged trusted worker verifier is
+`2304eeb00667954510c34cc4aacaa818532a301fbeabf04c2fb165d6cd1d70b5`.
+
+```sh
+timeout -k 30s 900s python3 -I scripts/diagnose_docker_torch_import.py \
+  --docker /usr/bin/docker \
+  --docker-config /home/profsynapse/.local/share/synaptic-qualification/docker-sft-stable-image-c/docker-config \
+  --release /home/profsynapse/.local/share/synaptic-qualification/docker-sft-stable-image-c/evidence/runtime-release.json \
+  --expected-release-sha256 5f65824ceb5e250a58314da0233b9c07f1d63f1b0a39892d9b36af694938bfe6 \
+  --daemon-id 24805003-b125-469b-8080-9da4daacd364 \
+  --source-root /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-ba228-20261022/attempt-r6/source/engine \
+  --source-lock /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-ba228-20261022/attempt-r6/material/source-lock.json \
+  --expected-source-lock-sha256 47173f8571738b2e756c3ae0c3df4fbc16b5287a5e6ca804fd5988538c0c0d26 \
+  --expected-engine-commit ba228d6c0e8859288b246c4b140774fa29c567a3 \
+  --expected-project-commit 9f7799659565481f05d3bc1ecfa8174c87cf1508 \
+  --expected-manifest-sha256 3842689403abc5b42e28d58545b88616b81cd8fc738ee5557e97159df65d00ef \
+  --expected-closure-digest 8465ff2b7cedb352337e7cedc5bb17cc169892c2eedae0b280569f4a0cde5002 \
+  --worker-context --worker-direct --public-parent --gpu-device 0 \
+  --expected-workload-sha256 18009cf4a68cdcd0ee6251632117852eca35d1afb2b94d4834bb6976e6dd6913 \
+  --expected-runtime-sha256 460121aaee3eb83764f67d9307cfb57a3b25c117611d987577b9631b6956a1b3 \
+  --expected-trainer-sha256 75c2ab22fbc5dd80b8ddd5e6d0da816d1451cda0cd620c34717336a39a8a7644 \
+  --expected-direct-trainer-sha256 a7a8585e2a4607c7c0b49614260fda2814f29887a3b61e4b8b5df6f71f52639a \
+  --expected-direct-manifest-sha256 c6c90c366f3b4043dc0cd651ae9ba130c05d76c370ac1570fab918dea25c31d1 \
+  --expected-direct-closure-digest eb1b679c294462603f792cf2c66d8c0080443309b25e5114df654fb88b71ccce \
+  --expected-parent-environment-sha256 900a0d6ca23915a506494fa3ad8e0af767fe6fcebb1cd155f5c500c8bba5041c \
+  --expected-parent-command-sha256 d83e9718a4ffb75998b2d0b69d8da56016a4cea7939f6eba990ab416afe0e61b \
+  --artifact-root /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-ba228-20261022/attempt-r6/artifacts \
+  --model-receipt /home/profsynapse/.local/share/synaptic-qualification/docker-public-plan-ba228-20261022/attempt-r6/model/model-preparation.json \
+  --expected-model-receipt-sha256 0c57668e67f5fbd4245c7dc66cb9b942ec8f2d01143fbd1a813cd49f60997920 \
+  --output-dir /home/profsynapse/.local/share/synaptic-qualification/torch-import-public-parent-r32-20261022/public-parent-gpu0-1
+```
+
+The helper retains its 8-KiB combined Docker CLI output cap, 1-MiB rotated
+Docker log cap, 120-second container execution deadline plus finite owned
+stop and independent terminal inspection, one create/start claim, and no
+container removal. The proposed caller has a 900-second limit and a further
+30-second kill tail; caller expiry is an uncertain consumed claim, not
+permission to retry. The full model inventory is checked through held FDs
+within 64 files, 256 directories, 16 GiB and 300 seconds per check. The
+worker label read retains at most 257 bytes. The parent's exclusive native
+trainer log files use the original writable artifact behavior; file
+production is bounded by the container deadline and resources, while only
+fixed closed bytes are admitted as evidence. The diagnostic differs from r6
+in its derivative closure, fresh artifact root and readonly nested model/data
+mounts. No live probe has run under this proposal.

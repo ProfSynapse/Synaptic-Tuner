@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import importlib.util
 import json
 import multiprocessing
 import os
@@ -488,6 +489,74 @@ print("TWO_GENERATIONS_PASS")
     )
     assert completed.returncode == 0, completed.stderr.decode()
     assert completed.stdout.strip() == b"TWO_GENERATIONS_PASS"
+
+
+@pytest.mark.parametrize("stub_torch", [False, True])
+def test_normal_parent_admits_independently_bound_fixed_stop_derivative(tmp_path,
+                                                                       stub_torch):
+    from scripts import diagnose_docker_torch_import as diagnostic
+
+    if not stub_torch and importlib.util.find_spec("torch") is not None:
+        pytest.skip("CPU fixture requires an interpreter without Torch")
+
+    payload = (b'{"format":"raw_text","schema_version":"syntunia-sft-row/v1",'
+               b'"split":"train","text":"fixture"}\n')
+    workload, environment, engine_file, roots, _ = _fixture(
+        tmp_path, raw_sft_overrides={}, prepared_payload=payload
+    )
+    engine = engine_file.parents[2]
+    trainer = engine / "Trainers/sft/train_sft.py"
+    original = trainer.read_bytes()
+    if stub_torch:
+        marker = b'_mark_packaged_runtime_phase("TORCH_IMPORT")\n'
+        assert original.count(marker) == 1
+        original = original.replace(marker, b"import types\nsys.modules['torch'] = types.ModuleType('torch')\n" + marker)
+    boundary = diagnostic._trainer_prefix_boundary(original)
+    derived = b"".join(original.splitlines(keepends=True)[:boundary + 1]) + diagnostic._DIRECT_STOP
+    trainer.write_bytes(derived)
+    manifest = Path(environment["SYNAPTIC_WORKER_CLOSURE_MANIFEST"])
+    document = json.loads(manifest.read_bytes())
+    member = next(item for item in document["members"] if item["path"] == "Trainers/sft/train_sft.py")
+    member["sha256"] = hashlib.sha256(derived).hexdigest()
+    member["size_bytes"] = len(derived)
+    document["payload_bytes"] = sum(item["size_bytes"] for item in document["members"])
+    document["closure_digest"] = offline_sft_worker.closure_digest(document)
+    manifest.write_bytes(json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+    environment["SYNAPTIC_WORKER_CLOSURE_DIGEST"] = document["closure_digest"]
+    admitted, bound_roots = runtime_v1.decode_and_validate_workload(
+        workload.canonical_bytes, environment, engine_file=engine_file
+    )
+    invocation = runtime_v1.build_trainer_invocation(admitted, bound_roots, environment)
+    assert invocation.argv[1:3] == ("-I", str(engine / "tuner/runtime/offline_sft_worker.py"))
+    assert invocation.environment[0][0] != "PYTHONPATH"
+    assert dict(invocation.environment)["SYNAPTIC_WORKER_CLOSURE_DIGEST"] == document["closure_digest"]
+    assert len(invocation.retained_fds) == 1
+    runtime_v1._close_retained_fds(invocation.retained_fds)
+
+    control = tmp_path / "transport-control"
+    control.mkdir()
+    source = control / "workload.json"
+    source.write_bytes(workload.canonical_bytes)
+    completed = subprocess.run(
+        [sys.executable, str(engine_file),
+         "--canonical-workload-file", str(source),
+         "--canonical-workload-control-root", str(control),
+         "--canonical-workload-byte-count", str(len(workload.canonical_bytes)),
+         "--canonical-workload-sha256", hashlib.sha256(workload.canonical_bytes).hexdigest(),
+         "--canonical-workload-fingerprint", workload.fingerprint],
+        cwd=roots["tmp"], env=environment, stdin=subprocess.DEVNULL,
+        capture_output=True, timeout=20,
+    )
+    assert completed.returncode == 23
+    assert completed.stdout == b""
+    assert completed.stderr == b"SFT_RUNTIME_V1_REJECTED\n"
+    expected = (b"OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=SYSTEM_EXIT "
+                b"milestone=UNSLOTH_IMPORT\n" if stub_torch else
+                b"OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=IMPORT "
+                b"milestone=TORCH_IMPORT\n")
+    assert (roots["tracking"] / "trainer.stderr.log").read_bytes() == expected
+    assert b"from unsloth import" not in derived
+    assert b"TRAIN_CALL" not in derived
 
 
 class FakeRunner:

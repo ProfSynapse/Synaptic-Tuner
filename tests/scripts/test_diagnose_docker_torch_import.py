@@ -23,6 +23,8 @@ DIRECT_TRAINER = "a7a8585e2a4607c7c0b49614260fda2814f29887a3b61e4b8b5df6f71f5263
 DIRECT_MANIFEST = "c6c90c366f3b4043dc0cd651ae9ba130c05d76c370ac1570fab918dea25c31d1"
 DIRECT_CLOSURE = "eb1b679c294462603f792cf2c66d8c0080443309b25e5114df654fb88b71ccce"
 R4_ENGINE_COMMIT = "4a8bb138672d60318479286797ffd75572407054"
+R6_ENGINE_COMMIT = "ba228d6c0e8859288b246c4b140774fa29c567a3"
+R6_PROJECT_COMMIT = "9f7799659565481f05d3bc1ecfa8174c87cf1508"
 
 
 def _release(root: Path) -> tuple[Path, str]:
@@ -190,6 +192,186 @@ def _stage_direct_inputs(root: Path):
         "artifact_root": artifact, "model_receipt": receipt,
         "expected_model_receipt_sha256": hashlib.sha256(receipt.read_bytes()).hexdigest()})
     return flags, workload_path, snapshot, prepared
+
+
+def _stage_public_parent_inputs(root: Path):
+    flags, workload_path, snapshot, prepared = _stage_direct_inputs(root)
+    project = flags["source_root"].parent / "project"
+    project.mkdir()
+    lock = flags["source_lock"]
+    lock_document = json.loads(lock.read_bytes())
+    lock_document["sources"]["engine"]["commit"] = R6_ENGINE_COMMIT
+    lock_document["sources"]["project"] = {"commit": R6_PROJECT_COMMIT}
+    lock.write_text(json.dumps(lock_document, sort_keys=True, separators=(",", ":")))
+    flags["expected_source_lock_sha256"] = hashlib.sha256(lock.read_bytes()).hexdigest()
+    flags["expected_engine_commit"] = R6_ENGINE_COMMIT
+    workload = json.loads(workload_path.read_bytes())
+    workload["entrypoint"] = "Trainers/sft/runtime_v1.py"
+    workload["execution_source"]["sources"] = {
+        "engine": {"commit": R6_ENGINE_COMMIT}, "project": {"commit": R6_PROJECT_COMMIT}}
+    workload_raw = json.dumps(workload, sort_keys=True, separators=(",", ":")).encode()
+    workload_path.write_bytes(workload_raw)
+    workload_sha = hashlib.sha256(workload_raw).hexdigest()
+    fingerprint = hashlib.sha256(b"synaptic-training-workload/v1\0" + workload_raw).hexdigest()
+    environment = diagnostic._context_environment(workload_raw, DIRECT_CLOSURE)
+    command = ("/source/engine/Trainers/sft/runtime_v1.py",
+               "--canonical-workload-file", "/source/control/workload.json",
+               "--canonical-workload-control-root", "/source/control",
+               "--canonical-workload-byte-count", str(len(workload_raw)),
+               "--canonical-workload-sha256", workload_sha,
+               "--canonical-workload-fingerprint", fingerprint)
+    flags.update({"expected_workload_sha256": workload_sha, "public_parent": True,
+                  "expected_project_commit": R6_PROJECT_COMMIT,
+                  "expected_parent_environment_sha256": hashlib.sha256(json.dumps(
+                      environment, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+                  "expected_parent_command_sha256": hashlib.sha256(json.dumps(
+                      command, separators=(",", ":")).encode()).hexdigest()})
+    return flags, workload_path, snapshot, prepared, command
+
+
+def test_public_parent_command_and_closed_terminal_use_real_entry(tmp_path: Path,
+                                                                  monkeypatch) -> None:
+    flags, _workload, snapshot, prepared, expected_command = _stage_public_parent_inputs(tmp_path)
+    docker, config, _state_path = _fake_docker(tmp_path)
+    original_run = diagnostic._run
+    creates = []
+
+    def run(authority, args, **kwargs):
+        if args[:2] == ("image", "inspect") and "Config.Env" in args[3]:
+            return subprocess.CompletedProcess(args, 0, b"[]\n", b"")
+        if args[:2] == ("container", "create"):
+            creates.append(args)
+        if args[:2] == ("container", "inspect") and "Config.Entrypoint" in args[3]:
+            created = creates[0]
+            mounts = []
+            for index, token in enumerate(created[:-1]):
+                if token == "--mount":
+                    parts = dict(part.split("=", 1) if "=" in part else (part, "")
+                                 for part in created[index + 1].split(","))
+                    mounts.append({"Type": "bind", "Source": parts["src"],
+                                   "Destination": parts["dst"], "RW": "readonly" not in parts})
+            env = [created[index + 1] for index, token in enumerate(created[:-1])
+                   if token == "--env"]
+            values = ([created[created.index("--entrypoint") + 1]], list(expected_command),
+                      "root", "/workspace", env, "none", 16 * 1024**3, 2 * 10**9,
+                      False, False, None, None, None, None, [], "runc",
+                      {"Type": "json-file", "Config": {"max-size": "1m", "max-file": "1"}},
+                      None, 64 * 1024**2, [], [{"Driver": "", "Count": 0,
+                          "DeviceIDs": ["0"], "Capabilities": [["gpu"]], "Options": {}}],
+                      "private", "",
+                      mounts)
+            return subprocess.CompletedProcess(args, 0,
+                ("\n".join(json.dumps(value) for value in values) + "\n").encode(), b"")
+        if args[:2] == ("container", "start"):
+            tracking = tmp_path / "out/artifacts/run/tracking/trainer.stderr.log"
+            tracking.write_bytes(
+                b"OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=SYSTEM_EXIT "
+                b"milestone=UNSLOTH_IMPORT\n")
+        if args[:2] == ("container", "logs"):
+            return subprocess.CompletedProcess(args, 0, b"", b"SFT_RUNTIME_V1_REJECTED\n")
+        return original_run(authority, args, **kwargs)
+
+    def inspect(_authority, _identifier, **_kwargs):
+        status = json.loads((tmp_path / "state.json").read_bytes())["status"]
+        return ("created", 0) if status == "created" else ("exited", 23)
+
+    monkeypatch.setattr(diagnostic, "_run", run)
+    monkeypatch.setattr(diagnostic, "_inspect_owned", inspect)
+    report = _call(tmp_path, docker, config, **flags)
+    assert report["scope"] == "public_parent"
+    assert (report["category"], report["stage"]) == ("PASS", "UNSLOTH_IMPORT")
+    assert report["training_executed"] is False
+    assert len(creates) == 1
+    command = creates[0]
+    assert command[command.index(IMAGE) + 1:] == expected_command
+    assert command[command.index("--entrypoint") + 1] == "/usr/bin/python3"
+    assert "--workdir=/workspace" in command and "-c" not in command
+    assert "--network=none" in command and "--memory=16g" in command
+    mounts = [command[i + 1] for i, value in enumerate(command[:-1]) if value == "--mount"]
+    assert any(f"src={snapshot}," in value and value.endswith(",readonly") for value in mounts)
+    assert any(f"src={prepared}," in value and value.endswith(",readonly") for value in mounts)
+    assert report["parent_identity"]["project_commit"] == R6_PROJECT_COMMIT
+
+
+@pytest.mark.parametrize("drift", ["project", "workload", "environment", "command"])
+def test_public_parent_drift_rejects_before_docker_or_claim(tmp_path: Path,
+                                                            monkeypatch, drift: str) -> None:
+    flags, workload, _snapshot, _prepared, _command = _stage_public_parent_inputs(tmp_path)
+    docker, config, state = _fake_docker(tmp_path)
+    if drift == "project":
+        flags["expected_project_commit"] = "0" * 40
+    elif drift == "workload":
+        workload.write_bytes(workload.read_bytes() + b" ")
+    elif drift == "environment":
+        flags["expected_parent_environment_sha256"] = "0" * 64
+    else:
+        flags["expected_parent_command_sha256"] = "0" * 64
+    monkeypatch.setattr(diagnostic, "_run", lambda *_args, **_kwargs:
+                        pytest.fail("Docker touched"))
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, **flags)
+    assert json.loads(state.read_text())["status"] == "absent"
+    assert not (tmp_path / "out").exists()
+
+
+def test_public_parent_project_drift_after_create_never_starts(tmp_path: Path,
+                                                               monkeypatch) -> None:
+    flags, _workload, _snapshot, _prepared, _command = _stage_public_parent_inputs(tmp_path)
+    docker, config, state = _fake_docker(tmp_path)
+    original_run = diagnostic._run
+    calls = []
+
+    def run(authority, args, **kwargs):
+        calls.append(args[:2])
+        if args[:2] == ("image", "inspect") and "Config.Env" in args[3]:
+            return subprocess.CompletedProcess(args, 0, b"[]\n", b"")
+        result = original_run(authority, args, **kwargs)
+        if args[:2] == ("container", "create"):
+            (flags["source_root"].parent / "project" / "unexpected").write_bytes(b"changed")
+        return result
+
+    monkeypatch.setattr(diagnostic, "_run", run)
+    monkeypatch.setattr(diagnostic, "_require_public_parent_scope",
+                        lambda *_args, **_kwargs: "a" * 64)
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, **flags)
+    assert json.loads(state.read_text())["status"] == "created"
+    assert ("container", "create") in calls
+    assert ("container", "start") not in calls
+    assert (tmp_path / "out/claim.json").exists()
+
+
+def test_public_parent_label_read_rejects_parent_redirect(tmp_path: Path) -> None:
+    root = tmp_path / "artifact"
+    tracking = root / "run/tracking"
+    tracking.mkdir(parents=True)
+    label = b"OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=IMPORT milestone=TORCH_IMPORT\n"
+    (tracking / "trainer.stderr.log").write_bytes(label)
+    assert diagnostic._read_closed_worker_label(root) == label
+    tracking.rename(root / "run/retained-tracking")
+    tracking.symlink_to(root / "run/retained-tracking", target_is_directory=True)
+    with pytest.raises(ValueError, match="CHILD_OUTPUT_INVALID"):
+        diagnostic._read_closed_worker_label(root)
+
+
+def test_public_parent_uncertain_create_consumes_claim(tmp_path: Path, monkeypatch) -> None:
+    flags, _workload, _snapshot, _prepared, _command = _stage_public_parent_inputs(tmp_path)
+    docker, config, _state_path = _fake_docker(tmp_path)
+    original_run = diagnostic._run
+
+    def run(authority, args, **kwargs):
+        if args[:2] == ("image", "inspect") and "Config.Env" in args[3]:
+            return subprocess.CompletedProcess(args, 0, b"[]\n", b"")
+        if args[:2] == ("container", "create"):
+            raise TimeoutError()
+        return original_run(authority, args, **kwargs)
+
+    monkeypatch.setattr(diagnostic, "_run", run)
+    with pytest.raises(ValueError, match="CREATE_UNCERTAIN"):
+        _call(tmp_path, docker, config, **flags)
+    assert (tmp_path / "out/claim.json").exists()
+    with pytest.raises(ValueError, match="OUTPUT_INVALID"):
+        _call(tmp_path, docker, config, **flags)
 
 
 def test_direct_derivative_keeps_exact_prefix_and_verifies_closure(tmp_path: Path) -> None:

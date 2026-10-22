@@ -584,6 +584,23 @@ attempt. Review and admit a fresh one-use command before any live execution;
 do not infer the historical failure cause from either result. See the r12
 proposal in the diagnosis note.
 
+`--worker-context --worker-direct --public-parent` keeps the direct worker's
+independently reviewed derivative trainer and fixed pre-Unsloth stop, but
+starts the checked-in `runtime_v1.py` parent using its canonical workload-file
+transport. It requires explicit expected engine and project commits, original
+source/manifest/closure/runtime/trainer/workload/model receipt pins, derivative
+trainer/manifest/closure pins, and parent environment/command digests. The
+normal parent authenticates the derivative closure and prepared input before
+starting its ordinary isolated worker; the diagnostic helper does not alter
+the production runtime or worker start method. It checks the actual new Docker
+parent configuration and mounts before start and at terminal, and accepts
+only the parent's generic fixed failure marker plus the worker's fixed closed
+`TORCH_IMPORT` import or `UNSLOTH_IMPORT` stop label. It retains the same owned
+claim, finite deadline, bounded CLI output, model inventory and cleanup
+rules. No command in a diagnosis note is live authority without separate
+one-use review; successful import cannot identify the cause of an earlier
+failed public run. See the r32 proposal in the diagnosis note.
+
 After an intentional worker source change, check and refresh existing
 manifests with the checked-in maintainers in dependency order:
 `regenerate_offline_sft_worker_closure.py`,

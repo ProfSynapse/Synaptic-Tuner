@@ -534,6 +534,36 @@ def _read(path: Path, maximum: int) -> bytes:
     return raw
 
 
+def _read_closed_worker_label(artifact_root: Path) -> bytes:
+    """Read the terminal worker label through held, non-redirected directory FDs."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    opened = []
+    try:
+        descriptor = os.open(artifact_root, flags)
+        opened.append(descriptor)
+        for name in ("run", "tracking"):
+            descriptor = os.open(name, flags, dir_fd=descriptor)
+            opened.append(descriptor)
+        leaf = os.open("trainer.stderr.log", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                       dir_fd=descriptor)
+        opened.append(leaf)
+        before = os.fstat(leaf)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 256:
+            raise ValueError("CHILD_OUTPUT_INVALID")
+        raw = os.read(leaf, 257)
+        after = os.fstat(leaf)
+        if (len(raw) > 256 or (before.st_dev, before.st_ino, before.st_size,
+                                before.st_mtime_ns) !=
+            (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)):
+            raise ValueError("CHILD_OUTPUT_INVALID")
+        return raw
+    except (OSError, ValueError):
+        raise ValueError("CHILD_OUTPUT_INVALID") from None
+    finally:
+        for descriptor in reversed(opened):
+            os.close(descriptor)
+
+
 def _identity(path: Path):
     value = path.stat()
     return value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns
@@ -721,21 +751,7 @@ def _worker_context_identity(source_root: Path, expected_workload: str,
                    for part in ref.split("/"))
             or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", revision)):
         raise ValueError("SOURCE_IDENTITY_INVALID")
-    child_env = dict(planned)
-    child_env.pop("PYTHONPATH")
-    child_env.update({"SYNAPTIC_WORKER_CLOSURE_MANIFEST":
-                      "/source/control/offline-sft-worker-v1.json"})
-    child_env["SYNAPTIC_WORKER_CLOSURE_DIGEST"] = expected_closure
-    child_env.update({_ROOT_ENV[name]: value for name, value in _R2_ROOTS.items()})
-    child_env.update({"SYNAPTIC_WORKLOAD_FINGERPRINT": hashlib.sha256(
-        b"synaptic-training-workload/v1\0" + workload_raw).hexdigest(),
-        "PYTHONNOUSERSITE": "1", "PYTHONSAFEPATH": "1",
-        "HF_HOME": _R2_ROOTS["cache"] + "/huggingface",
-        "TRANSFORMERS_CACHE": _R2_ROOTS["cache"] + "/transformers",
-        "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
-        "SYNAPTIC_MODEL_SNAPSHOT": _R2_ROOTS["cache"] + "/model/models--" +
-        "--".join(ref.split("/")) + "/snapshots/" + revision,
-        "WANDB_DISABLED": "true"})
+    child_env = _context_environment(workload_raw, expected_closure)
     child_env_lc_ctype = dict(child_env)
     child_env_lc_ctype["LC_CTYPE"] = "C.UTF-8"
     return {"workload_sha256": expected_workload,
@@ -746,6 +762,154 @@ def _worker_context_identity(source_root: Path, expected_workload: str,
                 child_env, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
             "child_env_lc_ctype_sha256": hashlib.sha256(json.dumps(
                 child_env_lc_ctype, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+
+
+def _context_environment(workload_raw: bytes, closure: str) -> dict[str, str]:
+    workload = json.loads(workload_raw)
+    runtime = workload["execution_source"]["runtime"]
+    roots = runtime["roots"]
+    model = workload["configuration"]["document"]["model"]
+    environment = dict(runtime["environment"]["variables"])
+    environment.pop("PYTHONPATH")
+    environment.update({"SYNAPTIC_WORKER_CLOSURE_MANIFEST":
+                        "/source/control/offline-sft-worker-v1.json",
+                        "SYNAPTIC_WORKER_CLOSURE_DIGEST": closure})
+    environment.update({_ROOT_ENV[name]: value for name, value in roots.items()})
+    environment.update({"SYNAPTIC_WORKLOAD_FINGERPRINT": hashlib.sha256(
+        b"synaptic-training-workload/v1\0" + workload_raw).hexdigest(),
+        "PYTHONNOUSERSITE": "1", "PYTHONSAFEPATH": "1",
+        "HF_HOME": roots["cache"] + "/huggingface",
+        "TRANSFORMERS_CACHE": roots["cache"] + "/transformers",
+        "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+        "SYNAPTIC_MODEL_SNAPSHOT": roots["cache"] + "/model/models--" +
+        "--".join(model["ref"].split("/")) + "/snapshots/" + model["revision"],
+        "WANDB_DISABLED": "true"})
+    return environment
+
+
+def _public_parent_identity(source_root: Path, source_lock: Path, *,
+                            expected_engine_commit: str, expected_project_commit: str,
+                            expected_workload: str, derivative_closure: str,
+                            expected_environment: str,
+                            expected_command: str) -> tuple[dict[str, str], tuple[str, ...], dict[str, str]]:
+    """Bind the real runtime entry and canonical file transport before create."""
+    if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in
+           (expected_workload, derivative_closure, expected_environment, expected_command)) or (
+           not re.fullmatch(r"[0-9a-f]{40}", expected_project_commit)):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    lock = json.loads(_read(source_lock, 128 * 1024))
+    workload_raw = _read(source_root.parent / "control/workload.json", 1024 * 1024)
+    workload = json.loads(workload_raw)
+    project = source_root.parent / "project"
+    if (lock["sources"]["engine"]["commit"] != expected_engine_commit
+            or lock["sources"]["project"]["commit"] != expected_project_commit
+            or workload["execution_source"]["sources"]["engine"]["commit"] != expected_engine_commit
+            or workload["execution_source"]["sources"]["project"]["commit"] != expected_project_commit
+            or workload["entrypoint"] != "Trainers/sft/runtime_v1.py"
+            or hashlib.sha256(workload_raw).hexdigest() != expected_workload
+            or json.dumps(workload, sort_keys=True, separators=(",", ":"),
+                          ensure_ascii=False, allow_nan=False).encode() != workload_raw
+            or not project.is_dir() or project.is_symlink()):
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    _path_custody(project)
+    _require_empty_project(project)
+    environment = _context_environment(workload_raw, derivative_closure)
+    environment_digest = hashlib.sha256(json.dumps(
+        environment, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    fingerprint = hashlib.sha256(b"synaptic-training-workload/v1\0" + workload_raw).hexdigest()
+    command = ("/source/engine/Trainers/sft/runtime_v1.py",
+               "--canonical-workload-file", "/source/control/workload.json",
+               "--canonical-workload-control-root", "/source/control",
+               "--canonical-workload-byte-count", str(len(workload_raw)),
+               "--canonical-workload-sha256", expected_workload,
+               "--canonical-workload-fingerprint", fingerprint)
+    command_digest = hashlib.sha256(json.dumps(
+        command, separators=(",", ":")).encode()).hexdigest()
+    if environment_digest != expected_environment or command_digest != expected_command:
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    return environment, command, {"project_commit": expected_project_commit,
+                                  "environment_sha256": environment_digest,
+                                  "command_sha256": command_digest,
+                                  "workload_fingerprint": fingerprint}
+
+
+def _require_empty_project(project: Path) -> None:
+    with os.scandir(project) as entries:
+        if next(entries, None) is not None:
+            raise ValueError("SOURCE_IDENTITY_INVALID")
+
+
+def _require_public_parent_scope(authority, cid: str, *, python: str,
+                                 command: tuple[str, ...], environment: dict[str, str],
+                                 image_environment: list[str], source: Path,
+                                 artifact: Path, snapshot: Path, prepared: Path,
+                                 model_relative: Path, input_relative: Path) -> str:
+    """Check the admitted Docker parent context before any mounted code starts."""
+    fields = ("Config.Entrypoint", "Config.Cmd", "Config.User", "Config.WorkingDir",
+              "Config.Env", "HostConfig.NetworkMode", "HostConfig.Memory",
+              "HostConfig.NanoCpus", "HostConfig.ReadonlyRootfs", "HostConfig.Privileged",
+              "HostConfig.CapAdd", "HostConfig.CapDrop", "HostConfig.SecurityOpt",
+              "HostConfig.PidsLimit", "HostConfig.Ulimits", "HostConfig.Runtime",
+              "HostConfig.LogConfig", "HostConfig.Tmpfs", "HostConfig.ShmSize",
+              "HostConfig.Devices", "HostConfig.DeviceRequests",
+              "HostConfig.IpcMode", "HostConfig.PidMode", "Mounts")
+    template = "\n".join("{{json ." + name + "}}" for name in fields)
+    observed = _run(authority, ("container", "inspect", "--format", template, cid))
+    if observed.stderr:
+        raise ValueError("CONTAINER_STATE_INVALID")
+    rows = observed.stdout.decode("ascii").splitlines()
+    if len(rows) != len(fields):
+        raise ValueError("CONTAINER_STATE_INVALID")
+    values = dict(zip(fields, (json.loads(row) for row in rows), strict=True))
+    baseline = {}
+    for item in image_environment:
+        key, separator, value = item.partition("=")
+        if not separator or key in baseline:
+            raise ValueError("CONTAINER_STATE_INVALID")
+        baseline[key] = value
+    baseline.update(environment)
+    actual_env = {}
+    for item in values["Config.Env"]:
+        key, separator, value = item.partition("=")
+        if not separator or key in actual_env:
+            raise ValueError("CONTAINER_STATE_INVALID")
+        actual_env[key] = value
+    expected_mounts = {
+        ("/source", str(source), False), ("/artifacts", str(artifact), True),
+        ("/artifacts/" + model_relative.as_posix(), str(snapshot), False),
+        ("/artifacts/" + input_relative.as_posix(), str(prepared), False)}
+    mounts = values["Mounts"]
+    actual_mounts = {(entry.get("Destination"), entry.get("Source"), entry.get("RW"))
+                     for entry in mounts if entry.get("Type") == "bind"}
+    if (values["Config.Entrypoint"] != [python] or values["Config.Cmd"] != list(command)
+            or values["Config.User"] != "root" or values["Config.WorkingDir"] != "/workspace"
+            or actual_env != baseline or values["HostConfig.NetworkMode"] != "none"
+            or values["HostConfig.Memory"] != 16 * 1024**3
+            or values["HostConfig.NanoCpus"] != 2 * 10**9
+            or values["HostConfig.ReadonlyRootfs"] is not False
+            or values["HostConfig.Privileged"] is not False
+            or values["HostConfig.CapAdd"] is not None
+            or values["HostConfig.CapDrop"] is not None
+            or values["HostConfig.SecurityOpt"] is not None
+            or values["HostConfig.PidsLimit"] is not None
+            or values["HostConfig.Ulimits"] not in (None, [])
+            or values["HostConfig.Runtime"] != "runc"
+            or values["HostConfig.LogConfig"] != {"Type": "json-file", "Config":
+                                                  {"max-size": "1m", "max-file": "1"}}
+            or values["HostConfig.Tmpfs"] not in (None, {})
+            or values["HostConfig.ShmSize"] != 64 * 1024**2
+            or values["HostConfig.Devices"] != []
+            or values["HostConfig.DeviceRequests"] != [{"Driver": "", "Count": 0,
+                "DeviceIDs": ["0"], "Capabilities": [["gpu"]], "Options": {}}]
+            or values["HostConfig.IpcMode"] != "private"
+            or values["HostConfig.PidMode"] != ""
+            or len(mounts) != 4 or actual_mounts != expected_mounts):
+        raise ValueError("CONTAINER_STATE_INVALID")
+    projection = {name: value for name, value in values.items() if name != "Config.Env"}
+    projection["Config.Env.sha256"] = hashlib.sha256(json.dumps(
+        actual_env, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(projection, sort_keys=True,
+                                     separators=(",", ":")).encode()).hexdigest()
 
 
 def _direct_source_identity(source_root: Path, *, expected_trainer: str,
@@ -1102,6 +1266,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
              expected_closure_digest: str | None = None,
              gpu_device: str | None = None, worker_context: bool = False,
              worker_entry: bool = False, worker_direct: bool = False,
+             public_parent: bool = False,
              expected_workload_sha256: str | None = None,
              expected_runtime_sha256: str | None = None,
              expected_trainer_sha256: str | None = None,
@@ -1109,17 +1274,24 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
              expected_direct_manifest_sha256: str | None = None,
              expected_direct_closure_digest: str | None = None,
              artifact_root: Path | None = None, model_receipt: Path | None = None,
-             expected_model_receipt_sha256: str | None = None) -> dict[str, object]:
+             expected_model_receipt_sha256: str | None = None,
+             expected_project_commit: str | None = None,
+             expected_parent_environment_sha256: str | None = None,
+             expected_parent_command_sha256: str | None = None) -> dict[str, object]:
     worker_values = (expected_workload_sha256, expected_runtime_sha256,
                      expected_trainer_sha256)
     direct_values = (expected_direct_trainer_sha256, expected_direct_manifest_sha256,
                      expected_direct_closure_digest, artifact_root, model_receipt,
                      expected_model_receipt_sha256)
+    parent_values = (expected_project_commit, expected_parent_environment_sha256,
+                     expected_parent_command_sha256)
     if (worker_entry and not worker_context) or (worker_direct and
             (worker_entry or not worker_context or gpu_device != "0" or
              expected_engine_commit is None or
              any(value is None for value in direct_values))) or (
             not worker_direct and any(value is not None for value in direct_values)) or (
+            public_parent and (not worker_direct or any(value is None for value in parent_values))) or (
+            not public_parent and any(value is not None for value in parent_values)) or (
             (worker_context and (source_root is None or any(value is None for value in worker_values)))
             or (not worker_context and any(value is not None for value in worker_values))):
         raise ValueError("SOURCE_IDENTITY_INVALID")
@@ -1170,6 +1342,17 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
         expected_manifest_sha256, expected_closure_digest, bound_engine_commit))
     context_identity = ({} if not worker_context else _worker_context_identity(
         source_root, *worker_values, expected_closure_digest))
+    parent_environment = {}
+    parent_command = ()
+    parent_identity = {}
+    if public_parent:
+        parent_environment, parent_command, parent_identity = _public_parent_identity(
+            source_root, source_lock, expected_engine_commit=bound_engine_commit,
+            expected_project_commit=expected_project_commit,
+            expected_workload=expected_workload_sha256,
+            derivative_closure=expected_direct_closure_digest,
+            expected_environment=expected_parent_environment_sha256,
+            expected_command=expected_parent_command_sha256)
     if worker_entry or worker_direct:
         try:
             workload = json.loads(_read(source_root.parent / "control/workload.json", 1024 * 1024))
@@ -1181,6 +1364,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
             raise ValueError("SOURCE_IDENTITY_INVALID")
     custody = (() if source_root is None else tuple(_path_custody(path) for path in
         (source_root, source_root.parent / "control/offline-sft-worker-v1.json", source_lock,
+         *((source_root.parent / "project",) if public_parent else ()),
          *((source_root.parent / "control/workload.json",) if worker_context else ()))))
     direct_inputs = (None if not worker_direct else _direct_retained_inputs(
         source_root, artifact_root, model_receipt, expected_model_receipt_sha256,
@@ -1192,6 +1376,15 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     before = _run(authority, ("image", "inspect", "--format", "{{.Id}}", image))
     if before.stderr or _one_line(before.stdout) != image:
         raise ValueError("IMAGE_INVALID")
+    image_environment = []
+    if public_parent:
+        baseline = _run(authority, ("image", "inspect", "--format", "{{json .Config.Env}}", image))
+        if baseline.stderr:
+            raise ValueError("IMAGE_INVALID")
+        image_environment = json.loads(_one_line(baseline.stdout))
+        if (type(image_environment) is not list or len(image_environment) > 64
+                or any(type(item) is not str for item in image_environment)):
+            raise ValueError("IMAGE_INVALID")
     output_dir.mkdir(mode=0o700)
     direct_identity = {}
     direct_custody = ()
@@ -1202,12 +1395,17 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
             expected_manifest=expected_direct_manifest_sha256,
             expected_closure=expected_direct_closure_digest)
         mounted_source = output_dir / "derived-source/engine"
+        if public_parent:
+            (output_dir / "derived-source/project").mkdir(mode=0o700)
         # A new writable root retains the r4 layout while the old model and
         # prepared input enter only through separate read-only nested mounts.
         scratch = output_dir / "artifacts"
         scratch.mkdir(mode=0o700)
         for leaf in ("artifacts", "state", "tracking", "cache", "tmp"):
             (scratch / "run" / leaf).mkdir(parents=True, mode=0o700)
+        if public_parent:
+            for leaf in ("huggingface", "transformers"):
+                (scratch / "run/cache" / leaf).mkdir(mode=0o700)
         model_relative = direct_inputs["snapshot"].relative_to(artifact_root)
         (scratch / model_relative).mkdir(parents=True, mode=0o700)
         input_relative = direct_inputs["prepared"].relative_to(artifact_root)
@@ -1217,6 +1415,7 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
         input_target.chmod(0o600)
         direct_custody = tuple(_path_custody(path) for path in
             (mounted_source, mounted_source.parent / "control/offline-sft-worker-v1.json",
+             *((mounted_source.parent / "project",) if public_parent else ()),
              scratch, direct_inputs["snapshot"], direct_inputs["prepared"]))
         context_identity = _worker_context_identity(
             mounted_source, expected_workload_sha256, expected_runtime_sha256,
@@ -1224,12 +1423,12 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
             direct_stop=True)
     nonce = secrets.token_hex(16)
     name = "synaptic-torch-import-" + nonce
-    probe = (_worker_probe(context_identity, (expected_direct_closure_digest if worker_direct else
+    probe = ("" if public_parent else (_worker_probe(context_identity, (expected_direct_closure_digest if worker_direct else
              expected_closure_digest), entry_mode=worker_entry, direct_mode=worker_direct,
              prepared_sha256=(direct_inputs["prepared_sha256"] if worker_direct else "0" * 64),
              prepared_size=(direct_inputs["prepared_size_bytes"] if worker_direct else 0))
              if worker_context else (_PROBE if source_root is None else
-             _GUARDED_PROBE.replace("EXPECTED_CLOSURE_DIGEST", expected_closure_digest)))
+             _GUARDED_PROBE.replace("EXPECTED_CLOSURE_DIGEST", expected_closure_digest))))
     if gpu_device is not None:
         if not worker_context and probe.count(_HIDDEN_GPU_ENV) != 1:
             raise ValueError("GPU_SCOPE_INVALID")
@@ -1241,15 +1440,16 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
              "release_sha256": expected_release_sha256, "source_identity": source_identity,
              "context_identity": context_identity,
              "direct_identity": direct_identity,
+             "parent_identity": parent_identity,
              "retained_input_identity": ({"receipt_sha256": direct_inputs["receipt_sha256"],
                  "prepared_sha256": direct_inputs["prepared_sha256"],
                  "prepared_size_bytes": direct_inputs["prepared_size_bytes"]}
                  if worker_direct else {}),
-             "name": name, "scope": ("worker_direct" if worker_direct else
+             "name": name, "scope": ("public_parent" if public_parent else "worker_direct" if worker_direct else
              "worker_entry" if worker_entry else "worker_context") if worker_context else
              ("bare" if source_root is None else "guarded"),
              "helper_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-             "probe_sha256": hashlib.sha256(probe.encode("utf-8")).hexdigest(),
+             "probe_sha256": (None if public_parent else hashlib.sha256(probe.encode("utf-8")).hexdigest()),
              "docker_file_identity": list(authority[2]),
              "docker_config_identity": list(authority[3])}
     if gpu_device is not None:
@@ -1276,20 +1476,24 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     limits = (("--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
                "--pids-limit=64", "--memory=4g", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777")
               if not worker_direct else ("--memory=16g",))
+    parent_env_args = tuple(value for key in sorted(parent_environment)
+                            for value in ("--env", key + "=" + parent_environment[key]))
     command = (
         "container", "create", "--name", name, "--label", "ai.synapticlabs.torch-import.claim=" + label,
         "--pull=never", "--network=none", "--log-driver", "json-file",
         "--log-opt", "max-size=1m", "--log-opt", "max-file=1",
         "--runtime=runc", *limits, "--cpus=2",
         *artifact_tmpfs,
-        *mount, *direct_mounts, *user,
+        *mount, *direct_mounts, *user, *parent_env_args,
         *visibility,
-        "--workdir=" + (_R2_ROOTS["tmp"] if worker_direct else "/tmp"), "--entrypoint", python,
-        image, "-I", "-c", probe,
+        "--workdir=" + ("/workspace" if public_parent else _R2_ROOTS["tmp"] if worker_direct else "/tmp"),
+        "--entrypoint", python, image,
+        *(parent_command if public_parent else ("-I", "-c", probe)),
     )
     if source_root is not None and tuple(_path_custody(path) for path in
             (source_root, source_root.parent / "control/offline-sft-worker-v1.json",
-             source_lock, *((source_root.parent / "control/workload.json",)
+             source_lock, *((source_root.parent / "project",) if public_parent else ()),
+             *((source_root.parent / "control/workload.json",)
                            if worker_context else ()))) != custody:
         raise ValueError("SOURCE_IDENTITY_INVALID")
     _require_daemon(authority, daemon_id)
@@ -1311,6 +1515,16 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
         raise ValueError("CONTAINER_STATE_INVALID")
     if gpu_device is not None:
         _require_gpu_zero(authority, cid)
+    parent_observed_sha256 = None
+    if public_parent:
+        parent_observed_sha256 = _require_public_parent_scope(
+            authority, cid, python=python, command=parent_command,
+            environment=parent_environment, image_environment=image_environment,
+            source=mounted_source.parent, artifact=scratch,
+            snapshot=direct_inputs["snapshot"], prepared=direct_inputs["prepared"],
+            model_relative=model_relative, input_relative=input_relative)
+        _append(output_dir, {"phase": "PARENT_CONTEXT_VERIFIED",
+                             "container_id": cid, "context_sha256": parent_observed_sha256})
     # Recheck the exact source bytes immediately before starting mounted code.
     if source_root is not None and _source_identity(source_root, source_lock,
             expected_source_lock_sha256, expected_manifest_sha256,
@@ -1323,6 +1537,16 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
             (expected_direct_closure_digest if worker_direct else expected_closure_digest),
             direct_stop=worker_direct) != context_identity:
         raise ValueError("SOURCE_IDENTITY_INVALID")
+    if public_parent and _public_parent_identity(
+            source_root, source_lock, expected_engine_commit=bound_engine_commit,
+            expected_project_commit=expected_project_commit,
+            expected_workload=expected_workload_sha256,
+            derivative_closure=expected_direct_closure_digest,
+            expected_environment=expected_parent_environment_sha256,
+            expected_command=expected_parent_command_sha256)[2] != parent_identity:
+        raise ValueError("SOURCE_IDENTITY_INVALID")
+    if public_parent:
+        _require_empty_project(mounted_source.parent / "project")
     if worker_direct:
         if (_direct_source_identity(mounted_source,
                 expected_trainer=expected_direct_trainer_sha256,
@@ -1332,11 +1556,13 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
                     expected_model_receipt_sha256, expected_workload_sha256) != direct_inputs
                 or tuple(_path_custody(path) for path in
                     (mounted_source, mounted_source.parent / "control/offline-sft-worker-v1.json",
+                     *((mounted_source.parent / "project",) if public_parent else ()),
                      scratch, direct_inputs["snapshot"], direct_inputs["prepared"])) != direct_custody):
             raise ValueError("SOURCE_IDENTITY_INVALID")
     if source_root is not None and tuple(_path_custody(path) for path in
             (source_root, source_root.parent / "control/offline-sft-worker-v1.json",
-             source_lock, *((source_root.parent / "control/workload.json",)
+             source_lock, *((source_root.parent / "project",) if public_parent else ()),
+             *((source_root.parent / "control/workload.json",)
                            if worker_context else ()))) != custody:
         raise ValueError("SOURCE_IDENTITY_INVALID")
     deadline = time.monotonic() + _RUN_SECONDS
@@ -1380,12 +1606,27 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
         if isinstance(error, ValueError) and error.args and error.args[0] in {"DEADLINE_UNCERTAIN", "DEADLINE_STOPPED"}:
             raise
         raise ValueError("DEADLINE_UNCERTAIN" if start_acknowledged else "START_UNCERTAIN") from None
-    if exit_code != 0:
+    if exit_code != (23 if public_parent else 0):
         raise ValueError("CHILD_OUTPUT_INVALID")
     result = _run(authority, ("container", "logs", cid))
-    if result.stderr:
+    if public_parent:
+        if result.stdout or result.stderr != b"SFT_RUNTIME_V1_REJECTED\n":
+            raise ValueError("CHILD_OUTPUT_INVALID")
+        stderr_raw = _read_closed_worker_label(scratch)
+        if stderr_raw == b"OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=SYSTEM_EXIT milestone=UNSLOTH_IMPORT\n":
+            child = {"schema_version": "synaptic-docker-torch-import-child/v1",
+                     "category": "PASS", "stage": "UNSLOTH_IMPORT", "context": {},
+                     "boundary": "BEFORE_UNSLOTH"}
+        elif stderr_raw == b"OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=IMPORT milestone=TORCH_IMPORT\n":
+            child = {"schema_version": "synaptic-docker-torch-import-child/v1",
+                     "category": "IMPORT", "stage": "TORCH_IMPORT", "context": {},
+                     "boundary": "BEFORE_UNSLOTH"}
+        else:
+            raise ValueError("CHILD_OUTPUT_INVALID")
+    elif result.stderr:
         raise ValueError("CHILD_OUTPUT_INVALID")
-    child = json.loads(_one_line(result.stdout))
+    else:
+        child = json.loads(_one_line(result.stdout))
     fields = ({"schema_version", "category", "stage", "context", "boundary"}
               if worker_context else ({"schema_version", "category"} if source_root is None
               else {"schema_version", "category", "stage"}))
@@ -1433,6 +1674,13 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
     if _inspect_owned(authority, cid, name=name, label=label, image=image,
                       daemon_id=daemon_id)[0] not in {"exited", "dead"}:
         raise ValueError("CONTAINER_STATE_INVALID")
+    if public_parent and _require_public_parent_scope(
+            authority, cid, python=python, command=parent_command,
+            environment=parent_environment, image_environment=image_environment,
+            source=mounted_source.parent, artifact=scratch,
+            snapshot=direct_inputs["snapshot"], prepared=direct_inputs["prepared"],
+            model_relative=model_relative, input_relative=input_relative) != parent_observed_sha256:
+        raise ValueError("CONTAINER_STATE_INVALID")
     after = _run(authority, ("image", "inspect", "--format", "{{.Id}}", image))
     if after.stderr or _one_line(after.stdout) != image:
         raise ValueError("IMAGE_CHANGED")
@@ -1440,12 +1688,14 @@ def diagnose(*, docker: Path, docker_config: Path, release_path: Path,
               "container_id": cid, "image_id": image, "daemon_id": daemon_id,
               "runtime_release_digest": digest,
               "training_executed": False, "gpu_used": None if gpu_device is not None else False,
-              "scope": ("worker_direct" if worker_direct else
+             "scope": ("public_parent" if public_parent else "worker_direct" if worker_direct else
               "worker_entry" if worker_entry else "worker_context") if worker_context else
               ("bare" if source_root is None else "guarded"),
               "claim_sha256": label, "source_identity": source_identity,
               "context_identity": context_identity,
               "direct_identity": direct_identity,
+              "parent_identity": parent_identity,
+              "parent_observed_sha256": parent_observed_sha256,
               "retained_input_identity": claim["retained_input_identity"],
               "terminal_observed": True}
     if source_root is not None:
@@ -1477,6 +1727,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--worker-context", action="store_true")
     parser.add_argument("--worker-entry", action="store_true")
     parser.add_argument("--worker-direct", action="store_true")
+    parser.add_argument("--public-parent", action="store_true")
     parser.add_argument("--expected-workload-sha256")
     parser.add_argument("--expected-runtime-sha256")
     parser.add_argument("--expected-trainer-sha256")
@@ -1486,6 +1737,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--artifact-root", type=Path)
     parser.add_argument("--model-receipt", type=Path)
     parser.add_argument("--expected-model-receipt-sha256")
+    parser.add_argument("--expected-project-commit")
+    parser.add_argument("--expected-parent-environment-sha256")
+    parser.add_argument("--expected-parent-command-sha256")
     args = parser.parse_args(argv)
     try:
         report = diagnose(docker=args.docker, docker_config=args.docker_config,
@@ -1499,6 +1753,7 @@ def main(argv: list[str] | None = None) -> int:
                           expected_closure_digest=args.expected_closure_digest,
                           gpu_device=args.gpu_device, worker_context=args.worker_context,
                           worker_entry=args.worker_entry, worker_direct=args.worker_direct,
+                          public_parent=args.public_parent,
                           expected_workload_sha256=args.expected_workload_sha256,
                           expected_runtime_sha256=args.expected_runtime_sha256,
                           expected_trainer_sha256=args.expected_trainer_sha256,
@@ -1506,7 +1761,10 @@ def main(argv: list[str] | None = None) -> int:
                           expected_direct_manifest_sha256=args.expected_direct_manifest_sha256,
                           expected_direct_closure_digest=args.expected_direct_closure_digest,
                           artifact_root=args.artifact_root, model_receipt=args.model_receipt,
-                          expected_model_receipt_sha256=args.expected_model_receipt_sha256)
+                          expected_model_receipt_sha256=args.expected_model_receipt_sha256,
+                          expected_project_commit=args.expected_project_commit,
+                          expected_parent_environment_sha256=args.expected_parent_environment_sha256,
+                          expected_parent_command_sha256=args.expected_parent_command_sha256)
     except BaseException as error:
         reason = error.args[0] if type(error) is ValueError and len(error.args) == 1 else None
         if type(reason) is not str or reason not in _REASONS:
