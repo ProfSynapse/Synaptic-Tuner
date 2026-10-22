@@ -11,7 +11,7 @@ import pytest
 
 from synaptic_tuner.api.v1.training_input import TrainingInputV1
 from synaptic_tuner.api.v1.training_sources import PreparedTrainingInputIdentity
-from tuner.runtime.native_mlx_child import _PinnedFinder, run_request
+from tuner.runtime.native_mlx_child import _PinnedFinder, _capture_document, run_request
 from tuner.runtime.native_mlx_material import canonical
 from tuner.training.native_mlx_compilation import NativeMLXProfile, compile_native_sft, parse_native_workload
 
@@ -182,6 +182,28 @@ def test_child_requires_isolation_and_has_closed_diagnostics(private_root):
         capture_output=True, timeout=5,
     )
     assert result.returncode == 120 and result.stdout == result.stderr == b""
+
+
+def test_child_bootstrap_accepts_only_canonical_v1_or_v2_capture():
+    for version in ("v1", "v2"):
+        value = {"schema": f"synaptic-native-mlx-capture/{version}",
+                 "status": "OBSERVED_NOT_ADMITTED", "config": {}}
+        if version == "v2":
+            value.update(dynamic_system_libraries=["observed"], builtin_modules={},
+                         dynamic_os_build={})
+            value["config"].update(dynamic_system_libraries=["selected"],
+                                   required_builtin_modules=["_ctypes"],
+                                   expected_os_build={})
+        raw = canonical(value)
+        assert _capture_document(raw)["schema"].endswith(version)
+        with pytest.raises(ValueError, match="capture schema"):
+            _capture_document(raw + b"\n")
+        if version == "v2":
+            del value["config"]["expected_os_build"]
+            with pytest.raises(ValueError, match="dynamic capture fields"):
+                _capture_document(canonical(value))
+    with pytest.raises(ValueError, match="capture schema"):
+        _capture_document(canonical({"schema": "synaptic-native-mlx-capture/v3"}))
 
 
 def test_child_loads_only_complete_published_tokenizer_bytes(private_root, monkeypatch):

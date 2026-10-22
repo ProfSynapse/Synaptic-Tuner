@@ -64,6 +64,29 @@ def _canonical(value):
                       allow_nan=False).encode()
 
 
+def _capture_document(raw):
+    capture = _json(raw)
+    if (type(capture) is not dict or capture.get("schema") not in (
+        "synaptic-native-mlx-capture/v1", "synaptic-native-mlx-capture/v2",
+    ) or _canonical(capture) != raw):
+        raise ValueError("native capture schema differs")
+    config = capture.get("config")
+    if type(config) is not dict:
+        raise ValueError("native capture configuration differs")
+    dynamic_fields = {
+        "dynamic_system_libraries", "required_builtin_modules", "expected_os_build",
+    }
+    observation_fields = {"dynamic_system_libraries", "builtin_modules", "dynamic_os_build"}
+    if capture["schema"].endswith("/v2"):
+        if (not dynamic_fields <= set(config) or not observation_fields <= set(capture)
+                or not config["dynamic_system_libraries"]
+                or not config["required_builtin_modules"]):
+            raise ValueError("native dynamic capture fields differ")
+    elif dynamic_fields & set(config) or observation_fields & set(capture):
+        raise ValueError("native legacy capture fields differ")
+    return capture
+
+
 class _PinnedSourceLoader(importlib.machinery.SourceFileLoader):
     def __init__(self, fullname, filename, digest):
         super().__init__(fullname, filename)
@@ -253,9 +276,7 @@ def main():
         runtime = _read(runtime_path, 16 * 1024 * 1024)
         if hashlib.sha256(runtime).hexdigest() != request["workload"]["profile"]["runtime_digest"]:
             raise ValueError("native capture digest differs from workload")
-        capture = _json(runtime)
-        if capture["schema"] != "synaptic-native-mlx-capture/v1" or _canonical(capture) != runtime:
-            raise ValueError("native capture schema differs")
+        capture = _capture_document(runtime)
         phase = 121
         install_capture_imports(capture)
         phase = 122

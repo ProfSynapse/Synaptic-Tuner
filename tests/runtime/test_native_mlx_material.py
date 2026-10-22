@@ -244,6 +244,195 @@ def capture(private_tree, monkeypatch):
     return config, expected, lock, library
 
 
+@pytest.fixture
+def dynamic_capture(capture, monkeypatch):
+    config, expected, lock, _ = capture
+    source = Path(config.sources[0]) / "module.py"
+    source.write_bytes(
+        b'import ctypes\nctypes.CDLL("/usr/lib/libSystem.B.dylib")\n'
+        b'ctypes.CDLL("/usr/lib/libproc.dylib")\n'
+    )
+    monkeypatch.setattr(material.sys, "builtin_module_names", (
+        *material.sys.builtin_module_names, "_ctypes",
+    ))
+    monkeypatch.setattr(material.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(material.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(material.platform, "mac_ver", lambda: ("27.0.1", (), ""))
+    monkeypatch.setattr(material.platform, "version", lambda: "Darwin xnu-13432.1.9~1")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    config = replace(config, dynamic_system_libraries=tuple(
+        material.NativeDynamicOSLibrary(str(source), digest, "ctypes.CDLL", library)
+        for library in ("/usr/lib/libSystem.B.dylib", "/usr/lib/libproc.dylib")
+    ), required_builtin_modules=("_ctypes",),
+        expected_os_build=material.NativeOSBuild("27.0.1", "Darwin xnu-13432.1.9~1"))
+    return config, expected, lock, source
+
+
+def test_v1_capture_keeps_legacy_canonical_document_and_config(capture):
+    config, expected, lock, _ = capture
+    raw = material.capture_native_material(config, expected, dependency_lock=lock)
+    value = material.strict_json(raw)
+    assert value["schema"] == "synaptic-native-mlx-capture/v1"
+    assert set(value["config"]) == {
+        "stdlib", "packages", "sources", "files", "system_libraries", "aliases",
+    }
+    assert "dynamic_system_libraries" not in value
+    assert "builtin_modules" not in value
+    assert "dynamic_os_build" not in value
+    assert material.canonical(value) == raw
+    assert material.NativeCaptureConfig.from_dict(value["config"]) == config
+    material.verify_native_material(raw, expected_digest=hashlib.sha256(raw).hexdigest(),
+                                    dependency_lock=lock)
+
+
+def test_v2_dynamic_source_builtin_and_host_profile_recheck(dynamic_capture, monkeypatch):
+    from examples.training_qualification import native_host
+
+    config, expected, lock, source = dynamic_capture
+    raw = material.capture_native_material(config, expected, dependency_lock=lock)
+    digest = hashlib.sha256(raw).hexdigest()
+    value = material.strict_json(raw)
+    assert value["schema"] == "synaptic-native-mlx-capture/v2"
+    assert [item["library"] for item in value["dynamic_system_libraries"]] == [
+        "/usr/lib/libSystem.B.dylib", "/usr/lib/libproc.dylib",
+    ]
+    assert all(item["source_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+               for item in value["dynamic_system_libraries"])
+    assert value["builtin_modules"]["required"] == ["_ctypes"]
+    assert value["dynamic_os_build"] == {
+        "macos": "27.0.1", "kernel_build": "Darwin xnu-13432.1.9~1",
+    }
+    material.verify_native_material(raw, expected_digest=digest, dependency_lock=lock)
+    assert material.native_runtime_spec(raw).material_digest == digest
+
+    root = Path(config.stdlib).parent
+    capture_file, lock_file, proposal_file = (
+        root / "capture.json", root / "lock", root / "proposal.json",
+    )
+    capture_file.write_bytes(raw)
+    lock_file.write_bytes(lock)
+    proposal = json.loads((Path(native_host.ENGINE_ROOT) /
+        "Trainers/mlx_sft_mac/runtime-candidate/sft-qualification-proposal.json").read_bytes())
+    proposal["runtime"].update(hardware="fixture-M4", physical_memory_bytes=24 * 1024**3,
+                               python_version=expected.python_version,
+                               dependency_lock_sha256=expected.dependency_lock_sha256,
+                               mlx_version="0.32.2", mlx_lm_version="0.32.2")
+    proposal_file.write_bytes(material.canonical(proposal))
+    monkeypatch.setattr(native_host, "source_record", lambda _: ({}, "a" * 64))
+    monkeypatch.setattr(native_host, "hardware_record", lambda: (
+        {"cpu": "fixture-M4", "memory_bytes": 24 * 1024**3}, "b" * 64,
+    ))
+    profile = native_host.profile_candidate({
+        "proposal_file": str(proposal_file), "runtime_capture_file": str(capture_file),
+        "dependency_lock_file": str(lock_file), "use_fast_tokenizer": True,
+    })
+    assert profile["runtime_digest"] == digest and profile["source_digest"] == "a" * 64
+    source.write_bytes(source.read_bytes() + b"# drift\n")
+    with pytest.raises(ValueError, match="dynamic source|runtime bytes"):
+        native_host.profile_candidate({
+            "proposal_file": str(proposal_file), "runtime_capture_file": str(capture_file),
+            "dependency_lock_file": str(lock_file), "use_fast_tokenizer": True,
+        })
+
+
+def test_v1_cannot_omit_explicit_dynamic_os_calls(dynamic_capture):
+    config, expected, lock, _ = dynamic_capture
+    legacy = replace(config, dynamic_system_libraries=(), required_builtin_modules=(),
+                     expected_os_build=None)
+    with pytest.raises(ValueError, match="dynamic source calls"):
+        material.capture_native_material(legacy, expected, dependency_lock=lock)
+
+
+def test_v2_rejects_unselected_absolute_load_in_another_captured_member(dynamic_capture):
+    config, expected, lock, source = dynamic_capture
+    source.with_name("another.py").write_bytes(
+        b'import ctypes\nctypes.CDLL("/usr/lib/libother.dylib")\n'
+    )
+    with pytest.raises(ValueError, match="dynamic source calls"):
+        material.capture_native_material(config, expected, dependency_lock=lock)
+
+
+@pytest.mark.parametrize("change", [
+    "missing", "extra", "wrong_hash", "wrong_source", "nonliteral", "alias",
+    "duplicate_call", "unsupported_call", "assignment_alias", "computed_getattr",
+    "duplicate_declaration",
+])
+def test_v2_dynamic_declaration_rejects_source_or_selection_drift(dynamic_capture, change):
+    config, expected, lock, source = dynamic_capture
+    chosen = list(config.dynamic_system_libraries)
+    if change == "missing":
+        chosen.pop()
+    elif change == "extra":
+        chosen.append(material.NativeDynamicOSLibrary(
+            str(source), chosen[0].source_sha256, "ctypes.CDLL", "/usr/lib/libother.dylib",
+        ))
+    elif change == "wrong_hash":
+        chosen = [replace(item, source_sha256="0" * 64) for item in chosen]
+    elif change == "wrong_source":
+        chosen = [replace(item, source=str(source.with_name("missing.py"))) for item in chosen]
+    elif change in {"nonliteral", "alias", "duplicate_call", "unsupported_call",
+                    "assignment_alias", "computed_getattr"}:
+        additions = {
+            "nonliteral": b'ctypes.CDLL(variable)\n',
+            "alias": b'from ctypes import CDLL\n',
+            "duplicate_call": b'ctypes.CDLL("/usr/lib/libproc.dylib")\n',
+            "unsupported_call": b'ctypes.PyDLL("/usr/lib/libother.dylib")\n',
+            "assignment_alias": b'load = ctypes.CDLL\n',
+            "computed_getattr": b'getattr(ctypes, "CDLL")\n',
+        }
+        source.write_bytes(source.read_bytes() + additions[change])
+        chosen = [replace(item, source_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
+                  for item in chosen]
+    elif change == "duplicate_declaration":
+        chosen.append(chosen[-1])
+    with pytest.raises(ValueError, match="native dynamic"):
+        material.capture_native_material(
+            replace(config, dynamic_system_libraries=tuple(chosen)), expected,
+            dependency_lock=lock,
+        )
+
+
+def test_v2_builtin_os_build_and_static_graph_remain_independent(dynamic_capture, monkeypatch):
+    config, expected, lock, _ = dynamic_capture
+    raw = material.capture_native_material(config, expected, dependency_lock=lock)
+    digest = hashlib.sha256(raw).hexdigest()
+    monkeypatch.setattr(material.sys, "builtin_module_names", ("other",))
+    with pytest.raises(ValueError, match="built-in"):
+        material.verify_native_material(raw, expected_digest=digest, dependency_lock=lock)
+    monkeypatch.setattr(material.sys, "builtin_module_names", ("_ctypes",))
+    monkeypatch.setattr(material.platform, "version", lambda: "different-kernel-build")
+    with pytest.raises(ValueError, match="OS build"):
+        material.verify_native_material(raw, expected_digest=digest, dependency_lock=lock)
+    monkeypatch.setattr(material.platform, "version", lambda: "Darwin xnu-13432.1.9~1")
+    with pytest.raises(ValueError, match="OS build"):
+        material.capture_native_material(replace(
+            config, expected_os_build=material.NativeOSBuild("27.0.1", "other-build"),
+        ), expected, dependency_lock=lock)
+    with pytest.raises(ValueError, match="unused"):
+        material.capture_native_material(replace(
+            config, system_libraries=("/usr/lib/libSystem.B.dylib", "/usr/lib/libproc.dylib"),
+        ), expected, dependency_lock=lock)
+    with pytest.raises(ValueError, match="unresolved"):
+        material.capture_native_material(replace(config, system_libraries=("/usr/lib/libproc.dylib",)),
+                                         expected, dependency_lock=lock)
+
+
+@pytest.mark.parametrize("name", [
+    "/Users/owner/lib/libproc.dylib", "/usr/lib/../private/libproc.dylib",
+    "/usr/lib/libproc.so", "/System/Library/Other/libproc.dylib",
+])
+def test_dynamic_os_trust_rejects_noncanonical_or_non_os_names(name):
+    with pytest.raises(ValueError):
+        material.NativeDynamicOSLibrary("/owned/source.py", "a" * 64, "ctypes.CDLL", name)
+
+
+def test_actual_guardian_has_exact_reviewed_literal_os_loads():
+    guardian = Path(material.__file__).with_name("native_process_guardian.py")
+    assert material._literal_ctypes_loads(guardian.read_bytes()) == (
+        "/usr/lib/libSystem.B.dylib", "/usr/lib/libproc.dylib",
+    )
+
+
 def test_material_rechecks_framework_not_only_python_stub(capture):
     config, expected, lock, framework = capture
     raw = material.capture_native_material(config, expected, dependency_lock=lock)

@@ -10,6 +10,18 @@ hardware, model snapshots, prepared publication, project, request, run, attempt,
 private state root, process limits and artifact budget. An ordinary two-run qualification receipt is not
 created by this workflow.
 
+The current guardian loads two Apple OS shared-cache libraries through
+`ctypes.CDLL`. A new static capture must use the separate v2
+`dynamic_system_libraries` declaration and `_ctypes` built-in selection in the
+checked-in [capture config example](native-capture-v2.example.json). The example
+has placeholders and an intentionally incomplete distribution/static-library
+inventory; it is not an executable config or admission. Literal source calls,
+source hashes, built-in inventory, interpreter bytes and exact OS build are
+rechecked, while ordinary Mach-O dependencies retain their independent strict
+graph. The r31 CPU normal outcome covers one fixed worker only. Preserve all
+prior consumed Mac attempts and require a new reviewed capture/profile/raw
+host inspection before external signing or ML work.
+
 ## Inputs and private layout
 
 Use an isolated **clean pushed** engine checkout on the M4 Mac. The proposed

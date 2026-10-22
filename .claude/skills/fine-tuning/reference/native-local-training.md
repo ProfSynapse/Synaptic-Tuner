@@ -109,6 +109,35 @@ freeze the filesystem against a malicious same-uid process, or independently
 grant execution. Root review must reconcile the original hash-required install
 evidence and selected archives; public capability remains gated.
 
+The v2 capture format separately records selected literal `ctypes.CDLL` OS
+shared-cache names. The config declares each exact captured `.py` source member,
+its SHA-256, the direct `ctypes.CDLL` call and the absolute OS library name.
+Capture parses bounded source bytes without executing them and requires the
+declared names to equal all such calls in each selected member. It rejects
+aliases, computed paths, extra or missing calls, source hash drift and duplicate
+declarations. The current Darwin guardian selects both `/usr/lib/libSystem.B.dylib`
+and `/usr/lib/libproc.dylib`. These are OS shared-cache names on the observed
+Mac, not ordinary files with invented hashes or static Mach-O edges. The v2
+document records the exact macOS/kernel build and selected `_ctypes` built-in
+against the interpreter's full `sys.builtin_module_names` inventory digest;
+the config must select the independently reviewed macOS and full kernel build
+before capture, and capture rejects a different observed build.
+`ctypes` Python files remain inside the captured stdlib. Keep the existing
+strict Mach-O graph and its exact used/static OS-library set unchanged.
+Across the selected project source trees, any explicit absolute `ctypes.CDLL`
+call requires a matching v2 declaration; omitting the v2 fields cannot produce
+a v1 capture of the current guardian. Existing v1 sources without such calls
+retain byte-identical canonical captures.
+Source-observed load declarations and a same-build recheck do not attest an
+actual later `dlopen`, the loaded image's origin, or all dynamic behavior.
+Legacy configurations without these selections still serialize as exact v1
+captures. See the deliberately incomplete
+`examples/training_qualification/native-capture-v2.example.json`; replace its
+paths, source/executable hashes, complete 54-distribution expectation, all
+static system libraries and aliases from the independently reviewed selection
+before a new capture. Never add a dynamic name to `system_libraries` to quiet
+an unused or missing static dependency.
+
 `native_mlx_input.py` consumes the existing retained stream lease, verifies
 identity/hash/size, and feeds the established JSONL publication rows to shared
 `materialize_sft_example`. It retains row IDs and splits without filtering or
@@ -185,6 +214,12 @@ and require `_ctypes`; a fresh runtime capture must include this newly loaded
 stdlib extension and library graph before any further ML qualification. This
 is a group-scoped observation for trusted workers, not proof about descendants
 which deliberately escaped the group or future OS builds.
+The r31 CPU-only Mac attempt retained claim, spawn and outcome records for one
+fixed nonforking worker: `worker_exited`, exit 0, confirmed termination, zero
+stream bytes. It did not qualify ML, deadline or owner-loss behavior. Historical
+r20/r23/r25/r27/r30 attempts remain consumed, with r30 SSH transport uncertain.
+The current guardian source needs a new independently reviewed v2 runtime
+capture and raw host selection before any new ML execution admission.
 
 For a provider-free Darwin guardian check, use the private
 `examples/training_qualification/native_cpu_process.py` config-first
