@@ -811,6 +811,10 @@ binds the exact prepared dataset file read-only at the original state path.
 The helper checks the pinned model receipt and hashes its full file inventory
 through held directory descriptors with a 16-GiB/300-second preflight bound,
 both before create and before start; it checks the dataset digest and size.
+The r25 repair checks that deadline while consuming each directory entry,
+before collecting or sorting names. Across the full scan it admits at most
+320 entries and 81,600 name bytes, with a 255-byte limit for each name;
+duplicate names reject. The 64-file and 256-directory limits still apply.
 It never writes to the old r4 artifact, model, source, claim or container.
 This avoids the r22 proposal's unnecessary 9.3-GB model copy. The fresh
 artifact contents and read-only model bind remain a filesystem difference
@@ -819,10 +823,12 @@ from r4; no historical r4 environment or module cache is claimed captured.
 This is the **review candidate only**, with no authority yet to launch. A
 clean pushed helper checkout and exact helper/verifier hashes must be reviewed
 and checked on WSL before any effect. The helper SHA-256 is
-`9ed3241a159130b0953a39dc32482fc5fb15af88c149b4398663be5dabe7bea9`;
+`3153b65b6c9216dd4495d6e09dd6c57fece96e5d6bff395cd8b91a1c1df401a4`;
 the trusted verifier remains
 `2304eeb00667954510c34cc4aacaa818532a301fbeabf04c2fb165d6cd1d70b5`.
-The focused local CPU suite passed 42 tests, targeted Ruff and diff checks.
+The focused local CPU suite passed 44 tests, including forced excessive-entry
+and mid-enumeration deadline rejection before file stat, hashing or Docker.
+Targeted Ruff and diff checks passed. The command below is unchanged from r23.
 The parent
 `/home/profsynapse/.local/share/synaptic-qualification/torch-import-direct-r23-20261022`
 must be fresh, private mode 0700, and its `direct-worker-gpu0-1` child absent.

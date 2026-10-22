@@ -859,19 +859,43 @@ def _readonly_snapshot_inventory(snapshot: Path) -> list[dict[str, object]]:
     """Hash bounded model bytes through held directory descriptors."""
     custody = _path_custody(snapshot)
     deadline = time.monotonic() + 300
+    maximum_entries = 64 + 256
+    maximum_name_bytes = maximum_entries * 255
     rows: list[dict[str, object]] = []
     total = 0
     directories = 0
+    entries_seen = 0
+    name_bytes_seen = 0
     root_fd = os.open(snapshot, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         def walk(directory_fd: int, prefix: str) -> None:
-            nonlocal total, directories
+            nonlocal total, directories, entries_seen, name_bytes_seen
             if time.monotonic() >= deadline:
                 raise ValueError("SOURCE_IDENTITY_INVALID")
             with os.scandir(directory_fd) as entries:
-                names = sorted(entry.name for entry in entries)
+                names = []
+                seen = set()
+                for entry in entries:
+                    if time.monotonic() >= deadline:
+                        raise ValueError("SOURCE_IDENTITY_INVALID")
+                    name = entry.name
+                    if type(name) is not str or len(name) > 255:
+                        raise ValueError("SOURCE_IDENTITY_INVALID")
+                    encoded_name = os.fsencode(name)
+                    entries_seen += 1
+                    name_bytes_seen += len(encoded_name)
+                    if (name in {"", ".", ".."} or "/" in name or "\0" in name or
+                            name in seen or not 0 < len(encoded_name) <= 255 or
+                            entries_seen > maximum_entries or
+                            name_bytes_seen > maximum_name_bytes):
+                        raise ValueError("SOURCE_IDENTITY_INVALID")
+                    seen.add(name)
+                    names.append(name)
+                if time.monotonic() >= deadline:
+                    raise ValueError("SOURCE_IDENTITY_INVALID")
+                names.sort()
             for name in names:
-                if name in {"", ".", ".."} or "/" in name:
+                if time.monotonic() >= deadline:
                     raise ValueError("SOURCE_IDENTITY_INVALID")
                 info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                 if stat.S_ISDIR(info.st_mode):

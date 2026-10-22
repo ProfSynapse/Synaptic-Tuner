@@ -376,6 +376,65 @@ def test_direct_fake_docker_scope_and_readonly_nested_mounts(tmp_path: Path,
     assert (tmp_path / "out/claim.json").exists()
 
 
+@pytest.mark.parametrize("expire_during_enumeration", [False, True])
+def test_direct_inventory_enumeration_rejects_before_stat_hash_or_create(
+        tmp_path: Path, monkeypatch, expire_during_enumeration: bool) -> None:
+    flags, _workload, snapshot, _prepared = _stage_direct_inputs(tmp_path)
+    docker, config, state = _fake_docker(tmp_path)
+    snapshot_identity = (snapshot.stat().st_dev, snapshot.stat().st_ino)
+    original_scandir = diagnostic.os.scandir
+    original_stat = diagnostic.os.stat
+    original_open = diagnostic.os.open
+    yielded = 0
+    clock = [0.0]
+
+    def is_snapshot_fd(fd):
+        info = diagnostic.os.fstat(fd)
+        return (info.st_dev, info.st_ino) == snapshot_identity
+
+    class FakeScandir:
+        def __enter__(self):
+            def entries():
+                nonlocal yielded
+                for index in range(4096):
+                    yielded += 1
+                    if expire_during_enumeration and yielded == 1:
+                        clock[0] = 301.0
+                    yield type("Entry", (), {"name": f"unexpected-{index:04d}"})()
+            return entries()
+
+        def __exit__(self, *_args):
+            return False
+
+    def scandir(path):
+        return FakeScandir() if isinstance(path, int) and is_snapshot_fd(path) else original_scandir(path)
+
+    def stat(path, *args, **kwargs):
+        fd = kwargs.get("dir_fd")
+        if fd is not None and is_snapshot_fd(fd):
+            pytest.fail("model leaf was statted after enumeration should reject")
+        return original_stat(path, *args, **kwargs)
+
+    def open_file(path, flags, *args, **kwargs):
+        fd = kwargs.get("dir_fd")
+        if fd is not None and is_snapshot_fd(fd):
+            pytest.fail("model leaf was opened for hashing")
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(diagnostic.os, "scandir", scandir)
+    monkeypatch.setattr(diagnostic.os, "stat", stat)
+    monkeypatch.setattr(diagnostic.os, "open", open_file)
+    if expire_during_enumeration:
+        monkeypatch.setattr(diagnostic.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(diagnostic, "_run", lambda *args, **kwargs:
+                        pytest.fail("Docker touched after inventory rejection"))
+    with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
+        _call(tmp_path, docker, config, **flags)
+    assert yielded == (1 if expire_during_enumeration else 321)
+    assert json.loads(state.read_text())["status"] == "absent"
+    assert not (tmp_path / "out").exists()
+
+
 def test_worker_prefix_excludes_unsloth_and_all_trainer_calls() -> None:
     raw = (ROOT / "Trainers/sft/train_sft.py").read_bytes()
     boundary = diagnostic._trainer_prefix_boundary(raw)
