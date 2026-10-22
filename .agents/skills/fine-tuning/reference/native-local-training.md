@@ -157,6 +157,15 @@ same configured LoRA, loads the saved final adapter and compares every trainable
 tensor against the saved bytes before evaluating that second model. A no-op or
 partial reload rejects. Upstream in-loop validation occurs before the last
 optimizer update.
+Pinned MLX `mx.save_safetensors` may emit a present `__metadata__: null` header
+when no metadata is supplied. The CPU-only adapter parser accepts that exact
+absence marker or a string-to-string metadata object, while still rejecting
+other metadata shapes and checking every tensor byte range. Check a retained
+adapter with this parser before attributing a closed worker phase to training:
+an initial adapter file alone proves neither parser success nor an optimizer
+update. A source fix requires fresh captured bytes and independent admission
+before another live attempt; a phase code alone does not establish the exact
+historical exception.
 It saves native `adapter_config.json`, `input_binding.json` and
 `native_result.json` exclusively. These worker files become authenticated public
 artifact roles only through the family verifier described below.

@@ -39,7 +39,10 @@ def adapter_tensors(raw: bytes) -> tuple[NativeTensor, ...]:
     tensors = []
     for name, item in header.items():
         if name == "__metadata__":
-            if type(item) is not dict or any(type(k) is not str or type(v) is not str for k, v in item.items()):
+            # MLX's pinned save_safetensors writes JSON null when no metadata
+            # was supplied. Retain string-only validation when metadata exists.
+            if item is not None and (type(item) is not dict or any(
+                    type(k) is not str or type(v) is not str for k, v in item.items())):
                 raise ValueError("native adapter metadata is invalid")
             continue
         if (type(name) is not str or not 1 <= len(name) <= 512

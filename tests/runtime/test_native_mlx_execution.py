@@ -127,6 +127,32 @@ def tensor_bytes(values, *, dtype="F32", name="layers.0.q_proj.lora_a", shape=No
     return struct.pack("<Q", len(header)) + header + body
 
 
+def with_safetensors_metadata(raw, metadata):
+    header_size = struct.unpack_from("<Q", raw)[0]
+    header = json.loads(raw[8:8 + header_size])
+    header["__metadata__"] = metadata
+    encoded = json.dumps(header, separators=(",", ":")).encode()
+    return struct.pack("<Q", len(encoded)) + encoded + raw[8 + header_size:]
+
+
+@pytest.mark.parametrize("metadata", [None, {}, {"format": "mlx"}])
+def test_native_adapter_accepts_pinned_mlx_null_or_string_metadata(metadata):
+    # The pinned MLX save_safetensors emitted present JSON null metadata in
+    # the retained r37 initial adapter. Full tensor and delta checks still run.
+    initial = with_safetensors_metadata(tensor_bytes([0.0]), metadata)
+    final = with_safetensors_metadata(tensor_bytes([0.5]), metadata)
+    assert len(adapter_tensors(initial)) == 1
+    assert verify_adapter_delta(
+        initial, final, expected_shapes=(("layers.0.q_proj.lora_a", (1, 1)),),
+    )["changed_parameters"] == 1
+
+
+@pytest.mark.parametrize("metadata", [[], 1, "mlx", {"format": 1}, {"format": None}])
+def test_native_adapter_rejects_other_metadata_shapes(metadata):
+    with pytest.raises(ValueError, match="metadata"):
+        adapter_tensors(with_safetensors_metadata(tensor_bytes([1.0]), metadata))
+
+
 @pytest.mark.parametrize("dtype", ["F16", "BF16", "F32"])
 def test_actual_saved_tensor_delta_and_finite_values(dtype):
     initial = tensor_bytes([0, 1], dtype=dtype)
