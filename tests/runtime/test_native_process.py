@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -214,3 +215,91 @@ def test_darwin_exit_observer_uses_kqueue_without_reaping(monkeypatch):
     assert observer.exited() is True
     observer.close()
     assert calls[-1] == "closed"
+
+
+def test_empty_owned_group_still_reaps_child_after_both_signals_miss(monkeypatch):
+    calls = []
+
+    class Child:
+        pid = 42
+
+        def wait(self, *, timeout):
+            calls.append(("wait", timeout))
+            return 0
+
+    def no_group(pid, sig):
+        calls.append((pid, sig))
+        raise ProcessLookupError("group already empty")
+
+    monkeypatch.setattr(guardian.os, "killpg", no_group)
+    phase = {"name": "termination"}
+    observer = type("Observer", (), {"exited": lambda self: True})()
+    assert guardian._terminate(Child(), 1, observer, phase) == 0
+    assert calls == [(42, signal.SIGTERM), (42, signal.SIGKILL), ("wait", 1)]
+    assert phase["name"] == "termination_wait"
+
+
+@pytest.mark.parametrize("failure,expected,code", [
+    ("term", "termination_term", 128),
+    ("kill", "termination_kill", 130),
+    ("wait", "termination_wait", 131),
+])
+def test_termination_failure_subphase_is_closed(monkeypatch, failure, expected, code):
+    class Child:
+        pid = 42
+
+        def wait(self, *, timeout):
+            if failure == "wait":
+                raise OSError("private wait detail")
+            return 0
+
+    def signal_group(pid, sig):
+        if (failure == "term" and sig == signal.SIGTERM
+                or failure == "kill" and sig == signal.SIGKILL):
+            raise OSError("private signal detail")
+
+    monkeypatch.setattr(guardian.os, "killpg", signal_group)
+    phase = {"name": "termination"}
+    observer = type("Observer", (), {"exited": lambda self: True})()
+    with pytest.raises(OSError):
+        guardian._terminate(Child(), 1, observer, phase)
+    assert phase["name"] == expected
+    assert guardian._FAILURE_CODES[expected] == code
+
+
+def test_cleanup_preserves_first_termination_failure_and_reaps_owned_child(monkeypatch, invocation):
+    read_fd, write_fd = os.pipe()
+    original_killpg = os.killpg
+    original_popen = subprocess.Popen
+    children = []
+    failed = False
+
+    def own_child(*args, **kwargs):
+        child = original_popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    def fail_first_kill(pid, sig):
+        nonlocal failed
+        if sig == signal.SIGKILL and not failed:
+            failed = True
+            raise OSError("private signal detail")
+        return original_killpg(pid, sig)
+
+    monkeypatch.setattr(guardian.os, "killpg", fail_first_kill)
+    monkeypatch.setattr(guardian.subprocess, "Popen", own_child)
+    spec = {
+        "argv": [sys.executable, "-I", "-S", "-B", invocation.worker],
+        "cwd": invocation.private_root, "environment": {},
+        "timeout_seconds": 2, "termination_grace_seconds": 1,
+        "maximum_output_bytes": 1024, "maximum_file_bytes": 1024**2,
+    }
+    phase = {"name": "protocol"}
+    try:
+        with pytest.raises(OSError):
+            guardian.supervise(spec, read_fd, phase)
+        assert failed and phase["name"] == "termination_kill"
+        assert len(children) == 1 and children[0].returncode is not None
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)

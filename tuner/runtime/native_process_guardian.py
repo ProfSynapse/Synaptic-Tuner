@@ -29,6 +29,10 @@ _FAILURE_CODES = {
     "monitor": 125,
     "termination": 126,
     "cleanup": 127,
+    "termination_term": 128,
+    "termination_grace": 129,
+    "termination_kill": 130,
+    "termination_wait": 131,
 }
 
 
@@ -73,13 +77,17 @@ class _ExitObserver:
             self.queue.close()
 
 
-def _terminate(child, grace, observer=None):
+def _terminate(child, grace, observer=None, phase=None):
     # Do not poll/reap before signalling the still-owned group: its leader PID
     # cannot be recycled while retained as our unreaped child.
+    if phase is not None:
+        phase["name"] = "termination_term"
     try:
         os.killpg(child.pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
+    if phase is not None:
+        phase["name"] = "termination_grace"
     deadline = time.monotonic() + grace
     # Both observation implementations leave the child unreaped.
     while time.monotonic() < deadline:
@@ -90,10 +98,14 @@ def _terminate(child, grace, observer=None):
             except Exception:
                 observer = None
         time.sleep(min(.02, max(0, deadline - time.monotonic())))
+    if phase is not None:
+        phase["name"] = "termination_kill"
     try:
         os.killpg(child.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    if phase is not None:
+        phase["name"] = "termination_wait"
     try:
         return child.wait(timeout=grace)
     except subprocess.TimeoutExpired:
@@ -160,7 +172,7 @@ def supervise(spec, control_fd, phase=None):
                 if all(key.data == "control" for key in selector.get_map().values()):
                     break
         phase["name"] = "termination"
-        code = _terminate(child, spec["termination_grace_seconds"], observer)
+        code = _terminate(child, spec["termination_grace_seconds"], observer, phase)
         return {
             "schema": "synaptic-native-process-outcome/v1",
             "reason": reason, "exit_code": code, "termination_confirmed": code is not None,

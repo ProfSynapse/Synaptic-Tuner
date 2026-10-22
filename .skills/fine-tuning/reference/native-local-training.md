@@ -150,6 +150,13 @@ cleanup phases respectively; they contain no exception, worker output, path,
 argument, or environment data. A missing outcome remains uncertain and cannot
 authorize replay or signals to a persisted PID. These diagnostics describe a
 future attempt only; they cannot assign a phase to an earlier consumed claim.
+After the r23 CPU-only Mac probe returned the broad termination code 126 with
+claim/spawn/diagnostic but no outcome, the guardian added closed subphase codes
+128-131 for SIGTERM, grace observation, SIGKILL, and child wait. The fixed CPU
+worker's result file existed, but that does not prove guardian cleanup or a
+successful process outcome. The r23 cause is still unknown, and its consumed
+state must not be replayed. The new codes describe only a future, separately
+admitted CPU-only attempt; they do not broaden native training authority.
 
 For a provider-free Darwin guardian check, use the private
 `examples/training_qualification/native_cpu_process.py` config-first

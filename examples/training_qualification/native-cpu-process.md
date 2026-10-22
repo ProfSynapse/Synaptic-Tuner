@@ -45,3 +45,13 @@ diagnostic record. A failure after root creation consumes that root; never
 reset claims, adopt a partial root, or rerun it. CLI output has no exception,
 path, argv, environment, or worker text. The selected config path tells the
 operator where to inspect the private records and receipt.
+
+The first Darwin CPU observation retained claim/spawn and a guardian exit in
+the broad termination phase (code 126), but no process outcome. Its worker
+result file is not a supervised-exit receipt, and that state stays consumed.
+The guardian now distinguishes future termination failures with closed exit
+codes 128 (SIGTERM), 129 (grace observation), 130 (SIGKILL), and 131 (wait).
+Those codes do not reveal exception details or prove a historical cause. Any
+fresh CPU attempt needs its own reviewed clean source, config, unused root and
+one-use admission; the existing `inspect` and `run` actions remain the only
+consumer commands.
