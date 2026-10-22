@@ -788,7 +788,9 @@ uses the authenticated runtime's existing argument builder and a sealed
 descriptor containing r4's 2,821-byte prepared input. The child has no
 diagnostic `-c` wrapper, trace function or import hook. The derivative retains
 the exact original trainer prefix through the `UNSLOTH_IMPORT` marker, followed
-only by `raise SystemExit(42)`; the original source remains untouched.
+only by `raise SystemExit(42)`; the original source remains untouched. Direct
+stdout is discarded, and the outer process reads at most 257 stderr bytes in
+memory to match fixed closed labels; no raw child stream is retained.
 
 The r22 proposed derivative manifest SHA-256 omitted the terminal newline
 required by the worker's canonical manifest parser. The verifier-valid
@@ -817,7 +819,7 @@ from r4; no historical r4 environment or module cache is claimed captured.
 This is the **review candidate only**, with no authority yet to launch. A
 clean pushed helper checkout and exact helper/verifier hashes must be reviewed
 and checked on WSL before any effect. The helper SHA-256 is
-`2b5ff5ff20202d93ca9751ccbb5c8c683a80dfd907eecac95686ed354a4770d4`;
+`9ed3241a159130b0953a39dc32482fc5fb15af88c149b4398663be5dabe7bea9`;
 the trusted verifier remains
 `2304eeb00667954510c34cc4aacaa818532a301fbeabf04c2fb165d6cd1d70b5`.
 The focused local CPU suite passed 42 tests, targeted Ruff and diff checks.

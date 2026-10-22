@@ -461,16 +461,14 @@ try:
      raise ValueError()
    stdout_path=Path(roots['tracking'])/'worker-entry.stdout'
    stderr_path=Path(roots['tracking'])/'worker-entry.stderr'
-   with stdout_path.open('xb') as stdout,stderr_path.open('xb') as stderr:
-    command=([sys.executable,'-I',str(worker_path),*arguments] if DIRECT_MODE else
-             [sys.executable,'-I','-c',child_text,*arguments])
-    process=subprocess.Popen(command,cwd=roots['tmp'],env=environment,stdin=subprocess.DEVNULL,stdout=stdout,stderr=stderr,pass_fds=(descriptor,))
-    returncode=process.wait()
-   with stdout_path.open('rb') as stream: payload=stream.read(4097)
-   if len(payload)>4096: raise ValueError()
    if DIRECT_MODE:
-    with stderr_path.open('rb') as stream: stderr_raw=stream.read(257)
-    if (returncode!=2 or payload or len(stderr_raw)>256):
+    process=subprocess.Popen([sys.executable,'-I',str(worker_path),*arguments],
+     cwd=roots['tmp'],env=environment,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+     stderr=subprocess.PIPE,pass_fds=(descriptor,))
+    stderr_raw=process.stderr.read(257)
+    if len(stderr_raw)>256: process.kill()
+    returncode=process.wait()
+    if returncode!=2 or len(stderr_raw)>256:
      raise ValueError()
     if stderr_raw==b'OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=SYSTEM_EXIT milestone=UNSLOTH_IMPORT\\n':
      result={'schema_version':'synaptic-docker-torch-import-child/v1','category':'PASS','stage':'UNSLOTH_IMPORT','context':{},'boundary':'BEFORE_UNSLOTH'}
@@ -479,7 +477,14 @@ try:
     else:
      result={'schema_version':'synaptic-docker-torch-import-child/v1','category':'OTHER','stage':'ISOLATED_CHILD','context':{},'boundary':'BEFORE_UNSLOTH'}
     payload=json.dumps(result,sort_keys=True,separators=(',',':')).encode()
-   elif returncode!=0: raise ValueError()
+   else:
+    with stdout_path.open('xb') as stdout,stderr_path.open('xb') as stderr:
+     process=subprocess.Popen([sys.executable,'-I','-c',child_text,*arguments],
+      cwd=roots['tmp'],env=environment,stdin=subprocess.DEVNULL,stdout=stdout,
+      stderr=stderr,pass_fds=(descriptor,))
+     if process.wait()!=0: raise ValueError()
+    with stdout_path.open('rb') as stream: payload=stream.read(4097)
+    if len(payload)>4096: raise ValueError()
   finally:
    os.close(descriptor)
  else:

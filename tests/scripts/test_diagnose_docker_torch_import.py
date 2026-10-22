@@ -209,6 +209,8 @@ def test_direct_derivative_keeps_exact_prefix_and_verifies_closure(tmp_path: Pat
     ast.parse(probe)
     assert "EXPECTED_" not in probe and "DIRECT_MODE" not in probe
     assert "[sys.executable,'-I',str(worker_path),*arguments]" in probe
+    assert "stdout=subprocess.DEVNULL" in probe and "stderr=subprocess.PIPE" in probe
+    assert "process.stderr.read(257)" in probe
     actual += b" "
     (tmp_path / "derived/engine/Trainers/sft/train_sft.py").write_bytes(actual)
     with pytest.raises(ValueError, match="SOURCE_IDENTITY_INVALID"):
