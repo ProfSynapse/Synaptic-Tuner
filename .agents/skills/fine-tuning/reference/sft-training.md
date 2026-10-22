@@ -609,6 +609,18 @@ context field under the original bounded CLI read. Keep the r34 claim and
 created container; any new probe requires a fresh reviewed output name. See
 the r34 evidence and r35 proposal in the diagnosis note.
 
+The r36 public-parent diagnostic reached `TRAINER/IMPORT/TORCH_IMPORT` before
+Unsloth, while the earlier direct-worker diagnostic returned from Torch. A
+focused local CPU regression found that the old SFT runtime verified the
+declared venv interpreter by its resolved physical binary, then launched that
+physical binary as the isolated child. For a symlinked venv, this can lose its
+site-packages even with the same `-I` and child environment. The runtime now
+retains the physical identity check but executes the exact declared absolute
+launcher. A fresh pushed source lock and reviewed import-only qualification
+are required before attributing the historical Windows failures to this bug;
+never rewrite retained r4/r6 source or replay their claims. The r36 evidence,
+local venv regression and closure refresh are in the diagnosis note.
+
 After an intentional worker source change, check and refresh existing
 manifests with the checked-in maintainers in dependency order:
 `regenerate_offline_sft_worker_closure.py`,

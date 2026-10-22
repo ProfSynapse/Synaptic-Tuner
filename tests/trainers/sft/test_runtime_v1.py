@@ -10,8 +10,10 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import venv
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -186,6 +188,7 @@ def _fixture(
     message_sft_overrides: dict[str, object] | None = None,
     raw_dataset_without_controls: bool = False,
     prepared_payload: bytes | None = None,
+    python_executable: str | None = None,
 ):
     if mode != "dual_clone":
         raise ValueError(
@@ -425,7 +428,7 @@ def _fixture(
         writable_capability_root=str(capability_root),
         python_implementation="cpython",
         python_version=".".join(str(part) for part in sys.version_info[:3]),
-        python_executable=str(Path(sys.executable).resolve()),
+        python_executable=python_executable or str(Path(sys.executable).resolve()),
         python_executable_digest="6" * 64,
         environment=planned_environment,
         secret_requirements_digest="5" * 64,
@@ -489,6 +492,63 @@ print("TWO_GENERATIONS_PASS")
     )
     assert completed.returncode == 0, completed.stderr.decode()
     assert completed.stdout.strip() == b"TWO_GENERATIONS_PASS"
+
+
+def test_declared_venv_launcher_preserves_isolated_child_packages(tmp_path, monkeypatch):
+    """The real invocation and runner must retain a venv-only dependency."""
+    virtual = tmp_path / "runtime-venv"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(virtual)
+    launcher = virtual / "bin/python3"
+    physical = launcher.resolve(strict=True)
+    assert physical != launcher
+    site = subprocess.run(
+        [str(launcher), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        capture_output=True, text=True, check=True, timeout=20,
+    ).stdout.strip()
+    Path(site, "synaptic_venv_only_probe.py").write_text("VALUE = 1\n", encoding="utf-8")
+    child = tmp_path / "probe_child.py"
+    child.write_text(
+        "import importlib.util\n"
+        "raise SystemExit(42 if importlib.util.find_spec('synaptic_venv_only_probe') else 43)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "executable", str(launcher))
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path / "fixture", python_executable=str(launcher), raw_sft_overrides={}
+    )
+    admitted, roots = runtime_v1.decode_and_validate_workload(
+        workload.canonical_bytes, environment, engine_file=engine_file
+    )
+    invocation = runtime_v1.build_trainer_invocation(admitted, roots, environment)
+    assert invocation.argv[0] == str(launcher)
+    baseline = replace(
+        invocation, argv=(str(physical), "-I", str(child), *invocation.argv[3:]),
+        stdout_path=tmp_path / "physical.stdout", stderr_path=tmp_path / "physical.stderr",
+    )
+    observed = replace(
+        invocation, argv=(invocation.argv[0], "-I", str(child), *invocation.argv[3:]),
+        stdout_path=tmp_path / "declared.stdout", stderr_path=tmp_path / "declared.stderr",
+    )
+    try:
+        assert runtime_v1.SubprocessTrainerRunner().run(baseline).exit_code == 43
+        assert runtime_v1.SubprocessTrainerRunner().run(observed).exit_code == 42
+    finally:
+        runtime_v1._close_retained_fds(invocation.retained_fds)
+
+
+def test_declared_launcher_rejects_different_physical_interpreter(tmp_path, monkeypatch):
+    virtual = tmp_path / "runtime-venv"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(virtual)
+    launcher = virtual / "bin/python3"
+    monkeypatch.setattr(sys, "executable", str(launcher))
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path / "fixture", python_executable="/bin/false", raw_sft_overrides={}
+    )
+    admitted, roots = runtime_v1.decode_and_validate_workload(
+        workload.canonical_bytes, environment, engine_file=engine_file
+    )
+    with pytest.raises(RuntimeV1Error, match="resolved runtime interpreter"):
+        runtime_v1.build_trainer_invocation(admitted, roots, environment)
 
 
 @pytest.mark.parametrize("stub_torch", [False, True])

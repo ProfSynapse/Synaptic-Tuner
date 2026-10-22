@@ -1083,3 +1083,68 @@ inventory, and 900-second caller plus 30-second tail remain unchanged. Only a
 fixed closed worker label of at most 256 bytes may be admitted. The helper
 still does not cap aggregate native trainer log bytes physically. No r35
 container has been created or started under this proposal.
+
+### r36 public-parent result and r37 launcher-path regression
+
+The separately admitted r36 command created and started exactly one fresh
+container, `46ad4027ab7db73a4884dc79c4ddc575fffaca05591f43033c258b78fb3347ad`.
+It exited naturally with code 23. The descriptor-bound, 81-byte closed label
+was `TRAINER/IMPORT/TORCH_IMPORT`; the helper recorded `BEFORE_UNSLOTH` and
+`training_executed=false`. `claim.json`, `events.jsonl`, and `result.json` under
+`torch-import-public-parent-r35-20261022/public-parent-gpu0-1` have SHA-256
+`b88e0cc0ee9d2aa4b34c2c64f126735859a171f72d9fd285ac00a95a8d4fb279`,
+`a151847b6bf55dfe5d3f5ceb1e480130ee5a35f6a5b011eefe12596239ba2dee`,
+and `428da635ef0d74496dddd5d6feb8b06c80fa75a2c60ebb177d64011cd91a975a`.
+The authenticated parent context projection is
+`832eef6c3f8bdc17ae5e5396942c831dfb668512372958126ffdbdf473c3a973`.
+Read-only postcheck reverified the exact r6 source, derivative, prepared input,
+and complete 14-file model inventory. The r34 created container and all older
+claims remain untouched. This reproduces the Torch import boundary in the
+diagnostic public-parent context; `IMPORT` includes `ModuleNotFoundError`, and
+neither the missing module nor the historical r4/r6 cause is established.
+
+The retained r6 runtime source SHA-256
+`460121aaee3eb83764f67d9307cfb57a3b25c117611d987577b9631b6956a1b3`
+matches the immutable release's Python 3.12.3 launcher declaration
+`/opt/unsloth-venv/bin/python3`. In `build_trainer_invocation`, the original
+source verifies resolved executable equality, then puts the **resolved** path
+in `argv[0]`. The diagnostic direct worker uses the declared launcher. Python's
+[venv documentation](https://docs.python.org/3.12/library/venv.html#how-venvs-work)
+describes the venv prefix and the ability to invoke its interpreter by full
+path; [path initialization](https://docs.python.org/3.12/library/sys_path_init.html#virtual-environments)
+uses `pyvenv.cfg` near the invoked executable. `-I` still removes user and
+script path injection; it does not remove the venv's own installed packages
+([CPython command-line reference](https://docs.python.org/3.12/using/cmdline.html#cmdoption-I)).
+
+A local no-download CPython 3.12.15 regression exercised the real workload
+decoder, `build_trainer_invocation`, and `SubprocessTrainerRunner` with a tiny
+module installed only in a temporary venv. With the same `-I` switch and exact
+constructed child environment, the resolved physical Python could not find
+the module (fixed test exit 43); the declared venv launcher found it (exit 42).
+Before the fix, the test failed because `argv[0]` was the physical binary.
+The minimal source correction keeps the physical-equality check and adds an
+absolute-path requirement, then executes the exact declared launcher. This
+supports the missing-venv-package hypothesis. The retained image metadata
+confirms the declared launcher and pinned image ID but does not itself expose
+the launcher's symlink layout; no container was executed for this test.
+
+The changed member is only `Trainers/sft/runtime_v1.py`. Its refreshed
+offline SFT closure digest is
+`a191a67d6187f72bf13503cde6f116ba11020fccc8e1402ac3008470ac7182aa`.
+The offline GRPO closure contains that source member; its outer closure pins
+the offline manifest. Both were refreshed in order. The Modal runtime lock
+and its token-profile example pin
+were refreshed without inventory, image, Python or package-pin changes.
+Packaged SFT and GRPO public child composition already executes the exact
+declared release executable; no analogous code edit was needed. Inference,
+packaged-training-worker and HF parent closures remained current.
+
+Any new import-only qualification needs a **fresh** clean pushed engine and
+host gitlink, a newly authenticated source lock/workload/closure and separately
+reviewed expected hashes. The existing bounded `--public-parent` helper can
+then compare the fixed runtime with an independently committed pre-Unsloth
+derivative, fresh private output, and the same image/model receipt if their
+admissions still match. Retained r6 source and consumed claims must not be
+rewritten or used as new source authority. The old r35 command is historical,
+not a command for the fixed runtime, and this section grants no live probe or
+training authority.
