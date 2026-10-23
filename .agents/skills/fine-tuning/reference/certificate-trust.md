@@ -54,3 +54,32 @@ alone does not verify the trust store a client actually loads.
 Sources: [PSF pip/virtual-environment guidance](https://blog.python.org/2026/10/python-3151-3149-31317/),
 [Ubuntu CA fixes](https://ubuntu.com/security/notices/USN-8944-1),
 [Ubuntu NSS fixes](https://ubuntu.com/security/notices/USN-8947-1).
+
+
+## Local CPU validation conditions
+
+Use the existing `scripts/ci_pytest_shard.sh` and declared CI test commands in
+isolated environments, honoring the session's heavy-lock and worker limits.
+Runtime tests resolve `sys.executable` before starting isolated children. Use
+`python -m venv --copies` for those tests: resolving a symlinked venv executable
+can select the underlying interpreter and lose the venv's schema dependencies.
+Do not install dependencies into that shared underlying interpreter to compensate.
+
+Use process-local umask `022` when reproducing CI fixture setup. Some retained
+volume tests create trusted ancestors before applying their deliberate hostile
+umask. An inherited `002` makes those ancestors group-writable and correctly
+triggers the existing guard. Do not loosen the guard or chmod shared ancestors.
+
+Account for virtual reservations separately from resident memory. The current
+runtime's bounded dataset read reserves up to 8GiB even for tiny fixture input;
+a 4GiB address-space ceiling produces `MemoryError`. A bounded 12GiB virtual
+ceiling admitted the CPU fixtures with measured peak resident use near 101MiB.
+Retain measured memory receipts, keep test workers bounded, and do not interpret
+this as permission to install ML runtimes or run training/model downloads.
+Preserve failed full-run receipts and prove each failed case passes in the
+corrected affected-file rerun; distinguish that evidence from a fresh full run.
+
+The installed-base workflow requires ensurepip for its consumer venv. A distro
+Python lacking its matching `pythonX.Y-venv` package leaves that lane pending;
+report the actual prerequisite and defer host package changes to the owner or
+use the declared hosted runner. CPU contracts do not qualify cloud images.
