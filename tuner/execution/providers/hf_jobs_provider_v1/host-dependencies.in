@@ -1,2 +1,3 @@
 huggingface_hub==1.33.0
 hf-xet==1.6.0
+certifi>=2026.10.19

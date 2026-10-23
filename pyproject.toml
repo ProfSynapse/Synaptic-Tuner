@@ -16,6 +16,7 @@ dependencies = [
   "packaging>=23,<27",
   "python-dotenv>=1,<2",
   "requests>=2.32,<3",
+  "certifi>=2026.10.19",
 ]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
