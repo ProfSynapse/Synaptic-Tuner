@@ -122,7 +122,12 @@ from tuner.execution.providers.docker_provider_v1.preparation import (
     _ZERO_QUOTE_DIGEST,
     _resource_digest,
 )
-from tuner.execution.providers.modal.model_snapshot import prepare_model_snapshot
+from tuner.execution.providers.modal.model_snapshot import (
+    MODEL_SNAPSHOT_PREPARATION_STAGES,
+    ModelSnapshotPreparationError,
+    _bind_hub_api,
+    prepare_model_snapshot,
+)
 from tuner.project.context import ProjectContext
 from tuner.project.git_verification import (
     GitCliLocalSourceInspector,
@@ -371,12 +376,29 @@ def prepare(config, *, pushed_sources, authenticator, clock):
     }
 
 
-def prepare_model(config, *, model_preparer=prepare_model_snapshot):
+def model_preflight():
+    """Check the existing SDK call contract before any one-use model claim."""
+    try:
+        from huggingface_hub import HfApi, snapshot_download
+        _bind_hub_api(HfApi, snapshot_download)
+    except Exception:
+        raise ModelSnapshotPreparationError("SDK_ADMISSION") from None
+    return {
+        "model_sdk_contract": "compatible",
+        "model_download": False,
+        "provider_qualified": False,
+    }
+
+
+def prepare_model(
+    config, *, model_preparer=prepare_model_snapshot, sdk_preflight=model_preflight,
+):
     """Explicit pinned public download; never writes the sealed source mount."""
     from contextlib import ExitStack
     from tuner.execution.providers.docker_provider_v1.local_source import _Root
     from Trainers.sft.runtime_v1 import RuntimeRoots, _require_local_model_snapshot
 
+    sdk_preflight()
     output = Path(config["output_root"])
     launch._private(output)
     consumer = launch.load_config(output / "consumer.json")
@@ -479,7 +501,7 @@ def prepare_model(config, *, model_preparer=prepare_model_snapshot):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("plan", "prepare", "prepare-model"))
+    parser.add_argument("action", choices=("plan", "prepare", "model-preflight", "prepare-model"))
     parser.add_argument("configuration", type=Path)
     args = parser.parse_args(argv)
     try:
@@ -491,6 +513,8 @@ def main(argv=None):
                 "model_download": False,
                 "provider_qualified": False,
             }
+        elif args.action == "model-preflight":
+            result = model_preflight()
         elif args.action == "prepare-model":
             result = prepare_model(config)
         else:
@@ -536,8 +560,15 @@ def main(argv=None):
             result = prepare(
                 config, pushed_sources=verifier, authenticator=auth, clock=clock
             )
-    except Exception:
-        print(json.dumps({"diagnostic_code": "docker_material_preparation_failed"}))
+    except Exception as error:
+        diagnostic = {"diagnostic_code": "docker_material_preparation_failed"}
+        if (
+            type(error) is ModelSnapshotPreparationError
+            and type(error.stage) is str
+            and error.stage in MODEL_SNAPSHOT_PREPARATION_STAGES
+        ):
+            diagnostic["model_preparation_stage"] = error.stage
+        print(json.dumps(diagnostic))
         return 2
     print(json.dumps(result, allow_nan=False))
     return 0
