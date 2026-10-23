@@ -26,11 +26,24 @@ and accepted evidence remain historical facts until a fresh image is built and
 captured using the existing runtime/profile workflow. Inspect certifi and pip's
 vendored certifi in that capture. Keep trainer/Hub-client isolation intact.
 
-The protected HF training-smoke launcher still intentionally binds CPython 3.12.7
-and pip 24.2. Its certifi lock/allowlist can advance together, but this does not fix
-its vendored pip CA bundle or qualify the legacy interpreter. Do not run a paid
-smoke as evidence for this dependency change. A separate reviewed launcher
-contract update and exact-target recapture are required before using that path.
+The protected HF training-smoke launcher still binds Windows CPython 3.12.7
+(`win_amd64`/`cp312`) and pip 24.2. Its canonical
+`requirements-hf-training-smoke-installed.json` is the normative installed-package
+allowlist consumed by setup/preflight, bound to `requirements-hf-training-smoke.lock`.
+It is also an exact-target evidence claim: preserve both files as a pair until a
+true capture is reviewed. They retain their historical certifi version; this path
+is explicitly unpatched by this maintenance change. The newer engine certifi
+floor is incompatible with that historical installed environment.
+
+`scripts/capture_hf_training_smoke_launcher_lock.py` probes the exact Windows
+Python/pip target, resolves and downloads hash-bound wheels, installs them offline
+in a fresh verifier, and inspects the installed distributions. It emits only
+external `.candidate` artifacts; it never promotes them. A manual version/hash
+edit or a Linux install is not measured exact-target evidence. Review a real
+candidate and its bound lock/installed evidence together before any promotion.
+A separate reviewed launcher contract modernization and exact-target recapture
+are required before using this path, including pip's vendored CA bundle and the
+legacy interpreter. Do not run a paid smoke as evidence for this dependency change.
 
 For an isolated validation environment, install the exact wheels with hashes,
 run `pip check`, and inspect the actual roots loaded into an SSL context. Require
