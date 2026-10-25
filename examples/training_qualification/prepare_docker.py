@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import secrets
 import sys
+import time
 
 
 def filesystem_probe(configuration):
@@ -115,7 +117,14 @@ import prepare_hf as common
 from synaptic_tuner.api.v1._contract import PreparedTrainingInputIdentity
 from synaptic_tuner.api.v1.secrets import SecretRef
 from tuner.dataset_prep.publication import snapshot_prepared_dataset_v1
-from tuner.execution.evidence import SOURCE_EVIDENCE_PURPOSE
+from tuner.dataset_prep.training_input_source import LocalPreparedTrainingInputSource
+from tuner.execution.evidence import (
+    SOURCE_EVIDENCE_POLICY, SOURCE_EVIDENCE_PURPOSE, validate_evidence_window,
+)
+from tuner.execution.providers.docker_provider_v1.local_source import DockerLocalSourceSealsV1
+from tuner.execution.providers.docker_provider_v1.model import (
+    DockerEffectIdentityV1, DockerSourceSealRequestV1,
+)
 from tuner.execution.providers.docker_provider_v1.preparation import (
     DockerTrainingPreparationBridgeV1,
     _NO_SECRET_REQUIREMENTS_DIGEST,
@@ -134,6 +143,7 @@ from tuner.project.git_verification import (
     GitCliLocalSourceInspector,
     GitLsRemotePushedCommitVerifier,
 )
+from tuner.project.source_bundle import SourceLock
 from tuner.project.manifest import load_project_manifest
 from tuner.runtime.dispatch import (
     WorkerControlLocationV1,
@@ -141,6 +151,11 @@ from tuner.runtime.dispatch import (
     build_source_worker_invocation,
     materialize_worker_bundle,
 )
+from tuner.runtime.offline_sft_worker import parse_offline_sft_worker_manifest
+from tuner.runtime.packaged_worker_closure import stable_read
+from tuner.training.docker_host_authority import DockerHostEvidenceAuthorityV1
+from tuner.training.docker_host_composition import _PlanPorts
+from synaptic_tuner.api.v1.reference.authority import derive_authority_key
 from tuner.runtime.releases import parse_packaged_runtime_release
 from tuner.training import TrainingService, default_recipe_registry
 from tuner.training.contracts import (
@@ -393,6 +408,150 @@ def prepare(config, *, pushed_sources, authenticator, clock):
     }
 
 
+def stage_diagnostic_source(config):
+    """Stage the normal authenticated bundle for a separate import diagnosis.
+
+    This consumes fresh private paths and a one-use local claim. It neither
+    publishes a Foundation stage nor grants a public training start.
+    """
+    root = Path(config["output_root"])
+    launch._private(root)
+    consumer = launch.load_config(root / "consumer.json")
+    selected = consumer["docker"]
+    source_root = Path(selected["source_host_root"])
+    artifact_root = Path(selected["artifact_host_root"])
+    claim_path = root / "diagnostic-source-stage-claim.json"
+    if (claim_path.exists() or claim_path.is_symlink()
+            or any(path.exists() or path.is_symlink() or not path.is_absolute()
+                   for path in (source_root, artifact_root))
+            or source_root == artifact_root
+            or source_root in artifact_root.parents
+            or artifact_root in source_root.parents):
+        raise ValueError("docker_diagnostic_source_claim_invalid")
+    for parent in (source_root.parent, artifact_root.parent):
+        launch._private(parent)
+    profile, rich, material, recipes, _ = docker_host._components(consumer)
+    if (material.run_id != config["run_id"]
+            or selected["prepared_publication"] != config["prepared_publication"]):
+        raise ValueError("docker_diagnostic_source_material_invalid")
+    lock_raw = stable_read(root / "source-lock.json", 2 << 20)
+    lock = SourceLock.from_dict(json.loads(lock_raw))
+    context = ProjectContext.host(
+        project_root=Path(config["project"]["root"]),
+        engine_root=Path(config["project"]["engine_root"]),
+        manifest_path=Path(config["project"]["manifest"]),
+        invocation_cwd=Path(config["project"]["root"]),
+    )
+    inspected = GitCliLocalSourceInspector().inspect(context=context)
+    if (not common._same_checkout(lock, inspected)
+            or lock.run_id != config["run_id"]
+            or not rich.execution_source.source_evidence.binds(lock)):
+        raise ValueError("docker_diagnostic_source_identity_invalid")
+    authority = config["source_authority"]
+    key = launch.NamedSecrets().resolve(SecretRef.from_dict(authority["secret"]))
+    if type(key) is not str or len(key.encode()) < 32:
+        raise ValueError("docker_diagnostic_source_identity_invalid")
+    authenticator = common._example_module("docker_source_auth", "authority.py").HMACAuthenticator(
+        {authority["key_ref"]: key.encode()},
+        allowed_purposes=frozenset({SOURCE_EVIDENCE_PURPOSE}),
+    )
+    evidence = rich.execution_source.source_evidence
+    if (evidence.issuer_ref != authority["issuer_ref"]
+            or evidence.audience_ref != authority["audience_ref"]
+            or evidence.key_ref != authority["key_ref"]
+            or sha(evidence.authenticated_payload) != evidence.attestation_digest
+            or authenticator.verify(
+                SOURCE_EVIDENCE_PURPOSE, evidence.authenticated_payload,
+                base64.b64decode(evidence.tag_base64), evidence.key_ref,
+            ) is not True):
+        raise ValueError("docker_diagnostic_source_identity_invalid")
+    validate_evidence_window(
+        verified_at=evidence.verified_at, expires_at=evidence.expires_at,
+        now=common._example_module("docker_source_clock", "authority.py").UTCClock().now(),
+        policy=SOURCE_EVIDENCE_POLICY,
+    )
+    bundle = materialize_worker_bundle(build_source_worker_invocation(
+        rich, WorkerControlLocationV1(PurePosixPath(selected["control_container_root"])),
+        CanonicalWorkloadFileLocationV1(PurePosixPath(selected["control_container_root"])),
+    ))
+    closure = parse_offline_sft_worker_manifest(
+        bundle.closure_manifest_bytes, source_ref=bundle.closure_manifest_source,
+        manifest_path=Path(bundle.closure_manifest_runtime_path),
+    )
+    engine = Path(config["project"]["engine_root"])
+    members = {item.path.as_posix(): stable_read(engine / item.path, item.size_bytes)
+               for item in closure.closure.members}
+    identity = PreparedTrainingInputIdentity.from_dict(
+        rich.resolved_config.to_dict()["dataset"])
+    lease = LocalPreparedTrainingInputSource(
+        Path(config["prepared_publication"]), identity).open_lease()
+    planning = _PlanPorts(profile, rich, material, recipes, launch.Clock(), True)
+    secret = launch.NamedSecrets().resolve(
+        SecretRef.from_dict(consumer["host"]["evidence_secret"]))
+    if type(secret) is not str or len(secret) < 32:
+        lease.close()
+        raise ValueError("docker_diagnostic_source_identity_invalid")
+    evidence_authority = DockerHostEvidenceAuthorityV1(
+        key=derive_authority_key(secret.encode(), "docker-evidence"),
+        authority_ref="docker-host-evidence", key_ref="docker-host-evidence-key",
+    )
+    # This claim is diagnostic custody only; it is not a public Foundation effect.
+    launch._write(claim_path, {
+        "schema_version": "synaptic-docker-diagnostic-source-stage/v1",
+        "source_lock_sha256": sha(lock_raw),
+        "material_sha256": sha(material.canonical_bytes),
+        "project_commit": lock.project_source.commit,
+        "engine_commit": lock.engine_source.commit,
+        "source_root": str(source_root), "artifact_root": str(artifact_root),
+    })
+    source_root.mkdir(mode=0o700)
+    artifact_root.mkdir(mode=0o700)
+    port = None
+    try:
+        port = DockerLocalSourceSealsV1(
+            training_plan=rich, prepared_plan=planning.prepared,
+            coordinator_plan=planning.plan, coordinator_material=material,
+            recipes=recipes, bundle=bundle, closure_members=members,
+            prepared_lease=lease, source_root=source_root,
+            source_container_root=PurePosixPath(selected["source_container_root"]),
+            artifact_root=artifact_root,
+            artifact_container_root=PurePosixPath(selected["artifact_container_root"]),
+            deadline=time.monotonic() + selected["command_seconds"],
+            sign_seal=evidence_authority.source_seal,
+        )
+        digest = sha(b"diagnostic-source-stage/v1\0" + material.canonical_bytes)
+        request = DockerSourceSealRequestV1(
+            DockerEffectIdentityV1(digest, "diagnostic-stage-" + digest[:20],
+                                   "stage", planning.prepared),
+            profile.roots.source_ref, rich.execution_source.fingerprint,
+        )
+        seal = port.seal_read_only(request)
+        if not evidence_authority.authenticate_source_seal(seal):
+            raise ValueError("docker_diagnostic_source_identity_invalid")
+    finally:
+        if port is not None:
+            port.close()
+        else:
+            lease.close()
+    if (stable_read(root / "source-lock.json", 2 << 20) != lock_raw
+            or not common._same_checkout(
+                inspected, GitCliLocalSourceInspector().inspect(context=context))):
+        raise ValueError("docker_diagnostic_source_identity_invalid")
+    result = {
+        "schema_version": "synaptic-docker-diagnostic-source-stage-result/v1",
+        "training_authority": False, "docker_effect": False,
+        "source_root": str(source_root / "engine"),
+        "source_lock_sha256": sha(lock_raw),
+        "workload_sha256": sha(bundle.canonical_workload_bytes),
+        "manifest_sha256": sha(bundle.closure_manifest_bytes),
+        "closure_digest": bundle.closure_digest,
+        "stage_evidence_digest": seal.content.evidence_digest,
+        "source_proof_expires_at": evidence.expires_at,
+    }
+    launch._write(root / "diagnostic-source-stage.json", result)
+    return result
+
+
 def model_preflight():
     """Check the existing SDK call contract before any one-use model claim."""
     try:
@@ -603,7 +762,7 @@ def prepare_model(
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("plan", "prepare", "model-preflight", "prepare-model"))
+    parser.add_argument("action", choices=("plan", "prepare", "model-preflight", "prepare-model", "stage-diagnostic-source"))
     parser.add_argument("configuration", type=Path)
     args = parser.parse_args(argv)
     try:
@@ -619,6 +778,8 @@ def main(argv=None):
             result = model_preflight()
         elif args.action == "prepare-model":
             result = prepare_model(config)
+        elif args.action == "stage-diagnostic-source":
+            result = stage_diagnostic_source(config)
         else:
             a = config["source_authority"]
             secret = SecretRef.from_dict(a["secret"])

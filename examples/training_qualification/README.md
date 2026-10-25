@@ -210,6 +210,19 @@ bounded file inventory is retained in `model-preparation.json`.
 configuration, then authenticates fresh pushed source and compiles material. Its
 consumer binds the exact receipt bytes; public `start` rechecks the model inventory
 before Docker effects. Public start retains its own committed receipt copy.
+
+For a separately reviewed import-only diagnosis, the same preparer exposes
+`stage-diagnostic-source` after a fresh `prepare`. It validates the prepared
+consumer/material, complete source lock, current clean host/gitlink, and the
+still-valid signed source evidence, then uses the existing local source port to
+stage the authenticated worker bundle and small prepared input into unused
+private roots. A create-only diagnostic claim prevents replay. It makes no
+Docker call or public Foundation stage and grants no training authority. The
+diagnostic must separately pin the staged source, original and derived closure,
+retained model receipt, and all container bounds before any live probe. An
+expired source proof refuses staging; a later diagnostic uses only its
+separately admitted immutable staged bytes, never the expired proof as training
+authority.
 Public `plan` authenticates receipt identity but does not attest current model
 bytes; `start` performs that live check.
 Later cold observe/cancel/reconcile/verify/download authenticate that retained

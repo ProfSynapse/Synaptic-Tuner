@@ -458,6 +458,14 @@ after pinned upstream metadata and every reused Git/LFS member are verified.
 The old seed claim is never adopted. `prepare` binds the complete model receipt;
 public start rechecks its bytes before Docker effects. A missing pinned revision
 in an otherwise private seed takes the normal cold path; redirects reject.
+For a separately admitted import-only diagnosis, `prepare_docker.py
+stage-diagnostic-source <fresh-prepare-config>` consumes new private source and
+artifact roots after `prepare`. It rechecks the clean source lock and signed
+proof while still valid and stages the real bundle through the existing local
+source port. Its create-only diagnostic claim, staged bytes and proof-expiry
+record are diagnostic evidence only; no public Foundation stage or training
+authority is created. Review the exact staged source and derivative closure
+before a bounded diagnostic container can be considered.
 Cold public reads use the receipt retained with the attempt and do not require
 current model weights or the original preparation root. See `examples/training_qualification/README.md`
 for the template and exact commands. Full public preflight remains deferred

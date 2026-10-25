@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 from types import SimpleNamespace
 from contextlib import contextmanager
@@ -14,11 +15,17 @@ import pytest
 from tests.examples.test_hf_material_preparation import configured as source_configured  # noqa: F401
 from tests.execution.providers.docker_provider_v1.conftest import profile  # noqa: F401
 from tests.runtime.test_packaged_runtime_releases import _release
+from tests.examples.test_hf_material_preparation import git
 from tuner.training.coordinator_material import CoordinatorResolvedMaterial
 from tuner.training import default_recipe_registry
 from tuner.execution.providers.modal.model_snapshot import (
     ModelSnapshotPreparationError, prepare_model_snapshot,
 )
+from tuner.runtime.offline_sft_worker import (
+    closure_digest, load_packaged_offline_sft_worker_manifest,
+)
+from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1, parse_packaged_runtime_release
+from scripts import diagnose_docker_torch_import as diagnostic
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location(
@@ -132,6 +139,124 @@ def test_real_source_publication_compiler_and_pure_docker_preview(configured):
     assert not Path(consumer["docker"]["source_host_root"]).exists()
     with pytest.raises(ValueError, match="used"):
         helper.prepare(c, pushed_sources=verifier, authenticator=auth, clock=clock)
+
+
+def _complete_fixture_engine(c):
+    engine = Path(c["project"]["engine_root"])
+    for member in load_packaged_offline_sft_worker_manifest().closure.members:
+        target = engine / member.path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / member.path, target)
+    git(engine, "add", ".")
+    git(engine, "commit", "-qm", "Synthetic complete worker closure")
+    host = Path(c["project"]["root"])
+    git(host, "update-index", "--cacheinfo", "160000", git(engine, "rev-parse", "HEAD"), "engine")
+    git(host, "commit", "-qm", "Bind synthetic complete worker closure")
+
+
+def test_diagnostic_source_stages_real_admitted_bundle_once(configured, monkeypatch):
+    c, verifier, auth, clock, _ = configured
+    c["runtime_environment"].update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
+    release_path = Path(c["runtime_release"])
+    release = parse_packaged_runtime_release(json.loads(release_path.read_bytes()))
+    values = {name: getattr(release, name) for name in release.__dataclass_fields__
+              if name not in {"manifest_digest", "schema_version"}}
+    values["python_executable"] = "/opt/unsloth-venv/bin/python3"
+    release_path.write_bytes(PackagedTrainingRuntimeReleaseV1.build(**values).canonical_bytes())
+    _complete_fixture_engine(c)
+    monkeypatch.setenv("SOURCE_KEY", "synthetic-host-source-signing-key!")
+    monkeypatch.setenv("READER", "fixture-evidence-key-" + "x" * 40)
+    helper.prepare(c, pushed_sources=verifier, authenticator=auth, clock=clock)
+    result = helper.stage_diagnostic_source(c)
+    source = Path(c["consumer"]["docker"]["source_host_root"])
+    artifact = Path(c["consumer"]["docker"]["artifact_host_root"])
+    assert result["training_authority"] is False
+    assert result["docker_effect"] is False
+    assert (source / "control/workload.json").is_file()
+    assert (source / "control/offline-sft-worker-v1.json").is_file()
+    assert (source / "project").is_dir() and not list((source / "project").iterdir())
+    assert list(artifact.rglob("private-dataset.jsonl"))
+    assert (Path(c["output_root"]) / "diagnostic-source-stage-claim.json").is_file()
+    lock = Path(c["output_root"]) / "source-lock.json"
+    manifest = source / "control/offline-sft-worker-v1.json"
+    engine = source / "engine"
+    diagnostic._source_identity(
+        engine, lock, hashlib.sha256(lock.read_bytes()).hexdigest(),
+        hashlib.sha256(manifest.read_bytes()).hexdigest(), result["closure_digest"],
+        git(Path(c["project"]["engine_root"]), "rev-parse", "HEAD"),
+    )
+    observed_workload = json.loads((source / "control/workload.json").read_bytes())
+    observed_runtime = observed_workload["execution_source"]["runtime"]
+    planned = observed_runtime["environment"]["variables"]
+    assert set(planned) == diagnostic._R2_ENV_KEYS
+    assert observed_runtime["roots"] == diagnostic._R2_ROOTS
+    assert observed_runtime["interpreter"]["executable"] == "/opt/unsloth-venv/bin/python3"
+    diagnostic._worker_context_identity(
+        engine, result["workload_sha256"],
+        hashlib.sha256((engine / "Trainers/sft/runtime_v1.py").read_bytes()).hexdigest(),
+        hashlib.sha256((engine / "Trainers/sft/train_sft.py").read_bytes()).hexdigest(),
+        result["closure_digest"],
+    )
+    trainer = (engine / "Trainers/sft/train_sft.py").read_bytes()
+    lines = trainer.splitlines(keepends=True)
+    derived_trainer = b"".join(lines[:diagnostic._trainer_prefix_boundary(trainer) + 1]) + diagnostic._DIRECT_STOP
+    derived_trainer_sha = hashlib.sha256(derived_trainer).hexdigest()
+    derived_manifest = json.loads(manifest.read_bytes())
+    member = next(item for item in derived_manifest["members"]
+                  if item["path"] == "Trainers/sft/train_sft.py")
+    member.update(sha256=derived_trainer_sha, size_bytes=len(derived_trainer))
+    derived_manifest["payload_bytes"] = sum(item["size_bytes"] for item in derived_manifest["members"])
+    derived_manifest["closure_digest"] = closure_digest(derived_manifest)
+    derived_manifest_raw = (json.dumps(derived_manifest, sort_keys=True, separators=(",", ":"),
+                                       ensure_ascii=False, allow_nan=False).encode() + b"\n")
+    derived = diagnostic._stage_direct_source(
+        engine, Path(c["output_root"]).parent / "derived-fixture",
+        expected_trainer=derived_trainer_sha,
+        expected_manifest=hashlib.sha256(derived_manifest_raw).hexdigest(),
+        expected_closure=derived_manifest["closure_digest"],
+    )
+    diagnostic._worker_context_identity(
+        Path(c["output_root"]).parent / "derived-fixture/engine", result["workload_sha256"],
+        hashlib.sha256((engine / "Trainers/sft/runtime_v1.py").read_bytes()).hexdigest(),
+        derived_trainer_sha, derived["closure_digest"], direct_stop=True,
+    )
+    workload_raw = (source / "control/workload.json").read_bytes()
+    fingerprint = hashlib.sha256(b"synaptic-training-workload/v1\0" + workload_raw).hexdigest()
+    parent_environment = diagnostic._context_environment(workload_raw, derived["closure_digest"])
+    parent_command = (
+        "/source/engine/Trainers/sft/runtime_v1.py",
+        "--canonical-workload-file", "/source/control/workload.json",
+        "--canonical-workload-control-root", "/source/control",
+        "--canonical-workload-byte-count", str(len(workload_raw)),
+        "--canonical-workload-sha256", result["workload_sha256"],
+        "--canonical-workload-fingerprint", fingerprint,
+    )
+    diagnostic._public_parent_identity(
+        engine, lock,
+        expected_engine_commit=git(Path(c["project"]["engine_root"]), "rev-parse", "HEAD"),
+        expected_project_commit=git(Path(c["project"]["root"]), "rev-parse", "HEAD"),
+        expected_workload=result["workload_sha256"], derivative_closure=derived["closure_digest"],
+        expected_environment=hashlib.sha256(json.dumps(
+            parent_environment, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+        expected_command=hashlib.sha256(json.dumps(
+            parent_command, separators=(",", ":")).encode()).hexdigest(),
+    )
+    with pytest.raises(ValueError, match="claim_invalid"):
+        helper.stage_diagnostic_source(c)
+
+
+def test_diagnostic_source_drift_refuses_before_claim(configured, monkeypatch):
+    c, verifier, auth, clock, _ = configured
+    _complete_fixture_engine(c)
+    monkeypatch.setenv("SOURCE_KEY", "synthetic-host-source-signing-key!")
+    monkeypatch.setenv("READER", "fixture-evidence-key-" + "x" * 40)
+    helper.prepare(c, pushed_sources=verifier, authenticator=auth, clock=clock)
+    engine = Path(c["project"]["engine_root"])
+    (engine / "Trainers/sft/runtime_v1.py").write_bytes(b"changed")
+    with pytest.raises(ValueError):
+        helper.stage_diagnostic_source(c)
+    assert not (Path(c["output_root"]) / "diagnostic-source-stage-claim.json").exists()
+    assert not Path(c["consumer"]["docker"]["source_host_root"]).exists()
 
 
 @pytest.mark.parametrize("change", ["format", "model", "source", "input"])
