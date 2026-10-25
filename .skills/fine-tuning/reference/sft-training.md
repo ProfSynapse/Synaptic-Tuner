@@ -636,6 +636,17 @@ are required before attributing the historical Windows failures to this bug;
 never rewrite retained r4/r6 source or replay their claims. The r36 evidence,
 local venv regression and closure refresh are in the diagnosis note.
 
+The later r45 fixed-launcher public-parent diagnostic retained the closed
+`TRAINER/SYSTEM_EXIT/UNSLOTH_IMPORT` label, but the helper rejected its final
+context digest and produced no accepted result. Docker 29.3.1 returned the
+same retained container's four mounts in different orders across bounded
+read-only inspections. For future diagnostics, validate all declared context
+fields and full mount identity first, then hash complete mount records in
+destination order and canonicalize only already accepted empty Ulimits/Tmpfs
+forms. Preserve all mount options in the digest and reject unexpected fields;
+do not reinterpret the consumed r45 result as PASS. Its prestart projection
+was retained only by digest, so the historical changed field is unknown.
+
 After an intentional worker source change, check and refresh existing
 manifests with the checked-in maintainers in dependency order:
 `regenerate_offline_sft_worker_closure.py`,

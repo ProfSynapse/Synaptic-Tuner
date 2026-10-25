@@ -883,6 +883,17 @@ def _require_public_parent_scope(authority, cid: str, *, python: str,
         ("/artifacts/" + model_relative.as_posix(), str(snapshot), False),
         ("/artifacts/" + input_relative.as_posix(), str(prepared), False)}
     mounts = values["Mounts"]
+    mount_fields = {"Type", "Name", "Source", "Destination", "Driver", "Mode",
+                    "RW", "Propagation"}
+    if (type(mounts) is not list or any(
+            type(entry) is not dict or not set(entry) <= mount_fields
+            or any(type(entry.get(key)) is not str for key in
+                   ("Type", "Source", "Destination"))
+            or type(entry.get("RW")) is not bool
+            or any(type(entry[key]) is not str for key in
+                   ("Name", "Driver", "Mode", "Propagation") if key in entry)
+            for entry in mounts)):
+        raise ValueError("CONTAINER_STATE_INVALID")
     actual_mounts = {(entry.get("Destination"), entry.get("Source"), entry.get("RW"))
                      for entry in mounts if entry.get("Type") == "bind"}
     if (values["Config.Entrypoint"] != [python] or values["Config.Cmd"] != list(command)
@@ -910,6 +921,11 @@ def _require_public_parent_scope(authority, cid: str, *, python: str,
             or len(mounts) != 4 or actual_mounts != expected_mounts):
         raise ValueError("CONTAINER_STATE_INVALID")
     projection = {name: value for name, value in values.items() if name != "Config.Env"}
+    # Docker 29.3.1 enumerates Mounts from a map. Normalize only representations
+    # already accepted above, retaining every validated mount field in the hash.
+    projection["Mounts"] = sorted(mounts, key=lambda entry: entry["Destination"])
+    projection["HostConfig.Ulimits"] = []
+    projection["HostConfig.Tmpfs"] = {}
     projection["Config.Env.sha256"] = hashlib.sha256(json.dumps(
         actual_env, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return hashlib.sha256(json.dumps(projection, sort_keys=True,

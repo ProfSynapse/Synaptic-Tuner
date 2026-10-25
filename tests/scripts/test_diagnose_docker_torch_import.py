@@ -20,8 +20,8 @@ IMAGE = "sha256:" + "a" * 64
 CID = "b" * 64
 ROOT = Path(__file__).parents[2]
 DIRECT_TRAINER = "a7a8585e2a4607c7c0b49614260fda2814f29887a3b61e4b8b5df6f71f52639a"
-DIRECT_MANIFEST = "c6c90c366f3b4043dc0cd651ae9ba130c05d76c370ac1570fab918dea25c31d1"
-DIRECT_CLOSURE = "eb1b679c294462603f792cf2c66d8c0080443309b25e5114df654fb88b71ccce"
+DIRECT_MANIFEST = "31c3ebe8a6f544faca79157759b0956dec0ed53de52d19e595d6f039e7fa7ec3"
+DIRECT_CLOSURE = "6b0eba557f327a6e6077396c9ec44364e1e49c35470c46f9e1596527ea07dd98"
 R4_ENGINE_COMMIT = "4a8bb138672d60318479286797ffd75572407054"
 R6_ENGINE_COMMIT = "ba228d6c0e8859288b246c4b140774fa29c567a3"
 R6_PROJECT_COMMIT = "9f7799659565481f05d3bc1ecfa8174c87cf1508"
@@ -254,6 +254,7 @@ def test_public_parent_command_and_closed_terminal_use_real_entry(tmp_path: Path
     docker, config, _state_path = _fake_docker(tmp_path)
     original_run = diagnostic._run
     creates = []
+    context_reads = []
 
     def run(authority, args, **kwargs):
         if args[:2] == ("image", "inspect") and "Config.Env" in args[3]:
@@ -265,7 +266,14 @@ def test_public_parent_command_and_closed_terminal_use_real_entry(tmp_path: Path
             # optional Tmpfs key is absent from HostConfig.
             if '{{json (index .HostConfig "Tmpfs")}}' not in args[3]:
                 raise ValueError("DOCKER_COMMAND_REJECTED")
-            values = _public_parent_inspect_rows(creates[0], expected_command)
+            values = list(_public_parent_inspect_rows(creates[0], expected_command))
+            context_reads.append(True)
+            if len(context_reads) == 2:
+                # Docker 29.3.1 enumerates Mounts from a Go map; accepted
+                # empty optional fields may also render as null or empty.
+                values[14] = None
+                values[17] = {}
+                values[-1] = list(reversed(values[-1]))
             return subprocess.CompletedProcess(args, 0,
                 ("\n".join(json.dumps(value) for value in values) + "\n").encode(), b"")
         if args[:2] == ("container", "start"):
@@ -288,6 +296,7 @@ def test_public_parent_command_and_closed_terminal_use_real_entry(tmp_path: Path
     assert (report["category"], report["stage"]) == ("PASS", "UNSLOTH_IMPORT")
     assert report["training_executed"] is False
     assert len(creates) == 1
+    assert len(context_reads) == 2
     command = creates[0]
     assert command[command.index(IMAGE) + 1:] == expected_command
     assert command[command.index("--entrypoint") + 1] == "/usr/bin/python3"
@@ -299,8 +308,61 @@ def test_public_parent_command_and_closed_terminal_use_real_entry(tmp_path: Path
     assert report["parent_identity"]["project_commit"] == R6_PROJECT_COMMIT
 
 
-@pytest.mark.parametrize("drift", ["incomplete", "malformed", "memory", "mount", "env",
-                                   "missing_required"])
+def test_public_parent_digest_keeps_checked_mount_options(tmp_path: Path,
+                                                          monkeypatch) -> None:
+    source = tmp_path / "source"
+    artifact = tmp_path / "artifact"
+    snapshot = tmp_path / "model"
+    prepared = tmp_path / "prepared"
+    model_relative = Path("run/cache/model/snapshot")
+    input_relative = Path("run/state/prepared-inputs/private-dataset.jsonl")
+    created = ("container", "create",
+        "--mount", f"type=bind,src={source},dst=/source,readonly",
+        "--mount", f"type=bind,src={artifact},dst=/artifacts",
+        "--mount", f"type=bind,src={snapshot},dst=/artifacts/{model_relative},readonly",
+        "--mount", f"type=bind,src={prepared},dst=/artifacts/{input_relative},readonly",
+        "--entrypoint", "/usr/bin/python3", IMAGE)
+    command = ("/source/engine/Trainers/sft/runtime_v1.py",)
+    values = list(_public_parent_inspect_rows(created, command))
+    for mount in values[-1]:
+        mount.update(Mode="rw" if mount["RW"] else "ro", Propagation="rprivate")
+
+    def run(_authority, args, **_kwargs):
+        return subprocess.CompletedProcess(args, 0,
+            ("\n".join(json.dumps(value) for value in values) + "\n").encode(), b"")
+
+    monkeypatch.setattr(diagnostic, "_run", run)
+
+    def digest():
+        return diagnostic._require_public_parent_scope(object(), CID,
+            python="/usr/bin/python3", command=command, environment={},
+            image_environment=[], source=source, artifact=artifact,
+            snapshot=snapshot, prepared=prepared,
+            model_relative=model_relative, input_relative=input_relative)
+
+    original = digest()
+    values[14] = None
+    values[17] = {}
+    values[-1].reverse()
+    assert digest() == original
+    values[-1][0]["Mode"] = "rw" if values[-1][0]["Mode"] == "ro" else "ro"
+    assert digest() != original
+    values[-1][0]["Mode"] = "ro" if values[-1][0]["Mode"] == "rw" else "rw"
+    values[-1][0]["Propagation"] = "shared"
+    assert digest() != original
+    values[-1][0]["Propagation"] = "rprivate"
+    values[14] = [{"Name": "nofile", "Soft": 1024, "Hard": 1024}]
+    with pytest.raises(ValueError, match="CONTAINER_STATE_INVALID"):
+        digest()
+    values[14] = []
+    values[17] = {"/tmp": "size=64m"}
+    with pytest.raises(ValueError, match="CONTAINER_STATE_INVALID"):
+        digest()
+
+
+@pytest.mark.parametrize("drift", ["incomplete", "malformed", "memory", "mount",
+                                   "mount_duplicate", "mount_added", "mount_unknown_field",
+                                   "mount_bad_option_type", "env", "missing_required"])
 def test_public_parent_inspect_rejects_before_start(tmp_path: Path, monkeypatch,
                                                      drift: str) -> None:
     flags, _workload, _snapshot, _prepared, expected_command = _stage_public_parent_inputs(tmp_path)
@@ -322,6 +384,14 @@ def test_public_parent_inspect_rejects_before_start(tmp_path: Path, monkeypatch,
                 values[6] = 8 * 1024**3
             elif drift == "mount":
                 values[-1][0]["RW"] = not values[-1][0]["RW"]
+            elif drift == "mount_duplicate":
+                values[-1][1] = dict(values[-1][0])
+            elif drift == "mount_added":
+                values[-1].append(dict(values[-1][0]))
+            elif drift == "mount_unknown_field":
+                values[-1][0]["UnexpectedOption"] = "value"
+            elif drift == "mount_bad_option_type":
+                values[-1][0]["Mode"] = {"unexpected": "value"}
             elif drift == "env":
                 values[4].append("UNEXPECTED=1")
             rows = [json.dumps(value) for value in values]

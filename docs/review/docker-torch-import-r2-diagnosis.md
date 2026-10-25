@@ -1148,3 +1148,30 @@ admissions still match. Retained r6 source and consumed claims must not be
 rewritten or used as new source authority. The old r35 command is historical,
 not a command for the fixed runtime, and this section grants no live probe or
 training authority.
+
+### r45 retained public-parent result and context digest repair
+
+The separately admitted r45 probe started one fresh public-parent container
+on the fixed `6874e9d3935065d3df650be953de141eb581ad0d` engine and exited
+23. Its descriptor-bound fixed label was
+`TRAINER/SYSTEM_EXIT/UNSLOTH_IMPORT`: Torch returned in this import-only
+diagnostic and the derivative stopped before Unsloth. The helper's overall
+outcome was `CONTAINER_STATE_INVALID`, with no accepted `result.json`, because
+the prestart and terminal context digests differed. The prestart projection
+was retained only as a digest, so its historical changed field cannot be
+recovered. The consumed r45 claim, output and container remain preserved.
+
+The daemon was Docker 29.3.1. Six bounded read-only inspect calls against the
+same retained container returned two orders for the same four complete mount
+records. This establishes order instability on that container, not which field
+changed between the historical r45 checks. Moby's pinned `GetMountPoints`
+enumerates mount points from a map without ordering; inspect uses that list.
+The helper now checks the full four-mount identity and every known mount field,
+then sorts complete mount records by destination for the context digest. It
+also canonicalizes only the `null`/empty Ulimits and Tmpfs representations
+that its existing scope predicate already accepted. Unknown mount fields,
+changed mount options, duplicate/extra mounts and nonempty Ulimits or Tmpfs
+still reject or change the digest. All other context values remain bound.
+This repairs a deterministic attestation defect for future attempts; it does
+not retroactively accept r45 or establish why historical r4/r6 failed. A new
+live effect requires its own reviewed admission.
