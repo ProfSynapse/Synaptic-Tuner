@@ -458,6 +458,13 @@ after pinned upstream metadata and every reused Git/LFS member are verified.
 The old seed claim is never adopted. `prepare` binds the complete model receipt;
 public start rechecks its bytes before Docker effects. A missing pinned revision
 in an otherwise private seed takes the normal cold path; redirects reject.
+Before `prepare`, verify that the advertised host branch equals the host HEAD
+and that the advertised engine branch committed in the host's `.gitmodules`
+equals its exact engine gitlink. A clean pinned checkout alone is insufficient:
+an operator PR can advance that branch while the gitlink stays fixed. Keep a
+qualification engine ref at the pinned commit and use a fresh host and attempt
+if either advertised ref drifts; never move the ref back or replay a failed
+source-preparation attempt.
 For a separately admitted import-only diagnosis, `prepare_docker.py
 stage-diagnostic-source <fresh-prepare-config>` consumes new private source and
 artifact roots after `prepare`. It rechecks the clean source lock and signed
