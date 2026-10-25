@@ -411,6 +411,17 @@ host composition in `start`. State is create-only: an unknown submission never
 authorizes replay. Successful native verification precedes downloading the five
 SFT artifacts through the public streams.
 
+Native artifact verification binds the original compiled workload, trainer
+lineage, source closure, manifest, and exact streamed bytes. For raw-text SFT,
+the trainer also accepts optional controls that state its existing behavior:
+`packing: false`, `prompt_render: full_conversation`, and
+`require_memory_efficient_loss: false`. The host verifier must accept those
+exact values while keeping them bound to the workload and lineage. A rejected
+verification receipt remains historical evidence; a separately reviewed
+same-run public `verify` may append a new receipt only against the unchanged
+original run, manifest, closure, and artifact bytes. Never replay training to
+repair a verifier defect.
+
 Docker cold composition uses retained material/profile/request bytes, original
 named keys, qualification assets and local mount roots. It is not source-free
 recovery or remote Docker path mapping. HF cold reads use the existing retained

@@ -70,7 +70,8 @@ def _canonical(value) -> bytes:
 
 
 def _runtime_workload(
-    *, raw_text: bool = False, raw_dataset_without_controls: bool = False
+    *, raw_text: bool = False, raw_dataset_without_controls: bool = False,
+    raw_optional_controls: dict[str, object] | None = None,
 ):
     source = _execution_source()
     roots = {
@@ -116,6 +117,7 @@ def _runtime_workload(
                 "use_preassigned_splits": True,
             }
         )
+        config_document["sft"].update(raw_optional_controls or {})
     config = CanonicalDocument.from_mapping(config_document)
     return compile_sft_workload(resolved_config=config, execution_source=source)
 
@@ -220,10 +222,14 @@ def _lineage(workload) -> bytes:
     return _canonical(wrapper)
 
 
-def _fixture(*, raw_text: bool = False, raw_dataset_without_controls: bool = False):
+def _fixture(
+    *, raw_text: bool = False, raw_dataset_without_controls: bool = False,
+    raw_optional_controls: dict[str, object] | None = None,
+):
     workload = _runtime_workload(
         raw_text=raw_text,
         raw_dataset_without_controls=raw_dataset_without_controls,
+        raw_optional_controls=raw_optional_controls,
     )
     values = {
         "workload.json": workload.canonical_bytes,
@@ -386,6 +392,47 @@ def test_provider_projection_comparison_rejects_boolean_numeric_alias() -> None:
 def test_provider_verifies_bound_raw_text_semantics() -> None:
     workload, inventory, reader, values = _fixture(raw_text=True)
     assert _verify_current(workload, inventory, reader, values).status is VerificationStatus.VERIFIED
+
+
+@pytest.mark.parametrize(
+    "controls",
+    (
+        {"packing": False},
+        {"prompt_render": "full_conversation"},
+        {"require_memory_efficient_loss": False},
+        {
+            "packing": False,
+            "prompt_render": "full_conversation",
+            "require_memory_efficient_loss": False,
+        },
+    ),
+)
+def test_provider_verifies_trainer_supported_optional_raw_controls(controls) -> None:
+    workload, inventory, reader, values = _fixture(
+        raw_text=True, raw_optional_controls=controls,
+    )
+    report = _verify_current(workload, inventory, reader, values)
+    assert report.status is VerificationStatus.VERIFIED
+    assert {check.code: check.passed for check in report.semantic_checks}[
+        "lineage_binds_workload"
+    ] is True
+
+
+def test_optional_raw_control_remains_bound_to_lineage() -> None:
+    workload, inventory, reader, values = _fixture(
+        raw_text=True, raw_optional_controls={"packing": False},
+    )
+    wrapper = json.loads(values["training_lineage.json"])
+    wrapper["execution_evidence"]["sft"].pop("packing")
+    wrapper["execution_evidence_sha256"] = hashlib.sha256(
+        _canonical(wrapper["execution_evidence"])
+    ).hexdigest()
+    values["training_lineage.json"] = _canonical(wrapper)
+    report = _verify_current(workload, inventory, reader, values)
+    assert report.status is VerificationStatus.INVALID
+    assert {check.code: check.passed for check in report.semantic_checks}[
+        "lineage_binds_workload"
+    ] is False
 
 
 def test_compiler_rejects_raw_dataset_schema_without_bound_controls() -> None:
