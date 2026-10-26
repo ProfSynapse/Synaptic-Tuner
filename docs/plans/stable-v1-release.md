@@ -2,10 +2,54 @@
 status: release-preparation
 scope: OSS API v1 stable workflow release
 baseline: 321a085f
-updated: 2026-10-20
+updated: 2026-10-26
 ---
 
 # Stable v1 release gate
+
+## Current engine increment — 2026-10-26
+
+The owner selected the open-source engine API and reliable Mac training
+integration, excluding full desktop distribution/installer/signing, bundled
+runtime UX, managed-download UI and local inference conversion. The integrated
+candidate is `06e0fcf24ca152621044736f65f87ce6e176d0f4`, joining release/GRPO,
+Windows SFT launcher/reader and native MLX work with current main's host-trust
+fixes. All fixed closure inventories and non-hash pins are retained; independent
+source/test review accepted the candidate for bounded qualification. Source
+acceptance is not a release or host execution grant.
+
+Fresh exact-source M4 raw r69 and assistant-only r70 each completed three real
+updates, public native verification, all five artifact downloads, independent
+finite adapter-delta checks and saved-final-adapter reload validation. The same
+Mac passed 51 lifecycle/CPU-host controls and three real MLX loss/autograd cases.
+Both final runs also passed fresh-process observation, reverification and all
+five artifact downloads after their signed start admissions expired, retaining
+original keys/catalogs and identical public inventories.
+The neutral base-only consumer passes against the candidate's wheel built from
+sdist; the optional public native module has no ML/storage/effect import. See
+the [Mac evidence](../review/native-mlx-sft-qualification.md),
+[public host contract](../architecture/native-mlx-host.md), and reconciled
+[support matrix](api-v1-support-matrix.md).
+
+Later retained evidence also closes the earlier bounded GRPO mechanics and
+original Windows completion/delivery questions: Modal GRPO on `ba228d6c` had
+three updates, changed parameter-set digest and nonconstant grouped rewards;
+Windows/WSL2 RTX3090 SFT ran on `6874e9d3`, with original-run native verification
+and five-role delivery through reviewed reader `b7d5e840`. Those exact sources
+remain distinct from the integrated candidate. Do not repeat training for a
+documentation, packaging or download correction.
+
+The broader stable checklist below is preserved. Native public
+logs/cancel/reconcile/GRPO remain disabled, and a consumer must independently
+authenticate exact qualification or a bounded restricted admission. Neither
+these successful fixtures nor report hashes establish broad stable lifecycle
+acceptance, arbitrary model/hardware support, writing quality, a Syntunia app or
+a default accepting qualification authority. Complete final CI/package/release
+review and the remaining active cancellation/caller-loss/reconciliation gates
+before claiming that broader stable release. No tag, publication, main merge
+or deployment is performed by this increment.
+
+## Historical release scope and gates
 
 This is the canonical preparation plan for the first broad stable OSS release.
 The selected scope is public Python API v1 scenarios, environment creation and

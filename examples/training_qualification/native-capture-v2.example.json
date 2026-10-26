@@ -1,0 +1,49 @@
+{
+  "capture": {
+    "stdlib": "/ABSOLUTE/PRIVATE/PYTHON/lib/python3.11",
+    "packages": "/ABSOLUTE/PRIVATE/VENV/lib/python3.11/site-packages",
+    "sources": [
+      "/ABSOLUTE/PRIVATE/SOURCE/examples/training_qualification",
+      "/ABSOLUTE/PRIVATE/SOURCE/shared",
+      "/ABSOLUTE/PRIVATE/SOURCE/synaptic_tuner",
+      "/ABSOLUTE/PRIVATE/SOURCE/tuner"
+    ],
+    "files": [
+      "/ABSOLUTE/PRIVATE/PYTHON/bin/python3.11",
+      "/ABSOLUTE/PRIVATE/PYTHON/lib/libpython3.11.dylib",
+      "/ABSOLUTE/PRIVATE/SOURCE/scripts/capture_native_mlx_runtime.py"
+    ],
+    "system_libraries": [
+      "/usr/lib/libSystem.B.dylib"
+    ],
+    "aliases": [],
+    "dynamic_system_libraries": [
+      {
+        "source": "/ABSOLUTE/PRIVATE/SOURCE/tuner/runtime/native_process_guardian.py",
+        "source_sha256": "REPLACE_WITH_REVIEWED_SOURCE_SHA256",
+        "call": "ctypes.CDLL",
+        "library": "/usr/lib/libSystem.B.dylib"
+      },
+      {
+        "source": "/ABSOLUTE/PRIVATE/SOURCE/tuner/runtime/native_process_guardian.py",
+        "source_sha256": "REPLACE_WITH_REVIEWED_SOURCE_SHA256",
+        "call": "ctypes.CDLL",
+        "library": "/usr/lib/libproc.dylib"
+      }
+    ],
+    "required_builtin_modules": ["_ctypes"],
+    "expected_os_build": {
+      "macos": "REPLACE_WITH_REVIEWED_MACOS_VERSION",
+      "kernel_build": "REPLACE_WITH_REVIEWED_FULL_KERNEL_BUILD"
+    }
+  },
+  "expectation": {
+    "python_version": "3.11.14",
+    "executable_sha256": "REPLACE_WITH_REVIEWED_EXECUTABLE_SHA256",
+    "dependency_lock_sha256": "REPLACE_WITH_REVIEWED_COMPLETE_LOCK_SHA256",
+    "distributions": {
+      "mlx": "0.32.2",
+      "mlx-lm": "0.32.2"
+    }
+  }
+}

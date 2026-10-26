@@ -35,9 +35,15 @@ For a Modal-backed application, start with the
 [durable consumer walkthrough](examples/training_qualification/modal-consumer.md).
 It covers the existing installed training and retained-run path, the public
 Python boundary, and the storage/authority Syntunia must own. HF Jobs
-qualification is paused; Modal GRPO and desktop local training on NVIDIA and
-Apple silicon remain required. Docker/CUDA and native macOS GPU execution need
-separate qualification.
+qualification remains paused. The support matrix records the exact qualified
+Modal GRPO, NVIDIA Docker/CUDA and native Apple-silicon SFT fixtures.
+
+For native Mac SFT, use the optional `synaptic_tuner.api.v1.native_mlx`
+[host integration contract](docs/architecture/native-mlx-host.md) and
+[real M4 qualification evidence](docs/review/native-mlx-sft-qualification.md).
+The host owns runtime/model preparation, authority and durable stores;
+submission is bounded and synchronous. Public native logs/cancel/reconcile and
+GRPO remain unavailable. Full desktop app distribution is a separate concern.
 
 Download a reviewed wheel from its GitHub release, then install that exact file
 and inspect the packaged CLI:

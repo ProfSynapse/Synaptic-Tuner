@@ -102,6 +102,38 @@ def test_real_flow_offline_rewards_metrics_and_mandatory_roles(tmp_path, monkeyp
     assert 'parameter_updated' not in result['training_lineage'].read_text()
 
 
+@pytest.mark.parametrize(('fp16', 'bf16', 'supported', 'expected'), [
+    (True, False, True, 'float16'),
+    (False, True, True, 'bfloat16'),
+    (False, True, False, 'float16'),
+])
+def test_model_load_precision_matches_effective_trainer_precision(
+        tmp_path, fp16, bf16, supported, expected):
+    values = inputs(tmp_path)
+    values['config']['training'].update(fp16=fp16, bf16=bf16)
+    values['workload']['config_sha256'] = runtime._sha(runtime._canonical(values['config']))
+    events = []
+    deps = dependencies(events)()
+    deps['bf16_supported'] = supported
+    def load(*args, **kwargs):
+        events.append(('model', args, kwargs))
+        return SimpleNamespace(config=SimpleNamespace(dtype=kwargs['dtype'])), Tokenizer(), False
+    deps['model_loader'].load_model_and_tokenizer = load
+    trainer_base = deps['trainer_class']
+    class PrecisionCheckingTrainer(trainer_base):
+        def __init__(self, **kwargs):
+            dtype = kwargs['model'].config.dtype
+            precision = kwargs['args']
+            if (dtype == 'float16' and precision.bf16) or (dtype != 'float16' and precision.fp16):
+                raise TypeError('incompatible model and trainer precision')
+            super().__init__(**kwargs)
+    deps['trainer_class'] = PrecisionCheckingTrainer
+    runtime.run_grpo(**values, _dependency_factory=lambda: deps)
+    assert events[0][2]['dtype'] == expected
+    assert (events[1][1]['args'].fp16, events[1][1]['args'].bf16) == (
+        expected == 'float16', expected == 'bfloat16')
+
+
 @pytest.mark.parametrize('change', ['dataset', 'reward', 'config', 'model', 'method', 'nonfinite', 'bool', 'custom', 'pivot', 'empty'])
 def test_rejects_before_dependency_effects(tmp_path, change):
     values = inputs(tmp_path)

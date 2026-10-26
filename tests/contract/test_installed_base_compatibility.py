@@ -163,6 +163,18 @@ def test_native_diagnostic_has_no_project_or_compute_effects():
     assert not any(name.partition('.')[0] in _OPTIONAL for name in sys.modules)
 
 
+def test_installed_native_composition_has_no_ml_or_host_effects():
+    checkout, _ = _context()
+    with _no_effects():
+        native = importlib.import_module('synaptic_tuner.api.v1.native_mlx')
+        _installed(native, checkout)
+        assert native.__all__
+        for name in native.__all__:
+            value = getattr(native, name)
+            _installed(importlib.import_module(value.__module__), checkout)
+    assert not any(name.partition('.')[0] in _OPTIONAL for name in sys.modules)
+
+
 def test_installed_console_and_project_manifest():
     _context()
     from tuner.project.manifest import load_project_manifest
@@ -194,6 +206,7 @@ if __name__ == '__main__':
                   test_real_installed_configuration_loaders,
                   test_help_has_no_optional_import_or_process_network_effect,
                   test_native_diagnostic_has_no_project_or_compute_effects,
+                  test_installed_native_composition_has_no_ml_or_host_effects,
                   test_installed_console_and_project_manifest):
         check()
     print('Installed base compatibility checks passed')

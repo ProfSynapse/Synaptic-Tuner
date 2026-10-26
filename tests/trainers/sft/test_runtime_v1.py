@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import importlib.util
 import json
 import multiprocessing
 import os
@@ -9,8 +10,10 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import venv
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -185,6 +188,7 @@ def _fixture(
     message_sft_overrides: dict[str, object] | None = None,
     raw_dataset_without_controls: bool = False,
     prepared_payload: bytes | None = None,
+    python_executable: str | None = None,
 ):
     if mode != "dual_clone":
         raise ValueError(
@@ -424,7 +428,7 @@ def _fixture(
         writable_capability_root=str(capability_root),
         python_implementation="cpython",
         python_version=".".join(str(part) for part in sys.version_info[:3]),
-        python_executable=str(Path(sys.executable).resolve()),
+        python_executable=python_executable or sys.executable,
         python_executable_digest="6" * 64,
         environment=planned_environment,
         secret_requirements_digest="5" * 64,
@@ -452,8 +456,9 @@ import os, runpy, sys
 from pathlib import Path
 assert sys.dont_write_bytecode is False
 bootstrap = runpy.run_path(sys.argv[1], run_name="fixture_bootstrap")
-def fixture_trainer(path, *, run_name):
+def fixture_trainer(path, *, run_name, init_globals):
     assert Path(path).name == "train_sft.py"
+    assert callable(init_globals["__packaged_runtime_phase__"])
     import shared.env_bootstrap
     return {}
 runpy.run_path = fixture_trainer
@@ -481,12 +486,137 @@ assert not list(roots.engine.rglob("*.pyc")), "worker modified its closure"
 print("TWO_GENERATIONS_PASS")
 '''
     completed = subprocess.run(
-        [str(Path(sys.executable).resolve()), "-I", "-c", outer_code, str(engine_file), child_code],
+        [sys.executable, "-I", "-c", outer_code, str(engine_file), child_code],
         input=workload.canonical_bytes, env=environment, cwd=roots["tmp"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
     assert completed.returncode == 0, completed.stderr.decode()
     assert completed.stdout.strip() == b"TWO_GENERATIONS_PASS"
+
+
+def test_declared_venv_launcher_preserves_isolated_child_packages(tmp_path, monkeypatch):
+    """The real invocation and runner must retain a venv-only dependency."""
+    virtual = tmp_path / "runtime-venv"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(virtual)
+    launcher = virtual / "bin/python3"
+    physical = launcher.resolve(strict=True)
+    assert physical != launcher
+    site = subprocess.run(
+        [str(launcher), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        capture_output=True, text=True, check=True, timeout=20,
+    ).stdout.strip()
+    Path(site, "synaptic_venv_only_probe.py").write_text("VALUE = 1\n", encoding="utf-8")
+    child = tmp_path / "probe_child.py"
+    child.write_text(
+        "import importlib.util\n"
+        "raise SystemExit(42 if importlib.util.find_spec('synaptic_venv_only_probe') else 43)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "executable", str(launcher))
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path / "fixture", python_executable=str(launcher), raw_sft_overrides={}
+    )
+    admitted, roots = runtime_v1.decode_and_validate_workload(
+        workload.canonical_bytes, environment, engine_file=engine_file
+    )
+    invocation = runtime_v1.build_trainer_invocation(admitted, roots, environment)
+    assert invocation.argv[0] == str(launcher)
+    baseline = replace(
+        invocation, argv=(str(physical), "-I", str(child), *invocation.argv[3:]),
+        stdout_path=tmp_path / "physical.stdout", stderr_path=tmp_path / "physical.stderr",
+    )
+    observed = replace(
+        invocation, argv=(invocation.argv[0], "-I", str(child), *invocation.argv[3:]),
+        stdout_path=tmp_path / "declared.stdout", stderr_path=tmp_path / "declared.stderr",
+    )
+    try:
+        assert runtime_v1.SubprocessTrainerRunner().run(baseline).exit_code == 43
+        assert runtime_v1.SubprocessTrainerRunner().run(observed).exit_code == 42
+    finally:
+        runtime_v1._close_retained_fds(invocation.retained_fds)
+
+
+def test_declared_launcher_rejects_different_physical_interpreter(tmp_path, monkeypatch):
+    virtual = tmp_path / "runtime-venv"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(virtual)
+    launcher = virtual / "bin/python3"
+    monkeypatch.setattr(sys, "executable", str(launcher))
+    workload, environment, engine_file, _, _ = _fixture(
+        tmp_path / "fixture", python_executable="/bin/false", raw_sft_overrides={}
+    )
+    admitted, roots = runtime_v1.decode_and_validate_workload(
+        workload.canonical_bytes, environment, engine_file=engine_file
+    )
+    with pytest.raises(RuntimeV1Error, match="resolved runtime interpreter"):
+        runtime_v1.build_trainer_invocation(admitted, roots, environment)
+
+
+@pytest.mark.parametrize("stub_torch", [False, True])
+def test_normal_parent_admits_independently_bound_fixed_stop_derivative(tmp_path,
+                                                                       stub_torch):
+    from scripts import diagnose_docker_torch_import as diagnostic
+
+    if not stub_torch and importlib.util.find_spec("torch") is not None:
+        pytest.skip("CPU fixture requires an interpreter without Torch")
+
+    payload = (b'{"format":"raw_text","schema_version":"syntunia-sft-row/v1",'
+               b'"split":"train","text":"fixture"}\n')
+    workload, environment, engine_file, roots, _ = _fixture(
+        tmp_path, raw_sft_overrides={}, prepared_payload=payload
+    )
+    engine = engine_file.parents[2]
+    trainer = engine / "Trainers/sft/train_sft.py"
+    original = trainer.read_bytes()
+    if stub_torch:
+        marker = b'_mark_packaged_runtime_phase("TORCH_IMPORT")\n'
+        assert original.count(marker) == 1
+        original = original.replace(marker, b"import types\nsys.modules['torch'] = types.ModuleType('torch')\n" + marker)
+    boundary = diagnostic._trainer_prefix_boundary(original)
+    derived = b"".join(original.splitlines(keepends=True)[:boundary + 1]) + diagnostic._DIRECT_STOP
+    trainer.write_bytes(derived)
+    manifest = Path(environment["SYNAPTIC_WORKER_CLOSURE_MANIFEST"])
+    document = json.loads(manifest.read_bytes())
+    member = next(item for item in document["members"] if item["path"] == "Trainers/sft/train_sft.py")
+    member["sha256"] = hashlib.sha256(derived).hexdigest()
+    member["size_bytes"] = len(derived)
+    document["payload_bytes"] = sum(item["size_bytes"] for item in document["members"])
+    document["closure_digest"] = offline_sft_worker.closure_digest(document)
+    manifest.write_bytes(json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+    environment["SYNAPTIC_WORKER_CLOSURE_DIGEST"] = document["closure_digest"]
+    admitted, bound_roots = runtime_v1.decode_and_validate_workload(
+        workload.canonical_bytes, environment, engine_file=engine_file
+    )
+    invocation = runtime_v1.build_trainer_invocation(admitted, bound_roots, environment)
+    assert invocation.argv[1:3] == ("-I", str(engine / "tuner/runtime/offline_sft_worker.py"))
+    assert invocation.environment[0][0] != "PYTHONPATH"
+    assert dict(invocation.environment)["SYNAPTIC_WORKER_CLOSURE_DIGEST"] == document["closure_digest"]
+    assert len(invocation.retained_fds) == 1
+    runtime_v1._close_retained_fds(invocation.retained_fds)
+
+    control = tmp_path / "transport-control"
+    control.mkdir()
+    source = control / "workload.json"
+    source.write_bytes(workload.canonical_bytes)
+    completed = subprocess.run(
+        [sys.executable, str(engine_file),
+         "--canonical-workload-file", str(source),
+         "--canonical-workload-control-root", str(control),
+         "--canonical-workload-byte-count", str(len(workload.canonical_bytes)),
+         "--canonical-workload-sha256", hashlib.sha256(workload.canonical_bytes).hexdigest(),
+         "--canonical-workload-fingerprint", workload.fingerprint],
+        cwd=roots["tmp"], env=environment, stdin=subprocess.DEVNULL,
+        capture_output=True, timeout=20,
+    )
+    assert completed.returncode == 23
+    assert completed.stdout == b""
+    assert completed.stderr == b"SFT_RUNTIME_V1_REJECTED\n"
+    expected = (b"OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=SYSTEM_EXIT "
+                b"milestone=UNSLOTH_IMPORT\n" if stub_torch else
+                b"OFFLINE_SFT_WORKER_REJECTED phase=TRAINER category=IMPORT "
+                b"milestone=TORCH_IMPORT\n")
+    assert (roots["tracking"] / "trainer.stderr.log").read_bytes() == expected
+    assert b"from unsloth import" not in derived
+    assert b"TRAIN_CALL" not in derived
 
 
 class FakeRunner:
@@ -973,7 +1103,7 @@ def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
     invocation = runner.calls[0]
     assert invocation.cwd == roots["tmp"]
     assert invocation.argv[:4] == (
-        str(Path(sys.executable).resolve(strict=True)),
+        sys.executable,
         "-I",
         str(
             Path(environment["SYNAPTIC_ENGINE_ROOT"])

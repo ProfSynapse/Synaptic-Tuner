@@ -1,0 +1,77 @@
+{
+  "schema": "synaptic-native-qualification-proposal/v1",
+  "status": "ROOT_REVIEW_REQUIRED_NOT_EXECUTION_AUTHORITY",
+  "profile_ref": "native-mlx-qwen3-06b-4bit-m4-candidate",
+  "method": "sft",
+  "source_requirement": "Exact independently reviewed pushed feature/integration commit; root issues the source and attempt binding after review.",
+  "runtime": {
+    "python_version": "3.11.14",
+    "mlx_version": "0.32.2",
+    "mlx_lm_version": "0.32.2",
+    "dependency_lock_sha256": "7c167018ee6bd61a3609971e3f834082c798e7bd2a3fa0c5c2564887da4fde4f",
+    "hardware": "Apple M4",
+    "physical_memory_bytes": 25769803776,
+    "capture_requirement": "Exact source including shared namespace, private interpreter/framework, stdlib, 54-package combined inventory, static native dependency graph, startup files, OS build and selected-wheel archive provenance; original 50 lock remains unchanged; no self-issued promotion."
+  },
+  "model": {
+    "repository": "mlx-community/Qwen3-0.6B-4bit",
+    "revision": "73e3e38d981303bc594367cd910ea6eb48349da8",
+    "tokenizer_repository": "mlx-community/Qwen3-0.6B-4bit",
+    "tokenizer_revision": "73e3e38d981303bc594367cd910ea6eb48349da8",
+    "download_budget_bytes": 536870912,
+    "trust_remote_code": false,
+    "snapshot_requirement": "Fresh private snapshot with reviewed complete file hashes, retained root descriptors, no model conversion or shared-cache writes."
+  },
+  "training": {
+    "batch_size": 1,
+    "max_seq_length": 128,
+    "max_batch_tokens": 128,
+    "iterations": 3,
+    "seed": 17,
+    "steps_per_report": 1,
+    "steps_per_eval": 3,
+    "steps_per_save": 3
+  },
+  "lora": {
+    "layers": 2,
+    "rank": 4,
+    "scale": 8,
+    "dropout": 0,
+    "targets": ["self_attn.q_proj", "self_attn.v_proj"]
+  },
+  "optimizer": {
+    "learning_rate": 0.0001,
+    "beta1": 0.9,
+    "beta2": 0.999,
+    "epsilon": 0.00000001,
+    "weight_decay": 0,
+    "bias_correction": true,
+    "schedule": "constant"
+  },
+  "bounds": {
+    "maximum_training_attempts": 2,
+    "maximum_total_optimizer_updates": 6,
+    "timeout_seconds_per_attempt": 300,
+    "termination_grace_seconds": 5,
+    "maximum_output_bytes_per_stream": 1048576,
+    "maximum_artifact_file_bytes": 67108864,
+    "maximum_artifact_set_bytes": 134217728
+  },
+  "input_review": {
+    "source": "Existing prepared-publication CLI/service, synthetic material only",
+    "rows_per_attempt": {"train": 3, "validation": 2},
+    "attempt_1": "Raw text, full_sequence, full_conversation, no template arguments",
+    "attempt_2": "Prepared prompt/completion, assistant_only, prompt_completion, enable_thinking=false",
+    "checks": ["Exact tokenizer tokens and splits", "Causal loss against independent reference", "Noncontiguous ignored-label fixture", "No truncation or row dropping"]
+  },
+  "acceptance": [
+    "One fresh host-owned attempt per run; preserve every consumed claim",
+    "Actual optimizer step count equals three",
+    "Finite nonzero saved-adapter parameter delta",
+    "Held-out evaluation after reloading the saved final adapter",
+    "Independent native safetensors inventory and authenticated public artifact readback",
+    "Real Darwin deadline, stop and owner-loss/restart evidence",
+    "Syntunia uses TrainingAPI/RunsAPI and host-owned existing ports",
+    "No native GRPO or hardware capability promotion from CPU contracts"
+  ]
+}
