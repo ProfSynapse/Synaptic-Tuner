@@ -583,6 +583,12 @@ python tuner.py cloud-gym --run latest --method sft
 python tuner.py ml train --config Trainers/ml/configs/templates/regression.yaml
 ```
 
+## Certificate trust maintenance
+
+Before refreshing launcher dependencies or cloud images, read
+[certificate trust maintenance](reference/certificate-trust.md). Standalone
+certifi, pip, uv, OS stores and measured cloud image inventories are separate.
+
 ## Environment Variables
 
 ```bash

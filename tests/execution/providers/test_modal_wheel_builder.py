@@ -26,7 +26,7 @@ def _item(raw: bytes) -> dict[str, object]:
 def test_locked_build_closure_is_exact_and_supported():
     wheels = builder._locked_wheels()
     assert [(w["name"], w["version"]) for w in wheels] == [
-        ("pip", "26.2"), ("setuptools", "84.0.0"),
+        ("pip", "26.2.2"), ("setuptools", "84.0.0"),
         ("wheel", "0.48.0"), ("packaging", "26.3"),
     ]
     assert sum(int(w["size"]) for w in wheels) < 3 * 1024 * 1024
