@@ -433,3 +433,22 @@ the probe cannot retroactively establish its failure cause or admit a retry.
 See `docs/plans/native-desktop-training-api-v1.md` for remaining review and
 real-Mac acceptance. The CPU facade tests substitute the ML child;
 they are not a hardware result and must never unlock the candidate.
+
+### Verification and numeric checks — 2026-10-26
+
+The earlier staging observations above are historical. Exact successful Mac
+attempts and their limits are recorded in
+`docs/review/native-mlx-sft-qualification.md`; use that report's source bindings.
+The engine's `runs.verify` admits an initially unverified artifact set.
+For an already verified run, use `runs.reverify`; the restricted host consumer
+exposes separate `verify` and `reverify` actions. A repeated initial verification
+can refuse by design and is never a reason to rerun training or renew admission.
+Retained reads use the original keys, catalog and material after start expiry.
+
+On the admitted Apple runtime, the checked-in
+`tests/runtime/test_native_mlx_numeric.py` compares the production loss hook and
+real MLX autograd against independent scalar softmax/cross-entropy gradients for
+full-sequence, prompt-masked and noncontiguous labels. Run with the separate test
+tools and a bounded process; it loads MLX but no model or training publication.
+Its three cases skip on non-Apple hosts. A skip or CPU algebra double is not
+real MLX numerical evidence and does not issue training authority.

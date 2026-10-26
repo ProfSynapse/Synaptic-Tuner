@@ -397,11 +397,12 @@ def test_cold_public_readback_survives_expiry_and_remote_ref_advance(host_case):
             shown = native_host.operate(config, action="show", trusted_root_key_sha256=trusted)
             observed = native_host.operate(config, action="observe", trusted_root_key_sha256=trusted)
             verified = native_host.operate(config, action="verify", trusted_root_key_sha256=trusted)
+            reverified = native_host.operate(config, action="reverify", trusted_root_key_sha256=trusted)
             downloaded = native_host.operate(
                 config, action="download", trusted_root_key_sha256=trusted,
                 destination=Path(config["state_root"]) / "downloaded",
             )
-            connection.send((shown, observed, verified, downloaded, len(calls)))
+            connection.send((shown, observed, verified, reverified, downloaded, len(calls)))
         finally:
             connection.close()
     parent, child = multiprocessing.get_context("fork").Pipe(duplex=False)
@@ -410,7 +411,7 @@ def test_cold_public_readback_survives_expiry_and_remote_ref_advance(host_case):
     child.close()
     try:
         assert parent.poll(10), "cold native reader did not finish"
-        shown, observed, verified, downloaded, child_calls = parent.recv()
+        shown, observed, verified, reverified, downloaded, child_calls = parent.recv()
         reader.join(2)
         assert reader.exitcode == 0 and child_calls == 1
     finally:
@@ -421,6 +422,7 @@ def test_cold_public_readback_survives_expiry_and_remote_ref_advance(host_case):
     assert shown["run"]["run_id"] == "run"
     assert observed["state"] == "succeeded"
     assert verified["verified"] is True
+    assert reverified["verified"] is True
     assert len(downloaded["paths"]) == 5 and len(calls) == 1
     with pytest.raises(ValueError, match="pushed source"):
         native_host.operate(config, action="start", trusted_root_key_sha256=trusted)

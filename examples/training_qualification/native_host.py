@@ -476,7 +476,7 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None,
 
 def operate(config, *, action="start", destination=None, trusted_root_key_sha256=None):
     """Start once, or recompose the same selected run for a cold public read."""
-    if action not in {"start", "show", "observe", "verify", "download"}:
+    if action not in {"start", "show", "observe", "verify", "reverify", "download"}:
         raise ValueError("native public action is unavailable")
     state = Path(config["state_root"])
     if action != "start":
@@ -588,8 +588,9 @@ def operate(config, *, action="start", destination=None, trusted_root_key_sha256
             return api.runs.show(run).to_dict()
         if action == "observe":
             return api.runs.outcome(run).to_dict()
-        if action == "verify":
-            report = api.runs.verify(run)
+        if action in {"verify", "reverify"}:
+            report = (api.runs.verify(run) if action == "verify"
+                      else api.runs.reverify(run))
             return {"run": report.run.to_dict(), "verified": report.verified,
                     "checked_at": report.checked_at}
         if destination is None:
@@ -603,7 +604,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("canonicalize", "profile-candidate", "inspect",
                                           "admission-candidate", "seal-admission", "start",
-                                          "show", "observe", "verify", "download",
+                                          "show", "observe", "verify", "reverify", "download",
                                           "snapshot-candidate"))
     parser.add_argument("config", type=Path, nargs="?")
     parser.add_argument("--destination", type=Path)

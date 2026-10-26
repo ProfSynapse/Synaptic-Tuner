@@ -85,6 +85,9 @@ This repository has a few cloud-training constraints that are easy to relearn th
   optimizer update count, saved adapter tensor inventory, finite parameter delta
   and a separate evaluation after reloading the saved final adapter. Never
   report upstream's last in-loop loss as final-adapter validation.
+- Use public `runs.verify` for initial native artifact admission and
+  `runs.reverify` for an already verified run. Retain original authority after
+  start expiry; a read or verification refusal never authorizes retraining.
 - Native public composition uses `native_mlx_planning.py` and
   `native_mlx_family.py` through the existing `ProviderFamilyV1` and reference
   host. Keep its independently authenticated hardware qualification gate closed

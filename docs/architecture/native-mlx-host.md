@@ -85,12 +85,16 @@ based on the guardian's internal cleanup behavior.
 
 For fresh-process readback, reopen the original private store and retain the
 original catalog, source/model/runtime inputs and signing authorities. The
-reference consumer's `show`, `observe`, `verify` and `download` actions rebuild
+reference consumer's `show`, `observe`, `verify`, `reverify` and `download` actions rebuild
 only the exact selected read binding. Expiry blocks a new restricted start,
 not authenticated retained reads. Missing keys, modified material or an
 uncertain submission cannot be repaired by adopting another run or issuing a
 new submission grant. Preserve diagnostic history even when later native
 verification succeeds.
+
+Use `runs.verify` for initial artifact admission and `runs.reverify` for an
+already verified run. These are distinct authenticated transitions; repeating
+initial verification is refused. The reference consumer exposes both actions.
 
 ## Artifacts and support claims
 
