@@ -20,6 +20,12 @@ attempt. Never renew a consumed or uncertain submission.
 
 ## Read-only host diagnosis
 
+Consumer integration uses the optional public
+`synaptic_tuner.api.v1.native_mlx` composition module with existing
+`TrainingAPI`/`RunsAPI` and host-owned ports. See
+`docs/architecture/native-mlx-host.md` (repo root) for installation/source assets,
+authority, synchronous submission, retained reads and explicit capability limits.
+
 Run `python tuner.py doctor native-training --json` on the target machine to
 record a bounded, versioned `DIAGNOSTIC_ONLY` report. The command observes OS,
 architecture, macOS version when applicable, CPython implementation/version,

@@ -216,7 +216,8 @@ def test_darwin_exit_observer_uses_kqueue_without_reaping(monkeypatch):
     for name, value in (("KQ_FILTER_PROC", 1), ("KQ_EV_ADD", 1), ("KQ_EV_ONESHOT", 2),
                         ("KQ_NOTE_EXIT", 4), ("KQ_EV_ERROR", 8)):
         monkeypatch.setattr(guardian.select, name, value, raising=False)
-    monkeypatch.setattr(guardian.os, "waitid", lambda *a: pytest.fail("Darwin must not call waitid"))
+    monkeypatch.setattr(guardian.os, "waitid", lambda *a: pytest.fail("Darwin must not call waitid"),
+                        raising=False)
     observer = guardian._ExitObserver(type("Child", (), {"pid": 42})())
     assert observer.exited() is True
     observer.close()

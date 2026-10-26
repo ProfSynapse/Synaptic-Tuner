@@ -23,14 +23,14 @@ from synaptic_tuner.api.v1.training_input import TrainingInputV1
 from synaptic_tuner.api.v1.training_facade import TrainingRequest
 from tuner.execution.foundation_v2.references import ExecutionScopeV1
 from tuner.runtime.native_mlx_material import canonical, native_runtime_spec, strict_json
-from tuner.runtime.native_process import NativeInvocation, NativeOwnedProcess, NativeProcessLimits
+from tuner.runtime.native_process import NativeOwnedProcess
 from tuner.training.coordinator_material import _domain, _runtime
 from tuner.training.modal_host_authority import HMACAuthenticator
-from tuner.training.native_mlx_authority import NativeEvidenceAuthority, NativeMaterialAuthority
-from tuner.training.native_mlx_compilation import compile_native_sft, parse_native_workload
-from tuner.training.native_mlx_family import NativeCommandMaterialV1, NativeCommandCatalogV1, native_mlx_family
-from tuner.training.native_mlx_planning import (
-    NativePlanningV1, NativeQualificationV1, NativeRestrictedAdmissionV1,
+from tuner.training.native_mlx_compilation import parse_native_workload
+from synaptic_tuner.api.v1.native_mlx import (
+    NativeCommandCatalogV1, NativeCommandMaterialV1, NativeEvidenceAuthority,
+    NativeInvocation, NativeMaterialAuthority, NativePlanningV1, NativeProcessLimits,
+    NativeQualificationV1, NativeRestrictedAdmissionV1, compile_native_sft, native_mlx_family,
 )
 
 

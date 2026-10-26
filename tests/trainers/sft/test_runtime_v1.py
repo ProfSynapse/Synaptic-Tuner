@@ -428,7 +428,7 @@ def _fixture(
         writable_capability_root=str(capability_root),
         python_implementation="cpython",
         python_version=".".join(str(part) for part in sys.version_info[:3]),
-        python_executable=python_executable or str(Path(sys.executable).resolve()),
+        python_executable=python_executable or sys.executable,
         python_executable_digest="6" * 64,
         environment=planned_environment,
         secret_requirements_digest="5" * 64,
@@ -486,7 +486,7 @@ assert not list(roots.engine.rglob("*.pyc")), "worker modified its closure"
 print("TWO_GENERATIONS_PASS")
 '''
     completed = subprocess.run(
-        [str(Path(sys.executable).resolve()), "-I", "-c", outer_code, str(engine_file), child_code],
+        [sys.executable, "-I", "-c", outer_code, str(engine_file), child_code],
         input=workload.canonical_bytes, env=environment, cwd=roots["tmp"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
@@ -1103,7 +1103,7 @@ def test_runtime_invokes_fixed_non_shell_trainer_and_emits_exact_roles(
     invocation = runner.calls[0]
     assert invocation.cwd == roots["tmp"]
     assert invocation.argv[:4] == (
-        str(Path(sys.executable).resolve(strict=True)),
+        sys.executable,
         "-I",
         str(
             Path(environment["SYNAPTIC_ENGINE_ROOT"])
