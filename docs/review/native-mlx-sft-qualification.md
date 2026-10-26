@@ -1,8 +1,9 @@
 # Native MLX SFT qualification — 2026-10-26
 
-The recovered API v1 work now has two successful bounded SFT mechanics
-checks on the owner's Apple M4 MacBook Air: raw full-sequence and assistant-only
-prompt/completion. This is exact-run hardware evidence;
+The recovered API v1 work has successful bounded SFT mechanics checks on the
+owner's Apple M4 MacBook Air: an initial raw/assistant-only pair on `7a8f36ec`
+and a fresh pair on integrated engine candidate `06e0fcf2`, recorded below.
+This is exact-run hardware evidence;
 ordinary native capability and Syntunia training remain gated.
 
 ## Execution and custody
@@ -115,7 +116,7 @@ training_metrics   1214  c9cd9ff87d0d17461f1cb5c28ed563f975df01b41a5416d50a66009
 workload_record    2849  e9e442e55434446f66903cddcad544d6d370c8c012480bfe28cbec36065488aa
 ```
 
-## Test isolation and remaining gates
+## Initial pair: test isolation and remaining gates
 
 The prior PR269 CPU core CI ended with `OSError: [Errno 27] File too large`
 while pytest wrote its JUnit report. A targeted reproduction showed that two
@@ -141,3 +142,109 @@ independent report are retained under
 `native-messages-r62` on the
 Linux host, with the original attempt state and public delivery on the Mac.
 Nexus workspace `Fine-Tuning Lab`, task `T-0c6ae8a8`, records the continuation.
+
+## Integrated engine qualification — 2026-10-26
+
+Fresh raw r69 and assistant-only r70 executed clean pushed
+`06e0fcf24ca152621044736f65f87ce6e176d0f4` on the same pinned M4,
+private CPython 3.11.14 / 54-package runtime and model/tokenizer revision above.
+This candidate integrates the Windows SFT launcher/reader repairs, GRPO precision
+fix and main's host certificate-trust changes. The production native execution,
+preprocessing and artifact-verification sources remain unchanged from `7a8f36ec`.
+Independent correctness/security review accepted the integrated source for
+bounded qualification; it did not issue execution or ordinary qualification
+authority. Each run then received a separate externally signed, single-use
+admission with new run/request/attempt/grant/state identities and the same finite
+three-update/300-second bounds. No earlier attempt was replayed.
+
+The fresh runtime capture is
+`f5bbd580ae82c5df3d20730f1535ddd63de70ca7b66f64d667b71dea2bca3257`.
+All 722 selected project files match exact Git membership, sizes and hashes;
+the runtime trees, interpreter, native dependency graph, OS and builtins match
+the earlier reviewed capture. The existing capture CLI's current-filesystem
+check passed. The distinct coordinator runtime digest is
+`82a68a691c815a2b5c17ee53252d0c2d436e7b2144f1678b268557508d05c553`.
+Capture remains an observation, with the exact OS shared cache and exclusive
+host ownership as explicit trust boundaries.
+
+All **51** process/CPU-host tests passed on the real Mac, including deadline,
+output, live-owner stop and owner-pipe-loss cleanup. The repaired injected-signal
+cases separately retained unchanged pytest hard resource limits. Three additional
+real-MLX tests compare the production causal loss and autograd against independent
+scalar cross-entropy/softmax gradients for full-sequence, prompt-masked and
+noncontiguous supervision. All three passed without loading a model. Linux skips
+for these three cases are intentional and are not hardware evidence.
+
+| Exact integrated run | Raw r69 | Assistant-only r70 |
+| --- | --- | --- |
+| Run | `6f5f645e-8299-4a73-82bb-a0403e916cf5` | `fdf1fb74-d481-4426-9718-36966e30200a` |
+| Attempt | `153687cc-b5cf-4f03-8d76-605be5da3b1d` | `a42741ef-c876-4e30-9d1d-ab7987a34464` |
+| Actual updates | 3 | 3 |
+| Changed scalar adapter parameters | 40,960 / 40,960 | 40,960 / 40,960 |
+| Independent delta L2 | 0.03652545480504223 | 0.037091878184678954 |
+| Saved-adapter reload held-out loss | 4.3157453536987305 | 3.949827194213867 |
+| Held-out rows / supervised tokens | 2 / 37 | 2 / 17 |
+| Public verification and delivery | Passed, all five roles | Passed, all five roles |
+
+The publications and tokenization contracts are the same as r61/r62; r70's
+compiled workload and verified lineage explicitly retain assistant-only loss,
+prompt/completion and `enable_thinking=false`. Independent Linux readback matched
+every public size/hash, checked the four-member model archive, recomputed actual
+initial-to-final adapter changes and matched the saved-final-reload evidence.
+Identical numeric results across these two source pairs are fixture repeatability
+evidence, not a model-quality result or a promise that every future run succeeds.
+
+Raw r69 public manifest:
+
+```text
+final_model       337920  85d930adb99ab29a83fb19429ba7590f0bd1e5dbb1dfeafbb534b2712e2d08f3
+tokenizer       15892480  1a0d8f59e96a5aeae51232d71dd2ccb44ed32d8f2afbcec3af251a84b96bce1e
+training_lineage   1078  317b83610990d4f0d1b8d3648e095607b20e86d656d7acb6363bbc7f90b4f321
+training_metrics   1214  df6fef68a035a4f42d68d314ab6117a623bbf025042c34846f51f65755dfa812
+workload_record    2781  18d0c1bd6f393b0779c2bdfcd1927fc727e30a7f37727d388a1f2e874e6313a4
+```
+
+Assistant-only r70 public manifest:
+
+```text
+final_model       337920  59029b4bc2bb6aa58383d046dd08163b0fcfc73c886d357e3cb1ae00e7dd6ca0
+tokenizer       15892480  668e35f7bc5da35ff0a36a277eb8c0f37f4c004a75bee3b4ece92d8f4690bb36
+training_lineage   1098  23aab4f4be4bf66acd322794e4ccf70f32668a2b8021a0e01ac57b2e6ace47f7
+training_metrics   1214  891890b2d2ce3c39f2682f01313bfddc7b33f0d97655ed5a0365edf25d6196b9
+workload_record    2849  3bc52863fa72ae62d9f12cea85d3f9c17c60dd9bafff066daecbe5550e5aaff2
+```
+
+The candidate's sdist-to-wheel build and neutral base-only installed consumer
+passed. All 17 native/public module bytes in both archives match exact `06e0fcf2`.
+Wheel SHA256 is
+`56300d87ae39b16a23b31f96459db747eb01dad1f38372540ac9c5dc45299908`;
+sdist SHA256 is
+`c5f70f72eb819896aa9c9608a3d7ce321a84c6b051e8039e6adcbbf8af099fe9`.
+These archives are retained qualification artifacts, not a published release.
+The installed library still requires separately captured worker source and
+host-owned runtime/model preparation. See the
+[native host integration contract](../architecture/native-mlx-host.md).
+
+Use `runs.verify` for initial artifact admission and `runs.reverify` after a run
+is already verified. Repeating initial verification can correctly refuse the
+new transition. Original r61's public reverify succeeded after its signed start
+window expired, using original authority; no training was repeated. The current
+reference consumer exposes both actions explicitly.
+
+Both final-source start admissions expired at **21:05:00 UTC**. Separate fresh
+consumer processes then observed success, reverified using the original keys
+and catalogs, and downloaded all five roles into new private destinations.
+Reverification completed at **21:05:21.724370 UTC** for r69 and
+**21:05:33.107026 UTC** for r70. Every redelivered size/hash matched the original
+verified inventory. No training grant was renewed and no start was dispatched.
+This proves retained exact-run readback after expiry, not unknown-run adoption
+or checkpoint resume.
+
+Exact original signed admissions, command results, delivered roles, numeric and
+lifecycle records, and independent reports are retained under the private Linux
+evidence root `~/.cache/synaptic-tuner-release-proof/resume-20261026/`, in
+`integrated-06e0fcf2`, `integrated-raw-r69` and `integrated-messages-r70`, with
+original Mac state preserved. Earlier rejected/unsigned stages remain intact.
+No `NativeQualificationV1` is manufactured from these report hashes. This scoped
+evidence does not enable native public logs/cancel/reconcile/GRPO or approve the
+broader stable-v1 lifecycle gates, arbitrary hardware/models or a desktop app.

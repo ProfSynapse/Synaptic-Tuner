@@ -1,12 +1,41 @@
 ---
 status: release-preparation
-baseline: df166a75
-updated: 2026-10-20
+baseline: 06e0fcf2
+updated: 2026-10-26
 ---
 
 # API v1 support and qualification matrix
 
-## Current integration baseline — 2026-10-20
+## Integrated engine candidate — 2026-10-26
+
+The current owner-selected work is the open-source engine API and reliable Mac
+training integration. Full desktop installation/signing, bundled-runtime UX,
+managed-download UI and local inference conversion are outside this increment.
+Candidate `06e0fcf24ca152621044736f65f87ce6e176d0f4` integrates the release/GRPO,
+Windows SFT and native MLX branches with main's host-trust corrections. Fixed
+closure inventories and non-hash runtime pins are preserved. Independent source
+review accepted it for bounded qualification, and a neutral base-only installed
+consumer passed. No stable tag, package release or Syntunia deployment follows.
+
+Native public composition is available explicitly through
+`synaptic_tuner.api.v1.native_mlx`, using the existing `TrainingAPI`/`RunsAPI`
+and host-owned authority/storage ports. The exact M4/Qwen3-0.6B/CPython3.11.14/
+MLX-LM0.32.2 fixture passed fresh raw and assistant-only runs on this integrated
+source, each with three actual updates, finite changed saved adapters, separate
+saved-adapter reload validation, public verification and five-role delivery.
+Real Mac process and numerical controls passed. See the
+[exact source-scoped report](../review/native-mlx-sft-qualification.md) and
+[host integration contract](../architecture/native-mlx-host.md).
+
+The rows below reconcile later GRPO/Windows/native evidence without relabeling
+older execution sources as this candidate. A host must authenticate qualification
+for its exact selection; no default native admission is shipped. Public native
+logs/cancel/reconcile/GRPO remain unavailable. Broad stable-v1 active cancellation,
+caller-loss/reconciliation and final release checks remain separate gates.
+HF Jobs qualification remains owner-paused. Existing Windows/Modal runs are not
+retrained to repair documentation, packaging or local readback.
+
+## Historical integration baseline — 2026-10-20
 
 The consumer target is **Modal SFT and GRPO through public API v1**, with
 retained known-run reads and verified artifacts. HF Jobs qualification is
@@ -94,15 +123,15 @@ existing APIs. Nontraining smoke results remain bounded synthetic evidence.
 | Route / operation | Current support | Evidence and release requirement |
 | --- | --- | --- |
 | SFT generic plan/preflight/start | Implemented/provider-free public `TrainingAPI` and SFT compiler | Compile exact recipe/input/runtime identities, then host-owned grants and coordinator effects. Not every named recipe/model/hardware combination is qualified. |
-| SFT Docker start/observe/artifacts | Installed durable host/consumer; live completion still open | The latest exact container exited before trainer invocation with runtime code 35. Verified-cache reuse lacked three required writable roots. PR #259 corrects consumer preparation; it requires a distinct live attempt. Keep failed records and existing verified cache/image. Required for the desktop local-training product; the current target is NVIDIA/CUDA, not Apple GPU support. |
+| SFT Docker start/observe/artifacts | Live-qualified, bounded original Windows/WSL2 NVIDIA run | Three-update RTX 3090 run `docker-sft-venv-6874-r50-20261025` executed source `6874e9d3935065d3df650be953de141eb581ad0d`. Reviewed reader `b7d5e840fca8a94c13292dec2e40c6b1ca30315c` verified and delivered all five original artifacts (23,714,452 bytes), retaining earlier rejected receipts. Integration preserves the declared-venv launch and raw optional-control verifier fixes. This is not execution of the integrated source, repeated reliability, general Windows Python support or cancellation qualification. |
 | SFT Docker logs/cancel/reconcile | Profile-selected cancellation and retained known-receipt reconciliation; logs unavailable | Exact-container stop is one-shot; acknowledgment and natural terminal truth remain distinct. Default/unpromoted capability refusals remain enforced. The older same-process composition still rejects cancellation. Final-source live cancellation/recovery parity remains open. |
 | SFT Modal start/observe/verified artifacts | Live-qualified, bounded on `864a9bcc` | Runs `modal-4bcace8af9a4e37d00805ffd` and `modal-1e3c4eaf107a1411b87f6176` each completed and verified five native artifacts. The second passed fresh-process observe/show. Exact launcher/runtime/profile, input and source pins remain required. This is SFT fixture qualification, not arbitrary model/hardware or quality acceptance. |
 | SFT Modal logs | Conditional implementation; restricted precompletion delivery proved | Both current SFT runs delivered two numeric records before completion. General transport and partial-write qualification remain false. Default logs stay disabled; only the existing exact reader-issued transport proof can enable its capability. A UI must tolerate missing progress and use verified terminal outcomes for completion. |
 | SFT Modal cancel/reconcile/cost quote | Merged public configured lifecycle; default flags remain off | Initial recipe opt-in binds the descriptor before planning; current caller permission and the original authenticated submit/assessment/call target are required. Cancel acknowledgment and provider-input terminal observation are separate. Merged #246 permits known-run observation after an orphaned cancel receipt, preserves its unadvanced intent/history, and refuses cancel/reconcile replay. Neither observation nor acknowledgment proves physical quiescence. Quote/log/capability promotion and real final-source lifecycle parity remain separately gated. |
 | SFT HF Jobs public API v1 | Implemented/installed; owner-paused qualification | Job `6ad7403a5275124786e158ba` ended ERROR with closed DISPATCH/23 (nonzero trainer subprocess). Cause remains unknown; retained bucket contains input only. No replay or cancellation occurred. The unused cancellation lane is not replacement-job authority. No new HF work is planned. HF model-repository publication is a separate operation and is not implicitly waived. |
-| GRPO Modal public training route | Implemented/installed candidate; GPU qualification open | Public preparation, isolated child, native verification and retained reads exist. Earlier CPU evidence does not qualify the changed final closure. A genuine bounded GPU run must demonstrate a parameter update and grouped reward variation; constant/unchanged observations stay inconclusive. Required on the release and Syntunia readiness path alongside SFT; not deferred. |
-| Apple-silicon local training | Legacy MLX SFT trainer/backend exists; public API v1 qualification open | `Trainers/mlx_sft_mac` and `tuner/backends/training/mac_backend.py` are audit/reuse starting points. They do not establish a durable v1 local provider, pinned runtime, native artifact compatibility or GRPO support. Required desktop target: native macOS GPU execution, exact method/model/runtime matrix, cancellation, restart and verified artifacts on real Apple hardware. macOS base-import CI is not GPU qualification. |
-| Training restart/recovery, all providers | Retained known-run reads; bounded Modal live readback | Fresh-process observe/show passed for the second current Modal SFT run. Active caller-loss/cancellation still needs live qualification. Original private keys, catalogs and bindings remain required. No unknown-job adoption, automatic resubmission, arbitrary checkpoint continuation or restoration of a lost source lease is promised. HF qualification is paused; Docker remains open. |
+| GRPO Modal public training route | Live-qualified, bounded on `ba228d6c` | Run `modal-10201ea947d40c7bffa0c92c`, call `fc-01M5JJG31MGCHJGRNW37BZSWSZ`, completed three updates, changed the aggregate 120-tensor parameter-set digest, and produced grouped rewards 0/1 with variance 0.25 over three nonconstant callbacks. Public verification and five delivered artifacts passed. This does not prove every tensor changed, writing quality, arbitrary recipes or execution of the later integrated closure. Other GRPO backends remain deferred. |
+| Apple-silicon local training | Live-qualified, bounded native API v1 SFT fixture | Exact integrated `06e0fcf2` raw r69 and assistant-only r70 passed on M4/24GiB/macOS27.0.1 with the pinned private runtime/model and unchanged prepared publications. Each completed three updates and five verified/delivered MLX roles; independent saved-adapter changes and final reload losses passed. The public optional module and host-owned synchronous consumer are implemented. Real Mac51 process/host controls and three realMLX loss/autograd cases passed. Ordinary qualification remains independently authenticated; public logs/cancel/reconcile, native GRPO, checkpoint resume and broad model/OS support are unavailable. |
+| Training restart/recovery, all providers | Exact known-run cold reads; bounded Modal/Mac evidence | Fresh-process observation/show passed for the scoped Modal SFT evidence and Mac consumer. Both integrated Mac r69/r70 passed fresh-process observation, reverification and five-role redelivery after signed start expiry with original keys/catalogs and identical manifests. Use `runs.reverify` on already verified artifacts. Active caller-loss/public cancellation and broad stable lifecycle acceptance remain open. No unknown-job adoption, automatic resubmission, arbitrary checkpoint continuation or restoration of a lost source lease is promised. HF qualification is paused. |
 
 ## Earlier exact live evidence
 
