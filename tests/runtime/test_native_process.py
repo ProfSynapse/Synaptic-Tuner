@@ -534,14 +534,13 @@ def test_cleanup_preserves_first_termination_failure_and_reaps_owned_child(
     # pytest or prevent later tests/JUnit output from writing larger files.
     limits = []
     monkeypatch.setattr(guardian.resource, "setrlimit", lambda *args: limits.append(args))
-    # This case exercises preservation of an actual signal failure. Darwin's
-    # separately tested empty-group recovery would legitimately handle EPERM.
-    monkeypatch.setattr(guardian, "_darwin_empty_owned_group", lambda *args: False)
     read_fd, write_fd = os.pipe()
     original_killpg = os.killpg
     original_popen = subprocess.Popen
+    original_empty_group = guardian._darwin_empty_owned_group
     children = []
     failed = False
+    injected_eperm = False
     signals = []
 
     def own_child(*args, **kwargs):
@@ -550,15 +549,26 @@ def test_cleanup_preserves_first_termination_failure_and_reaps_owned_child(
         return child
 
     def fail_first_kill(pid, sig):
-        nonlocal failed
+        nonlocal failed, injected_eperm
         signals.append(sig)
         if sig == failed_signal and not failed:
             failed = True
             if sig == signal.SIGTERM:
+                injected_eperm = True
                 raise PermissionError(errno.EPERM, "private signal detail")
             raise OSError(errno.EIO, "private signal detail")
         return original_killpg(pid, sig)
 
+    def recover_only_real_empty_groups(*args):
+        nonlocal injected_eperm
+        # Reject only the injected EPERM. Real Darwin zombie-group EPERM can
+        # precede SIGKILL or occur during cleanup and still needs real recovery.
+        if injected_eperm:
+            injected_eperm = False
+            return False
+        return original_empty_group(*args)
+
+    monkeypatch.setattr(guardian, "_darwin_empty_owned_group", recover_only_real_empty_groups)
     monkeypatch.setattr(guardian.os, "killpg", fail_first_kill)
     monkeypatch.setattr(guardian.subprocess, "Popen", own_child)
     spec = {
@@ -572,6 +582,7 @@ def test_cleanup_preserves_first_termination_failure_and_reaps_owned_child(
         with pytest.raises(OSError):
             guardian.supervise(spec, read_fd, phase)
         assert failed and phase["name"] == expected_phase
+        assert not injected_eperm
         assert limits == [
             (guardian.resource.RLIMIT_CORE, (0, 0)),
             (guardian.resource.RLIMIT_FSIZE, (1024**2, 1024**2)),
