@@ -106,7 +106,151 @@ def _profile(raw):
     return profile
 
 
-def _components(config):
+def _hash_scanned_member(parent_fd, name, observed, maximum):
+    """Read the scanned leaf through its held parent, including identity checks."""
+    if not stat.S_ISREG(observed.st_mode) or not 0 <= observed.st_size <= maximum:
+        raise ValueError("docker_model_member_invalid")
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent_fd)
+    except OSError:
+        raise ValueError("docker_model_member_changed") from None
+    try:
+        before = os.fstat(fd)
+        identity = (observed.st_dev, observed.st_ino, observed.st_size, observed.st_mtime_ns)
+        if not stat.S_ISREG(before.st_mode) or (
+            before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns
+        ) != identity:
+            raise ValueError("docker_model_member_changed")
+        digest = hashlib.sha256()
+        size = 0
+        while True:
+            chunk = os.read(fd, min(1 << 20, maximum + 1 - size))
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > maximum:
+                raise ValueError("docker_model_inventory_bound")
+            digest.update(chunk)
+        after = os.fstat(fd)
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if size != observed.st_size or (
+            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+        ) != identity or (
+            current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns
+        ) != identity:
+            raise ValueError("docker_model_member_changed")
+        return size, digest.hexdigest()
+    except OSError:
+        raise ValueError("docker_model_member_changed") from None
+    finally:
+        os.close(fd)
+
+
+def model_inventory(artifact_root, snapshot, *, missing_ok=False):
+    """Hash the complete private offline snapshot through bounded regular reads."""
+    artifact_root = Path(artifact_root)
+    snapshot = Path(snapshot)
+    with ExitStack() as stack:
+        guard = _Root(artifact_root)
+        stack.callback(guard.stack.close)
+        guard.check()
+        if not snapshot.is_relative_to(artifact_root) or ".." in snapshot.parts:
+            raise ValueError("docker_model_snapshot_outside_artifact_root")
+        rows = []
+        total = 0
+        parent = guard.fd
+        chain = []
+        for part in snapshot.relative_to(artifact_root).parts:
+            try:
+                child = os.open(part, _DIR, dir_fd=parent)
+            except FileNotFoundError:
+                if not missing_ok:
+                    raise
+                DockerLocalArtifactsV1._recheck(chain)
+                guard.check()
+                return []
+            except OSError:
+                raise ValueError("docker_model_snapshot_path_invalid") from None
+            stack.callback(os.close, child)
+            chain.append((parent, part, child))
+            parent = child
+        pending = [(snapshot, parent)]
+        seen = 0
+        directories = 0
+        while pending:
+            directory, directory_fd = pending.pop()
+            with os.scandir(directory_fd) as entries:
+                for entry in entries:
+                    seen += 1
+                    if seen > 20_000:
+                        raise ValueError("docker_model_inventory_bound")
+                    info = entry.stat(follow_symlinks=False)
+                    if stat.S_ISDIR(info.st_mode) and not entry.is_symlink():
+                        directories += 1
+                        if directories > 256:
+                            raise ValueError("docker_model_inventory_bound")
+                        child = os.open(entry.name, _DIR, dir_fd=directory_fd)
+                        stack.callback(os.close, child)
+                        chain.append((directory_fd, entry.name, child))
+                        pending.append((directory / entry.name, child))
+                    elif stat.S_ISREG(info.st_mode) and not entry.is_symlink():
+                        if len(rows) >= 20_000 or total + info.st_size > 1 << 40:
+                            raise ValueError("docker_model_inventory_bound")
+                        path = directory / entry.name
+                        size, digest = _hash_scanned_member(
+                            directory_fd, entry.name, info, info.st_size
+                        )
+                        rows.append({"path": path.relative_to(snapshot).as_posix(),
+                                     "size_bytes": size, "sha256": digest})
+                        total += size
+                    else:
+                        raise ValueError("docker_model_member_invalid")
+        DockerLocalArtifactsV1._recheck(chain)
+        guard.check()
+        if not rows:
+            raise ValueError("docker_model_snapshot_empty")
+        return sorted(rows, key=lambda item: item["path"])
+
+
+def verify_model_receipt(raw, *, selected, model, configuration_sha256,
+                         runtime_declaration_sha256, live_bytes=True):
+    """Bind fresh prepared bytes to the later public consumer's exact inputs."""
+    receipt = _json(raw)
+    artifact_root = Path(selected["artifact_host_root"])
+    cache = artifact_root / "run/cache"
+    expected = (cache / "model" / ("models--" + model["ref"].replace("/", "--"))
+                / "snapshots" / model["revision"])
+    if (set(receipt) != {"schema_version", "model", "configuration_sha256",
+                         "runtime_declaration_sha256", "artifact_host_root",
+                         "snapshot", "files"}
+            or receipt["schema_version"] != "synaptic-docker-model-preparation/v1"
+            or receipt["model"] != model
+            or receipt["configuration_sha256"] != configuration_sha256
+            or receipt["runtime_declaration_sha256"] != runtime_declaration_sha256
+            or receipt["artifact_host_root"] != str(artifact_root)
+            or receipt["snapshot"] != str(expected)
+            or not isinstance(receipt["files"], list)):
+        raise ValueError("docker_model_receipt_mismatch")
+    if live_bytes:
+        from Trainers.sft.runtime_v1 import RuntimeRoots, _require_local_model_snapshot
+
+        roots = RuntimeRoots(
+            engine=Path(selected["source_host_root"]) / "engine",
+            project=Path(selected["source_host_root"]) / "project",
+            artifacts=artifact_root / "run/artifacts", state=artifact_root / "run/state",
+            tracking=artifact_root / "run/tracking", cache=cache,
+            tmp=artifact_root / "run/tmp",
+        )
+        _require_local_model_snapshot(model, roots, {
+            "SYNAPTIC_CACHE_ROOT": str(cache), "SYNAPTIC_MODEL_SNAPSHOT": str(expected),
+            "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+        })
+        if model_inventory(artifact_root, expected) != receipt["files"]:
+            raise ValueError("docker_model_receipt_bytes_changed")
+    return receipt
+
+
+def _components(config, *, live_model_bytes=False):
     if config["provider"] != "docker":
         raise ValueError("Docker provider required")
     selected = config["docker"]
@@ -129,7 +273,7 @@ def _components(config):
         "command_seconds",
         "read_seconds",
     }
-    if set(selected) - {"allow_current_cancel_authorization"} != fields:
+    if set(selected) - {"allow_current_cancel_authorization", "model_preparation_file"} != fields:
         raise ValueError("Docker configuration fields invalid")
     profile = _profile(read_committed(selected["profile_file"]))
     recipes = default_recipe_registry()
@@ -151,6 +295,16 @@ def _components(config):
             document["artifact_policy"]["retain_checkpoints"],
         ),
     )
+    if "model_preparation_file" in selected:
+        verify_model_receipt(
+            read_committed(selected["model_preparation_file"]),
+            selected=selected, model=rich.resolved_config.to_dict()["model"],
+            configuration_sha256=hashlib.sha256(
+                rich.resolved_config.canonical_json.encode()).hexdigest(),
+            runtime_declaration_sha256=hashlib.sha256(
+                rich.execution_context.canonical_json.encode()).hexdigest(),
+            live_bytes=live_model_bytes,
+        )
     checked, resolved = DockerTrainingPreparationBridgeV1(profile).coordinator_material(
         rich, material, recipes
     )
@@ -177,10 +331,13 @@ def preview(config):
 
 def retain_inputs(config, root):
     # Preserve the existing canonical documents, never serialize a new rich type.
-    for key, name in (
+    references = [
         ("material_file", "docker-material.json"),
         ("profile_file", "docker-profile.json"),
-    ):
+    ]
+    if "model_preparation_file" in config["docker"]:
+        references.append(("model_preparation_file", "docker-model-preparation.json"))
+    for key, name in references:
         raw = read_committed(config["docker"][key])
         target = root / name
         _write_bytes(target, raw)
@@ -318,7 +475,9 @@ def open_host(
     if mode == "start":
         _require_runtime_root_platform()
     selected = config["docker"]
-    profile, rich, material, recipes, basis = _components(config)
+    profile, rich, material, recipes, basis = _components(
+        config, live_model_bytes=mode == "start"
+    )
     run = TrainingRunRef(material.run_id, basis.project_ref)
     if config["run"] != run.to_dict():
         raise ValueError("configured run differs from material")

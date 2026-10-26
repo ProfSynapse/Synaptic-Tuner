@@ -2,15 +2,30 @@
 """Genuine Git/publication/compiler and no-daemon Docker preparation controls."""
 
 import importlib.util
+import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
+import sys
+from types import SimpleNamespace
+from contextlib import contextmanager
 import pytest
 
 from tests.examples.test_hf_material_preparation import configured as source_configured  # noqa: F401
 from tests.execution.providers.docker_provider_v1.conftest import profile  # noqa: F401
 from tests.runtime.test_packaged_runtime_releases import _release
+from tests.examples.test_hf_material_preparation import git
 from tuner.training.coordinator_material import CoordinatorResolvedMaterial
 from tuner.training import default_recipe_registry
+from tuner.execution.providers.modal.model_snapshot import (
+    ModelSnapshotPreparationError, prepare_model_snapshot,
+)
+from tuner.runtime.offline_sft_worker import (
+    closure_digest, load_packaged_offline_sft_worker_manifest,
+)
+from tuner.runtime.releases import PackagedTrainingRuntimeReleaseV1, parse_packaged_runtime_release
+from scripts import diagnose_docker_torch_import as diagnostic
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location(
@@ -126,6 +141,124 @@ def test_real_source_publication_compiler_and_pure_docker_preview(configured):
         helper.prepare(c, pushed_sources=verifier, authenticator=auth, clock=clock)
 
 
+def _complete_fixture_engine(c):
+    engine = Path(c["project"]["engine_root"])
+    for member in load_packaged_offline_sft_worker_manifest().closure.members:
+        target = engine / member.path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / member.path, target)
+    git(engine, "add", ".")
+    git(engine, "commit", "-qm", "Synthetic complete worker closure")
+    host = Path(c["project"]["root"])
+    git(host, "update-index", "--cacheinfo", "160000", git(engine, "rev-parse", "HEAD"), "engine")
+    git(host, "commit", "-qm", "Bind synthetic complete worker closure")
+
+
+def test_diagnostic_source_stages_real_admitted_bundle_once(configured, monkeypatch):
+    c, verifier, auth, clock, _ = configured
+    c["runtime_environment"].update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
+    release_path = Path(c["runtime_release"])
+    release = parse_packaged_runtime_release(json.loads(release_path.read_bytes()))
+    values = {name: getattr(release, name) for name in release.__dataclass_fields__
+              if name not in {"manifest_digest", "schema_version"}}
+    values["python_executable"] = "/opt/unsloth-venv/bin/python3"
+    release_path.write_bytes(PackagedTrainingRuntimeReleaseV1.build(**values).canonical_bytes())
+    _complete_fixture_engine(c)
+    monkeypatch.setenv("SOURCE_KEY", "synthetic-host-source-signing-key!")
+    monkeypatch.setenv("READER", "fixture-evidence-key-" + "x" * 40)
+    helper.prepare(c, pushed_sources=verifier, authenticator=auth, clock=clock)
+    result = helper.stage_diagnostic_source(c)
+    source = Path(c["consumer"]["docker"]["source_host_root"])
+    artifact = Path(c["consumer"]["docker"]["artifact_host_root"])
+    assert result["training_authority"] is False
+    assert result["docker_effect"] is False
+    assert (source / "control/workload.json").is_file()
+    assert (source / "control/offline-sft-worker-v1.json").is_file()
+    assert (source / "project").is_dir() and not list((source / "project").iterdir())
+    assert list(artifact.rglob("private-dataset.jsonl"))
+    assert (Path(c["output_root"]) / "diagnostic-source-stage-claim.json").is_file()
+    lock = Path(c["output_root"]) / "source-lock.json"
+    manifest = source / "control/offline-sft-worker-v1.json"
+    engine = source / "engine"
+    diagnostic._source_identity(
+        engine, lock, hashlib.sha256(lock.read_bytes()).hexdigest(),
+        hashlib.sha256(manifest.read_bytes()).hexdigest(), result["closure_digest"],
+        git(Path(c["project"]["engine_root"]), "rev-parse", "HEAD"),
+    )
+    observed_workload = json.loads((source / "control/workload.json").read_bytes())
+    observed_runtime = observed_workload["execution_source"]["runtime"]
+    planned = observed_runtime["environment"]["variables"]
+    assert set(planned) == diagnostic._R2_ENV_KEYS
+    assert observed_runtime["roots"] == diagnostic._R2_ROOTS
+    assert observed_runtime["interpreter"]["executable"] == "/opt/unsloth-venv/bin/python3"
+    diagnostic._worker_context_identity(
+        engine, result["workload_sha256"],
+        hashlib.sha256((engine / "Trainers/sft/runtime_v1.py").read_bytes()).hexdigest(),
+        hashlib.sha256((engine / "Trainers/sft/train_sft.py").read_bytes()).hexdigest(),
+        result["closure_digest"],
+    )
+    trainer = (engine / "Trainers/sft/train_sft.py").read_bytes()
+    lines = trainer.splitlines(keepends=True)
+    derived_trainer = b"".join(lines[:diagnostic._trainer_prefix_boundary(trainer) + 1]) + diagnostic._DIRECT_STOP
+    derived_trainer_sha = hashlib.sha256(derived_trainer).hexdigest()
+    derived_manifest = json.loads(manifest.read_bytes())
+    member = next(item for item in derived_manifest["members"]
+                  if item["path"] == "Trainers/sft/train_sft.py")
+    member.update(sha256=derived_trainer_sha, size_bytes=len(derived_trainer))
+    derived_manifest["payload_bytes"] = sum(item["size_bytes"] for item in derived_manifest["members"])
+    derived_manifest["closure_digest"] = closure_digest(derived_manifest)
+    derived_manifest_raw = (json.dumps(derived_manifest, sort_keys=True, separators=(",", ":"),
+                                       ensure_ascii=False, allow_nan=False).encode() + b"\n")
+    derived = diagnostic._stage_direct_source(
+        engine, Path(c["output_root"]).parent / "derived-fixture",
+        expected_trainer=derived_trainer_sha,
+        expected_manifest=hashlib.sha256(derived_manifest_raw).hexdigest(),
+        expected_closure=derived_manifest["closure_digest"],
+    )
+    diagnostic._worker_context_identity(
+        Path(c["output_root"]).parent / "derived-fixture/engine", result["workload_sha256"],
+        hashlib.sha256((engine / "Trainers/sft/runtime_v1.py").read_bytes()).hexdigest(),
+        derived_trainer_sha, derived["closure_digest"], direct_stop=True,
+    )
+    workload_raw = (source / "control/workload.json").read_bytes()
+    fingerprint = hashlib.sha256(b"synaptic-training-workload/v1\0" + workload_raw).hexdigest()
+    parent_environment = diagnostic._context_environment(workload_raw, derived["closure_digest"])
+    parent_command = (
+        "/source/engine/Trainers/sft/runtime_v1.py",
+        "--canonical-workload-file", "/source/control/workload.json",
+        "--canonical-workload-control-root", "/source/control",
+        "--canonical-workload-byte-count", str(len(workload_raw)),
+        "--canonical-workload-sha256", result["workload_sha256"],
+        "--canonical-workload-fingerprint", fingerprint,
+    )
+    diagnostic._public_parent_identity(
+        engine, lock,
+        expected_engine_commit=git(Path(c["project"]["engine_root"]), "rev-parse", "HEAD"),
+        expected_project_commit=git(Path(c["project"]["root"]), "rev-parse", "HEAD"),
+        expected_workload=result["workload_sha256"], derivative_closure=derived["closure_digest"],
+        expected_environment=hashlib.sha256(json.dumps(
+            parent_environment, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+        expected_command=hashlib.sha256(json.dumps(
+            parent_command, separators=(",", ":")).encode()).hexdigest(),
+    )
+    with pytest.raises(ValueError, match="claim_invalid"):
+        helper.stage_diagnostic_source(c)
+
+
+def test_diagnostic_source_drift_refuses_before_claim(configured, monkeypatch):
+    c, verifier, auth, clock, _ = configured
+    _complete_fixture_engine(c)
+    monkeypatch.setenv("SOURCE_KEY", "synthetic-host-source-signing-key!")
+    monkeypatch.setenv("READER", "fixture-evidence-key-" + "x" * 40)
+    helper.prepare(c, pushed_sources=verifier, authenticator=auth, clock=clock)
+    engine = Path(c["project"]["engine_root"])
+    (engine / "Trainers/sft/runtime_v1.py").write_bytes(b"changed")
+    with pytest.raises(ValueError):
+        helper.stage_diagnostic_source(c)
+    assert not (Path(c["output_root"]) / "diagnostic-source-stage-claim.json").exists()
+    assert not Path(c["consumer"]["docker"]["source_host_root"]).exists()
+
+
 @pytest.mark.parametrize("change", ["format", "model", "source", "input"])
 def test_wrong_commitments_refuse_before_consumer_publication(configured, change):
     c, verifier, auth, clock, _ = configured
@@ -181,6 +314,218 @@ def test_pinned_model_preparation_disjoint_cache_and_one_attempt(configured):
     with pytest.raises(FileExistsError):
         helper.prepare_model(c, model_preparer=model_preparer, sdk_preflight=lambda: None)
     assert len(calls) == 1
+
+
+def test_model_first_claim_precedes_source_and_receipt_binds_fresh_prepare(configured):
+    c, verifier, auth, clock, _ = configured
+    c["model_output_root"] = str(Path(c["output_root"]).parent / "model-attempt")
+    selected = c["consumer"]["docker"]
+    source = Path(selected["source_host_root"])
+    artifact = Path(selected["artifact_host_root"])
+    calls = []
+
+    def model_preparer(**kwargs):
+        assert not source.exists()
+        assert not Path(c["output_root"]).exists()
+        assert (Path(c["model_output_root"]) / "model-preparation-attempt.json").exists()
+        calls.append(kwargs)
+        target = (kwargs["destination_root"] / "model"
+                  / ("models--" + kwargs["model_ref"].replace("/", "--"))
+                  / "snapshots" / kwargs["revision"])
+        target.mkdir(parents=True, mode=0o700)
+        (target / "synthetic-config.json").write_text('{"fixture":true}')
+        return target
+
+    receipt = helper.prepare_model(
+        c, model_preparer=model_preparer, sdk_preflight=lambda: None,
+    )
+    assert receipt["schema_version"] == "synaptic-docker-model-preparation/v1"
+    assert not source.exists()
+    assert len(calls) == 1
+    with pytest.raises(ValueError):
+        helper.prepare_model(c, model_preparer=model_preparer, sdk_preflight=lambda: None)
+    assert len(calls) == 1
+    member = (artifact / "run/cache/model"
+              / ("models--" + calls[0]["model_ref"].replace("/", "--"))
+              / "snapshots" / calls[0]["revision"] / "synthetic-config.json")
+    original = member.read_bytes()
+    member.write_bytes(b"changed before source")
+    with pytest.raises(ValueError):
+        helper.prepare(c, pushed_sources=verifier, authenticator=auth, clock=clock)
+    assert not Path(c["output_root"]).exists()
+    member.write_bytes(original)
+    helper.prepare(c, pushed_sources=verifier, authenticator=auth, clock=clock)
+    consumer = helper.launch.load_config(Path(c["output_root"]) / "consumer.json")
+    assert "model_preparation_file" in consumer["docker"]
+    assert not source.exists()
+    member.write_text("changed")
+    assert helper.docker_host.preview(consumer)["run"]
+    with pytest.raises(ValueError):
+        helper.docker_host._components(consumer, live_model_bytes=True)
+
+
+def test_model_first_failure_consumes_only_fresh_model_claim(configured):
+    c, _, _, _, _ = configured
+    c["model_output_root"] = str(Path(c["output_root"]).parent / "model-attempt")
+    selected = c["consumer"]["docker"]
+
+    def fail(**kwargs):
+        assert (Path(c["model_output_root"]) / "model-preparation-attempt.json").exists()
+        raise RuntimeError("private fixture failure")
+
+    with pytest.raises(RuntimeError):
+        helper.prepare_model(c, model_preparer=fail, sdk_preflight=lambda: None)
+    assert not Path(c["output_root"]).exists()
+    assert not Path(selected["source_host_root"]).exists()
+    with pytest.raises(ValueError):
+        helper.prepare_model(c, model_preparer=fail, sdk_preflight=lambda: None)
+
+
+def test_model_first_rejects_source_created_during_expensive_preparation(configured):
+    c, _, _, _, _ = configured
+    c["model_output_root"] = str(Path(c["output_root"]).parent / "model-attempt")
+    source = Path(c["consumer"]["docker"]["source_host_root"])
+
+    def drift(**kwargs):
+        source.mkdir(mode=0o700)
+        target = (kwargs["destination_root"] / "model"
+                  / ("models--" + kwargs["model_ref"].replace("/", "--"))
+                  / "snapshots" / kwargs["revision"])
+        target.mkdir(parents=True, mode=0o700)
+        (target / "synthetic-config.json").write_text('{"fixture":true}')
+        return target
+
+    with pytest.raises(ValueError, match="docker_source_changed"):
+        helper.prepare_model(c, model_preparer=drift, sdk_preflight=lambda: None)
+    assert (Path(c["model_output_root"]) / "model-preparation-attempt.json").exists()
+    assert not (Path(c["model_output_root"]) / "model-preparation.json").exists()
+
+
+@pytest.mark.parametrize("seed_state", [
+    "verified", "corrupt", "symlink", "revision_symlink", "mutated",
+    "absent_revision", "cold",
+])
+def test_model_first_seed_is_independently_verified(configured, monkeypatch, seed_state):
+    c, _, _, _, _ = configured
+    c["model_output_root"] = str(Path(c["output_root"]).parent / "model-attempt")
+    model = json.loads(Path(c["resolved_config"]).read_bytes())["model"]
+    content = b'{"fixture":true}'
+    name = "synthetic-config.json"
+    seed = Path(c["output_root"]).parent / "retained-cache"
+    relative = (Path("models--" + model["ref"].replace("/", "--"))
+                / "snapshots" / model["revision"])
+    if seed_state != "cold":
+        seed.mkdir(mode=0o700)
+        (seed / "old-attempt-claim.json").write_bytes(b"retained claim")
+        member = seed / relative
+        if seed_state == "revision_symlink":
+            member.parent.mkdir(parents=True, mode=0o700)
+            member.symlink_to(Path(c["resolved_config"]), target_is_directory=True)
+        elif seed_state != "absent_revision":
+            member.mkdir(parents=True, mode=0o700)
+            (member / name).write_bytes(content)
+            if seed_state == "corrupt":
+                (member / name).write_bytes(b"wrong fixture")
+            elif seed_state == "symlink":
+                (member / name).unlink()
+                (member / name).symlink_to(Path(c["resolved_config"]))
+        c["model_seed_root"] = str(seed)
+    calls = []
+
+    class API:
+        def __init__(self, *, endpoint, token):
+            pass
+
+        def model_info(self, repo_id, *, revision, files_metadata, token):
+            assert (repo_id, revision) == (model["ref"], model["revision"])
+            calls.append("metadata")
+            return SimpleNamespace(
+                sha=revision,
+                siblings=[SimpleNamespace(
+                    rfilename=name, size=len(content), lfs=None,
+                    blob_id=hashlib.sha1(
+                        f"blob {len(content)}\0".encode() + content
+                    ).hexdigest(),
+                )],
+            )
+
+    def download(**kwargs):
+        calls.append("download")
+        (kwargs["local_dir"] / name).write_bytes(content)
+        return str(kwargs["local_dir"])
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(
+        HfApi=API, snapshot_download=download,
+    ))
+    if seed_state == "mutated":
+        original_copy = helper.copy_regular
+
+        def mutate_after_copy(*args, **kwargs):
+            result = original_copy(*args, **kwargs)
+            (seed / relative / name).write_bytes(b"x" * len(content))
+            return result
+
+        monkeypatch.setattr(helper, "copy_regular", mutate_after_copy)
+    if seed_state in {"corrupt", "symlink", "revision_symlink", "mutated"}:
+        with pytest.raises((ValueError, ModelSnapshotPreparationError)):
+            helper.prepare_model(
+                c, model_preparer=prepare_model_snapshot, sdk_preflight=lambda: None,
+            )
+        assert "download" not in calls
+        assert not Path(c["output_root"]).exists()
+    else:
+        receipt = helper.prepare_model(
+            c, model_preparer=prepare_model_snapshot, sdk_preflight=lambda: None,
+        )
+        assert receipt["files"] == [{
+            "path": name, "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }]
+        assert ("download" in calls) == (seed_state in {"cold", "absent_revision"})
+        if seed_state == "verified":
+            assert (seed / relative / name).read_bytes() == content
+    if seed_state != "cold":
+        assert (seed / "old-attempt-claim.json").read_bytes() == b"retained claim"
+    assert Path(c["model_output_root"]).exists()
+
+
+def test_model_inventory_hashes_held_scan_during_transient_ancestor_swap(
+    tmp_path, monkeypatch
+):
+    root, alternate, held = (tmp_path / name for name in ("model", "alternate", "held"))
+    for directory, content in ((root, b"trusted"), (alternate, b"hostile")):
+        directory.mkdir(mode=0o700)
+        snapshot = directory / "snapshot"
+        snapshot.mkdir(mode=0o700)
+        (snapshot / "member.bin").write_bytes(content)
+    original_scandir = os.scandir
+    swapped = False
+
+    @contextmanager
+    def swap_while_scanning(directory_fd):
+        nonlocal swapped
+        with original_scandir(directory_fd) as entries:
+            if not swapped:
+                swapped = True
+                os.rename(root, held)
+                os.rename(alternate, root)
+                try:
+                    yield entries
+                finally:
+                    os.rename(root, alternate)
+                    os.rename(held, root)
+            else:
+                yield entries
+
+    monkeypatch.setattr(helper.docker_host.os, "scandir", swap_while_scanning)
+    rows = helper.docker_host.model_inventory(root, root / "snapshot")
+    assert swapped
+    assert rows == [{
+        "path": "member.bin", "size_bytes": len(b"trusted"),
+        "sha256": hashlib.sha256(b"trusted").hexdigest(),
+    }]
+    assert (root / "snapshot/member.bin").read_bytes() == b"trusted"
+    assert (alternate / "snapshot/member.bin").read_bytes() == b"hostile"
 
 
 @pytest.mark.parametrize("kind", ["source_member", "artifact_symlink", "artifact_mode"])

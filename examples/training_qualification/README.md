@@ -182,8 +182,8 @@ Run from a neutral directory with the installed engine interpreter:
 ```sh
 python -I /absolute/checkout/examples/training_qualification/prepare_docker.py plan /private/prepare.json
 python -I /absolute/checkout/examples/training_qualification/prepare_docker.py model-preflight /private/prepare.json
-python -I /absolute/checkout/examples/training_qualification/prepare_docker.py prepare /private/prepare.json
 python -I /absolute/checkout/examples/training_qualification/prepare_docker.py prepare-model /private/prepare.json
+python -I /absolute/checkout/examples/training_qualification/prepare_docker.py prepare /private/prepare.json
 python -I /absolute/checkout/examples/training_qualification/launch.py start /private/prepared/consumer.json
 ```
 
@@ -196,14 +196,45 @@ pull, build, download a model or start a container. Original host manifests and
 pushed source evidence must be genuine and fresh. Its source admission helper
 is shared with the HF preparer without changing HF canonical outputs.
 
-`prepare-model` is the explicit public-model network boundary: it uses the existing
-pinned model preparer with anonymous credentials, private persistent/SDK scratch
-under the preparation output and destination under the authenticated artifact
-mount's `run/cache`. The existing verifier checks pinned file metadata/content;
-the native snapshot validator checks the resulting offline path. The source
-mount remains empty until the original claimed stage. Writable runtime directories
-are private and disjoint; the exact prepared-input slot is never adopted. A
-create-only local attempt prevents automatic repeat after an uncertain download.
+`prepare-model` is the explicit public-model network boundary. With the template's
+`model_output_root`, it consumes a fresh private model claim and prepares the
+pinned model before any short-lived execution-source proof is minted. It uses
+anonymous upstream metadata, private persistent/SDK scratch, and a fresh artifact
+mount's `run/cache`. Optional `model_seed_root` points to an independently held,
+private read-only repository cache; each present member is copied into fresh roots
+and checked against current pinned Git/LFS metadata. A corrupt, redirected or
+changed seed member rejects; absent members use the normal cold download path.
+An absent entire pinned revision under an otherwise private seed is also a
+cold miss; an existing redirected revision or member rejects.
+The seed's old claim and bytes stay untouched and never become new authority.
+The native snapshot validator checks the resulting offline path and a complete
+bounded file inventory is retained in `model-preparation.json`.
+
+`prepare` first rechecks that receipt and actual model bytes against its declared
+configuration, then authenticates fresh pushed source and compiles material. Its
+consumer binds the exact receipt bytes; public `start` rechecks the model inventory
+before Docker effects. Public start retains its own committed receipt copy.
+
+For a separately reviewed import-only diagnosis, the same preparer exposes
+`stage-diagnostic-source` after a fresh `prepare`. It validates the prepared
+consumer/material, complete source lock, current clean host/gitlink, and the
+still-valid signed source evidence, then uses the existing local source port to
+stage the authenticated worker bundle and small prepared input into unused
+private roots. A create-only diagnostic claim prevents replay. It makes no
+Docker call or public Foundation stage and grants no training authority. The
+diagnostic must separately pin the staged source, original and derived closure,
+retained model receipt, and all container bounds before any live probe. An
+expired source proof refuses staging; a later diagnostic uses only its
+separately admitted immutable staged bytes, never the expired proof as training
+authority.
+Public `plan` authenticates receipt identity but does not attest current model
+bytes; `start` performs that live check.
+Later cold observe/cancel/reconcile/verify/download authenticate that retained
+receipt, configuration and run identity without reopening weights or depending
+on the preparation root. The source mount remains absent until the source stage.
+Writable runtime directories are private and disjoint; the exact prepared-input
+slot is never adopted. Each model and source root is one-use. A failed or uncertain
+model preparation cannot be replayed under the same claim.
 Vendor download behavior is not a hard job deadline or bill cap. No manual weight
 upload, source inventory widening or restored training authority is involved.
 

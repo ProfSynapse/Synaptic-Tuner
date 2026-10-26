@@ -7,6 +7,8 @@
   "run_id": "REPLACE_UNUSED_RUN",
   "request_id": "REPLACE_UNUSED_REQUEST",
   "output_root": "/absolute/private/REPLACE_UNUSED_PREPARATION",
+  "model_output_root": "/absolute/private/REPLACE_UNUSED_MODEL_PREPARATION",
+  "model_seed_root": null,
   "prepared_publication": "/absolute/REPLACE_VERIFIED_V1_PUBLICATION",
   "resolved_config": "/absolute/REPLACE_CANONICAL_SFT_CONFIG.json",
   "runtime_release": "/absolute/REPLACE_ACTUAL_VERIFIED_RUNTIME_RELEASE.json",

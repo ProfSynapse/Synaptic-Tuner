@@ -780,9 +780,22 @@ def _expected_trainer_argv(
         config["dataset"].get("format") in {"syntunia-sft-row/v2", "synaptic-conversation-sft-row/v1"}
     )
     if dataset_claims_raw:
+        # The portable trainer accepts these optional raw-text controls only
+        # when they state its existing behavior. Their presence does not add
+        # a child argv switch, but remains bound by the workload and lineage.
+        raw_optional_controls = {
+            "packing": False,
+            "prompt_render": "full_conversation",
+            "require_memory_efficient_loss": False,
+        }
         if (
-            present_prepared_keys != prepared_sft_keys
+            not prepared_sft_keys <= present_prepared_keys
             or sft.get("dataset_format") != "raw_text"
+            or any(
+                key in sft
+                and (type(sft[key]) is not type(expected) or sft[key] != expected)
+                for key, expected in raw_optional_controls.items()
+            )
         ):
             return []
         if (

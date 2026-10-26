@@ -411,6 +411,17 @@ host composition in `start`. State is create-only: an unknown submission never
 authorizes replay. Successful native verification precedes downloading the five
 SFT artifacts through the public streams.
 
+Native artifact verification binds the original compiled workload, trainer
+lineage, source closure, manifest, and exact streamed bytes. For raw-text SFT,
+the trainer also accepts optional controls that state its existing behavior:
+`packing: false`, `prompt_render: full_conversation`, and
+`require_memory_efficient_loss: false`. The host verifier must accept those
+exact values while keeping them bound to the workload and lineage. A rejected
+verification receipt remains historical evidence; a separately reviewed
+same-run public `verify` may append a new receipt only against the unchanged
+original run, manifest, closure, and artifact bytes. Never replay training to
+repair a verifier defect.
+
 Docker cold composition uses retained material/profile/request bytes, original
 named keys, qualification assets and local mount roots. It is not source-free
 recovery or remote Docker path mapping. HF cold reads use the existing retained
@@ -450,10 +461,31 @@ See the checked-in example README for commands and exact fixture coverage.
 
 The checkout-owned `examples/training_qualification/prepare_docker.py` closes
 material setup for the public Docker consumer. With an installed engine,
-`plan` validates declared release/model/layout, `prepare` authenticates genuine
-sources and existing immutable v1 input before publishing canonical material,
-and `prepare-model` explicitly downloads the pinned public snapshot into the
-private artifact-mount cache. See `examples/training_qualification/README.md`
+`plan` validates declared release/model/layout, `prepare-model` first prepares
+the pinned public snapshot into a fresh private artifact cache, and `prepare`
+then authenticates fresh source and existing immutable v1 input before publishing
+canonical material. A private read-only seed cache may reduce downloads only
+after pinned upstream metadata and every reused Git/LFS member are verified.
+The old seed claim is never adopted. `prepare` binds the complete model receipt;
+public start rechecks its bytes before Docker effects. A missing pinned revision
+in an otherwise private seed takes the normal cold path; redirects reject.
+Before `prepare`, verify that the advertised host branch equals the host HEAD
+and that the advertised engine branch committed in the host's `.gitmodules`
+equals its exact engine gitlink. A clean pinned checkout alone is insufficient:
+an operator PR can advance that branch while the gitlink stays fixed. Keep a
+qualification engine ref at the pinned commit and use a fresh host and attempt
+if either advertised ref drifts; never move the ref back or replay a failed
+source-preparation attempt.
+For a separately admitted import-only diagnosis, `prepare_docker.py
+stage-diagnostic-source <fresh-prepare-config>` consumes new private source and
+artifact roots after `prepare`. It rechecks the clean source lock and signed
+proof while still valid and stages the real bundle through the existing local
+source port. Its create-only diagnostic claim, staged bytes and proof-expiry
+record are diagnostic evidence only; no public Foundation stage or training
+authority is created. Review the exact staged source and derivative closure
+before a bounded diagnostic container can be considered.
+Cold public reads use the receipt retained with the attempt and do not require
+current model weights or the original preparation root. See `examples/training_qualification/README.md`
 for the template and exact commands. Full public preflight remains deferred
 until host composition; missing image/runtime/model qualification still refuses.
 The CPU `probe-filesystem` command measures actual native writer modes and host
@@ -491,6 +523,140 @@ establish OOM. Do not interpret an older bare marker retrospectively. Preserve
 the consumed claim, roots, container and retained logs; the diagnostics never
 authorize replay. See `docs/review/offline-sft-worker-diagnostics.md` for the
 October 20 evidence boundary, CPU regressions and fresh-run prerequisites.
+
+For a fresh, credential-free Docker Torch import reproduction, review the exact
+command before effects. The checked-in `scripts/diagnose_docker_torch_import.py`
+requires `--docker`, an empty `--docker-config`, `--release`, independently
+verified `--expected-release-sha256`, `--daemon-id`, and a nonexistent private
+`--output-dir`. Guarded mode additionally requires `--source-root`,
+`--source-lock`, independently reviewed `--expected-source-lock-sha256`,
+`--expected-manifest-sha256`, and `--expected-closure-digest` from the retained
+attempt. Direct-worker mode also requires `--expected-engine-commit` set to the
+independently reviewed engine gitlink from that source lock; legacy modes default
+to the pinned r2 commit when this option is absent. It validates every staged
+worker member before executing mounted code;
+the result records those commitments. Run from the reviewed checkout so its
+trusted closure verifier is the one checked in with the helper.
+
+The helper claims a unique name before Docker create, authenticates the exact
+new container before start, and retains it. Docker CLI output is capped at 8 KiB
+in memory; the container requests JSON log rotation at 1 MiB with one file.
+The import execution has a
+120-second host deadline. At expiry the helper issues at most one stop request
+to the authenticated new container and separately inspects terminal state;
+cleanup takes additional bounded time, and a stop acknowledgment alone is not
+quiescence. An uncertain create/start/stop remains consumed in `claim.json` and
+`events.jsonl`, with no automatic replay or container removal. The default
+probe asks for at most 2 CPUs, 4 GiB, no network/GPU/model mount, and a
+read-only root.
+Bare mode mounts no source. Guarded mode mounts the independently authenticated
+retained source and runs the worker closure check, module guard, trainer path
+setup, environment bootstrap and Torch import. Neither runs training. `PASS`
+only says Torch imports in the reduced probe; it does not diagnose an earlier
+failure. Review the pinned package/runtime source before changing a profile,
+image or runtime policy.
+The exact r2 CPU evidence and its unresolved runtime difference are in
+`docs/review/docker-torch-import-r2-diagnosis.md`.
+
+The guarded-only `--gpu-device 0` option is an import-only comparison that
+requires separate exact root review before any live use. It requests only
+device 0, verifies Docker retained that device request before start, removes
+the CPU probe's visibility suppressors, and records the scope in its claim.
+`gpu_used=null` means actual device use was not measured. The same 8-KiB
+output budget, 120-second execution deadline, owned cleanup, source
+authentication and closed child codes apply. It neither invokes the trainer
+nor loads a model; a PASS or failure cannot retrospectively diagnose an
+earlier trainer attempt. See the exact proposed command and remaining
+environment/user/filesystem gaps in the r2 diagnosis note.
+
+For the worker-context child, keep supplied environment bytes distinct from
+the environment observed after isolated Python startup. Require every
+supplied key unchanged; the only reviewed addition is
+`LC_CTYPE=C.UTF-8`, recorded as a closed delta with separate digests.
+Any other addition or change rejects. Do not reset the observed environment
+or reinterpret it as a historical capture of the failed r2 child. See the r10
+repair and exact unexecuted command in the diagnosis note.
+
+The optional `--worker-context` mode requires independently reviewed
+`--expected-workload-sha256`, `--expected-runtime-sha256`, and
+`--expected-trainer-sha256` alongside guarded source commitments. It
+reconstructs the pinned workload's isolated child environment, launches a
+separate `-I` child, loads the authenticated worker closure and guard, and
+executes only the authenticated trainer prefix through `import torch`.
+The prefix excludes the `UNSLOTH_IMPORT` marker and all later trainer/model
+code. It records closed environment, path, file and cwd digests and keeps the
+existing claim, output budget, deadline and owned cleanup. Its writable
+`/artifacts` is a small private tmpfs with no model weights. Review the exact
+workload/source hashes, device scope, host user, caps and filesystem before
+each fresh use. A reconstructed child environment is a source-and-plan
+deduction; it is not a historical capture of the failed child.
+
+`--worker-context --worker-entry` selects a separate, still import-only
+diagnostic. It reconstructs the pinned runtime's trainer argument vector,
+including a one-byte sealed stand-in for the prepared dataset descriptor,
+then invokes the authenticated worker's real `main()` and nested
+`runpy.run_path` trainer entry. A source-bound line trace raises at the
+`UNSLOTH_IMPORT` marker after Torch import, while a narrow import-call and
+module-finder barrier prevents Unsloth entry even if tracing is disabled or
+that module name was cached. A PASS
+requires the worker's closed stop label and real trainer `__main__` module
+binding. The worker still performs its own argument, closure and import-guard
+checks. It records closed environment digests before and after Torch import,
+separate from the supplied and interpreter-startup digests. The diagnostic
+starts through `-I -c` to install that boundary, so it
+does not reproduce the original direct `-I` script startup. The sealed data
+byte, reduced filesystem and absent model weights also differ from the failed
+attempt. Review and admit a fresh one-use command before any live execution;
+do not infer the historical failure cause from either result. See the r12
+proposal in the diagnosis note.
+
+`--worker-context --worker-direct --public-parent` keeps the direct worker's
+independently reviewed derivative trainer and fixed pre-Unsloth stop, but
+starts the checked-in `runtime_v1.py` parent using its canonical workload-file
+transport. It requires explicit expected engine and project commits, original
+source/manifest/closure/runtime/trainer/workload/model receipt pins, derivative
+trainer/manifest/closure pins, and parent environment/command digests. The
+normal parent authenticates the derivative closure and prepared input before
+starting its ordinary isolated worker; the diagnostic helper does not alter
+the production runtime or worker start method. It checks the actual new Docker
+parent configuration and mounts before start and at terminal, and accepts
+only the parent's generic fixed failure marker plus the worker's fixed closed
+`TORCH_IMPORT` import or `UNSLOTH_IMPORT` stop label. It retains the same owned
+claim, finite deadline, bounded CLI output, model inventory and cleanup
+rules. No command in a diagnosis note is live authority without separate
+one-use review; successful import cannot identify the cause of an earlier
+failed public run. See the r32 proposal in the diagnosis note.
+
+The r34 public-parent attempt created its container but stopped before start:
+Docker omitted the optional `HostConfig.Tmpfs` map key, and direct access to
+that key made the combined inspect template fail. The helper now uses Go
+template `index` for that one optional key and still checks every declared
+context field under the original bounded CLI read. Keep the r34 claim and
+created container; any new probe requires a fresh reviewed output name. See
+the r34 evidence and r35 proposal in the diagnosis note.
+
+The r36 public-parent diagnostic reached `TRAINER/IMPORT/TORCH_IMPORT` before
+Unsloth, while the earlier direct-worker diagnostic returned from Torch. A
+focused local CPU regression found that the old SFT runtime verified the
+declared venv interpreter by its resolved physical binary, then launched that
+physical binary as the isolated child. For a symlinked venv, this can lose its
+site-packages even with the same `-I` and child environment. The runtime now
+retains the physical identity check but executes the exact declared absolute
+launcher. A fresh pushed source lock and reviewed import-only qualification
+are required before attributing the historical Windows failures to this bug;
+never rewrite retained r4/r6 source or replay their claims. The r36 evidence,
+local venv regression and closure refresh are in the diagnosis note.
+
+The later r45 fixed-launcher public-parent diagnostic retained the closed
+`TRAINER/SYSTEM_EXIT/UNSLOTH_IMPORT` label, but the helper rejected its final
+context digest and produced no accepted result. Docker 29.3.1 returned the
+same retained container's four mounts in different orders across bounded
+read-only inspections. For future diagnostics, validate all declared context
+fields and full mount identity first, then hash complete mount records in
+destination order and canonicalize only already accepted empty Ulimits/Tmpfs
+forms. Preserve all mount options in the digest and reject unexpected fields;
+do not reinterpret the consumed r45 result as PASS. Its prestart projection
+was retained only by digest, so the historical changed field is unknown.
 
 After an intentional worker source change, check and refresh existing
 manifests with the checked-in maintainers in dependency order:

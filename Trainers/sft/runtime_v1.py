@@ -1410,9 +1410,12 @@ def build_trainer_invocation(
             "execution interpreter identity does not match this runtime"
         )
     python_executable = interpreter["executable"]
-    if not isinstance(python_executable, str) or Path(python_executable).resolve(
-        strict=True
-    ) != Path(sys.executable).resolve(strict=True):
+    if (
+        not isinstance(python_executable, str)
+        or not Path(python_executable).is_absolute()
+        or Path(python_executable).resolve(strict=True)
+        != Path(sys.executable).resolve(strict=True)
+    ):
         raise RuntimeV1Error("resolved runtime interpreter does not match this runtime")
     planned_environment = (
         execution_environment.get("variables")
@@ -1440,7 +1443,7 @@ def build_trainer_invocation(
         ):
             raise RuntimeV1Error("offline worker closure binding changed")
     argv = [
-        str(Path(python_executable).resolve()),
+        python_executable,
         "-I",
         str(worker_path),
         "--",
