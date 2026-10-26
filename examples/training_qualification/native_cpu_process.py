@@ -64,7 +64,8 @@ def _file(path, digest, maximum):
 
 def _command(*args, cwd):
     environment = {
-        "PATH": "/usr/bin:/bin", "LC_ALL": "C", "GIT_OPTIONAL_LOCKS": "0",
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "LC_ALL": "C", "GIT_OPTIONAL_LOCKS": "0",
         "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1",
     }
     try:

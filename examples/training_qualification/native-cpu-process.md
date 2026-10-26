@@ -13,7 +13,15 @@ placeholder with reviewed real paths and hashes, and write canonical JSON with
 no trailing newline. `engine_root` must be the CLI's clean checkout, and its
 local `HEAD`, selected branch ref, and origin URL must match the config. The
 reviewer separately verifies that exact commit is pushed; this CLI performs
-no network lookup. `launcher` is the actual private venv `bin/python` path;
+no network lookup.
+
+Source observations use the host's explicitly configured `PATH` (default
+`/usr/bin:/bin`) for Git, retaining only fixed Git/locale controls rather than
+inheriting credentials or other environment entries. On a Mac with multiple
+developer toolchains, select the reviewed Command Line Tools path explicitly
+before invoking this helper; do not mutate system tool selection or permissions.
+
+`launcher` is the actual private venv `bin/python` path;
 `executable` is its owner-owned regular target. They must resolve exactly and
 the target bytes must match `executable_sha256`. The guardian, worker, and
 request are selected by fixed repository paths and exact config hashes.

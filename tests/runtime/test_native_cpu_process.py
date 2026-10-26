@@ -19,6 +19,24 @@ from synaptic_tuner.api.v1.reference.sqlite_store import SQLiteDurableStoreV1
 from tuner.runtime.native_mlx_material import canonical
 
 
+def test_source_observer_uses_explicit_host_path_without_inheriting_credentials(monkeypatch, tmp_path):
+    selected = "/reviewed/command-line-tools/bin:/usr/bin:/bin"
+    monkeypatch.setenv("PATH", selected)
+    monkeypatch.setenv("HF_TOKEN", "fixture-private-value")
+    calls = []
+
+    def bounded(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return 0, b"fixture-commit\n"
+
+    monkeypatch.setattr(cpu, "run_bounded_command", bounded)
+    assert cpu._command("rev-parse", "HEAD", cwd=tmp_path) == "fixture-commit"
+    assert calls[0][1]["environment"] == {
+        "PATH": selected, "LC_ALL": "C", "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1",
+    }
+
+
 @pytest.fixture
 def selection(monkeypatch):
     previous = os.umask(0o077)

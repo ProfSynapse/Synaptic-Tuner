@@ -534,6 +534,9 @@ def test_cleanup_preserves_first_termination_failure_and_reaps_owned_child(
     # pytest or prevent later tests/JUnit output from writing larger files.
     limits = []
     monkeypatch.setattr(guardian.resource, "setrlimit", lambda *args: limits.append(args))
+    # This case exercises preservation of an actual signal failure. Darwin's
+    # separately tested empty-group recovery would legitimately handle EPERM.
+    monkeypatch.setattr(guardian, "_darwin_empty_owned_group", lambda *args: False)
     read_fd, write_fd = os.pipe()
     original_killpg = os.killpg
     original_popen = subprocess.Popen
