@@ -39,6 +39,13 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Native MLX candidate
 
+- Restricted native start admissions expire within one hour of the current host
+  clock. Check the full signed selection and this window before start; signature
+  validity alone is insufficient. Preserve rejected admissions and use fresh
+  reviewed attempt identities rather than editing their signed bytes.
+- The native guardian sets hard process resource limits. Tests invoking
+  `supervise` inside pytest must stub and assert those calls, or isolate the test
+  in a subprocess; never lower pytest's own hard limits.
 - Native SFT consumes the shared preprocessor's exact token IDs and per-token
   labels with host-declared split/row identities. Never route prepared rows
   through MLX-LM text/chat loaders, a single-offset loss mask, implicit split,

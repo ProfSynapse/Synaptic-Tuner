@@ -1,5 +1,13 @@
 # Native MLX host consumer — restricted qualification candidate
 
+The recovered continuation now has successful bounded raw-text and assistant-only
+prompt/completion Mac runs,
+including public verification, five-role delivery and independent adapter delta
+readback. See [the dated evidence](../../docs/review/native-mlx-sft-qualification.md).
+The preparation sections below preserve earlier observations; ordinary native
+training and Syntunia integration remain gated. Signed start windows must be
+within one hour of the current execution-host clock.
+
 This example composes the existing public `TrainingAPI` and `RunsAPI`, reference
 host record/stream stores, Foundation grants, and the native provider family.
 It has no engine database, global provider registration, background training

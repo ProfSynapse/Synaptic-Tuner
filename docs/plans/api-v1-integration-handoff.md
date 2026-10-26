@@ -1,5 +1,17 @@
 # API v1 integration handoff
 
+## Recovered continuation — 2026-10-26
+
+The previous `api-v1-coordination-20261020` worktree is absent; its Git branch
+and MLX branches survived. Work resumes on `resume/api-v1-mlx-20261026` from
+the latest MLX consumer source. Bounded raw-text and assistant-only
+prompt/completion runs on the actual M4 now pass public training, native
+verification and five-artifact delivery; see
+the [exact source and evidence](../review/native-mlx-sft-qualification.md).
+This does not open Syntunia's native capability. Release branch integration,
+final package/CI review and product-owned training lifecycle joins remain.
+The older handoff below retains its dated scope and historical evidence.
+
 The integration branch is `feat/submodule-cloud-api-v1`. The Windows working
 branch is `feat/submodule-cloud-api-v1-windows`; its reviewed work was
 merged into the integration branch. Read the actual branch and worktree state

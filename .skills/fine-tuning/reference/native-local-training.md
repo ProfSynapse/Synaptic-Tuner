@@ -1,5 +1,25 @@
 # Native local training preparation
 
+## Current evidence — 2026-10-26
+
+The M4 now has successful bounded raw-text and assistant-only prompt/completion
+MLX SFT runs through the public `TrainingAPI` and `RunsAPI`, including native
+verification and five-artifact delivery for each. See
+`docs/review/native-mlx-sft-qualification.md` (repo root) for the
+exact execution source, run, numeric adapter-change evidence and remaining
+desktop integration gates. The preparation chronology below retains historical
+blockers; it does not supersede that dated evidence or enable ordinary native
+training, GRPO, public cancellation, or product support.
+
+Restricted signed start admissions must satisfy
+`now < expires_at <= now + one hour` on the execution host. `admission-candidate`
+constructs fields; it does not establish a valid current start window. Review
+the independent signature, exact selection and current clock before the sole
+start. Preserve rejected records; use fresh identities for a separately reviewed
+attempt. Never renew a consumed or uncertain submission.
+
+## Read-only host diagnosis
+
 Run `python tuner.py doctor native-training --json` on the target machine to
 record a bounded, versioned `DIAGNOSTIC_ONLY` report. The command observes OS,
 architecture, macOS version when applicable, CPython implementation/version,

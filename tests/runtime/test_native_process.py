@@ -528,6 +528,11 @@ def test_linux_eperm_does_not_use_darwin_group_recovery(monkeypatch):
 def test_cleanup_preserves_first_termination_failure_and_reaps_owned_child(
     monkeypatch, invocation, failed_signal, expected_phase,
 ):
+    # supervise normally runs in a separate guardian process. This test calls it
+    # inline to inject signal failures; its hard limits must not escape into
+    # pytest or prevent later tests/JUnit output from writing larger files.
+    limits = []
+    monkeypatch.setattr(guardian.resource, "setrlimit", lambda *args: limits.append(args))
     read_fd, write_fd = os.pipe()
     original_killpg = os.killpg
     original_popen = subprocess.Popen
@@ -563,6 +568,10 @@ def test_cleanup_preserves_first_termination_failure_and_reaps_owned_child(
         with pytest.raises(OSError):
             guardian.supervise(spec, read_fd, phase)
         assert failed and phase["name"] == expected_phase
+        assert limits == [
+            (guardian.resource.RLIMIT_CORE, (0, 0)),
+            (guardian.resource.RLIMIT_FSIZE, (1024**2, 1024**2)),
+        ]
         assert len(children) == 1 and children[0].returncode is not None
         assert signals.count(signal.SIGTERM) >= 1
         assert signal.SIGKILL in signals
