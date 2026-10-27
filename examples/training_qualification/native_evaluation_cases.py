@@ -88,6 +88,7 @@ def prepare(config):
             if not assertions:
                 raise ValueError("native evaluation requires configured assertions")
             correct = {"any": [{"name": "configured", "assertions": assertions}]}
+            validate_correctness_declaration(correct)
             if not evaluate_correctness(correct, view).passed:
                 raise ValueError("native evaluation reference does not satisfy declared assertions")
             cases.append(case)
@@ -188,6 +189,84 @@ def evidence_bundle(path, expected_digest, *, trusted_root_key_sha256):
     return selection, receipt, rows, manifest["execution_witness"]
 
 
+def validate_correctness_declaration(config):
+    """Admit nonempty assertion trees; keep shared permissive semantics unchanged."""
+    def refuse():
+        raise ValueError("native evaluation correctness declaration differs")
+
+    def named(value):
+        if "name" in value and (type(value["name"]) is not str or not 1 <= len(value["name"]) <= 512):
+            refuse()
+
+    if type(config) is not dict:
+        refuse()
+    modes = set(config) & {"any", "all", "assertions"}
+    if len(modes) != 1 or set(config) - (modes | {"name"}):
+        refuse()
+    named(config)
+    mode = next(iter(modes))
+    paths = config[mode] if mode == "any" else [{"assertions": config[mode]}]
+    if type(paths) is not list or not 1 <= len(paths) <= 128:
+        refuse()
+    pending = []
+    for path in paths:
+        if type(path) is not dict or set(path) - {"name", "assertions"} or "assertions" not in path:
+            refuse()
+        named(path)
+        pending.append((path["assertions"], 0))
+    leaves = {kind: kind for kind in ("exists", "absent", "equals", "not_equals", "contains",
+        "not_contains", "regex", "not_regex", "length_equals", "length_min", "length_max")}
+    leaves.update({"jsonpath_" + kind: kind for kind in tuple(leaves)})
+    leaves.update({"text_" + kind: kind for kind in ("contains", "not_contains", "regex", "not_regex")})
+    leaves["json_subset"] = "json_subset"
+    count = 0
+    while pending:
+        assertions, depth = pending.pop()
+        if type(assertions) is not list or not 1 <= len(assertions) <= 128 or depth > 32:
+            refuse()
+        for assertion in assertions:
+            count += 1
+            if count > 4096 or type(assertion) is not dict or type(assertion.get("type")) is not str:
+                refuse()
+            named(assertion)
+            kind = assertion["type"]
+            if kind in {"all", "any", "not"}:
+                field = "assertion" if kind == "not" else "assertions"
+                if set(assertion) - {"name", "type", field} or field not in assertion:
+                    refuse()
+                pending.append(([assertion[field]] if kind == "not" else assertion[field], depth + 1))
+                continue
+            if kind not in leaves:
+                refuse()
+            operation = leaves[kind]
+            selectors = set(assertion) & {"path", "selector"}
+            if len(selectors) > 1 or any(type(assertion[key]) is not str or not assertion[key].strip() for key in selectors):
+                refuse()
+            fields = set()
+            if operation in {"equals", "not_equals", "json_subset"}:
+                fields = {"value"}
+            elif operation in {"contains", "not_contains"}:
+                fields = {"value", "text"}
+            elif operation in {"regex", "not_regex"}:
+                fields = {"pattern"}
+            elif operation.startswith("length_"):
+                fields = {"value", {"length_equals": "length", "length_min": "min", "length_max": "max"}[operation]}
+            selected = set(assertion) & fields
+            if (fields and len(selected) != 1) or set(assertion) - ({"name", "type", "path", "selector"} | fields):
+                refuse()
+            if operation in {"regex", "not_regex"}:
+                if type(assertion["pattern"]) is not str:
+                    refuse()
+                try:
+                    re.compile(assertion["pattern"])
+                except re.error:
+                    refuse()
+            if operation.startswith("length_"):
+                number = assertion[next(iter(selected))]
+                if type(number) is not int or number < 0:
+                    refuse()
+
+
 def score(config, *, trusted_root_key_sha256):
     if (type(config) is not dict or set(config) != {"schema", "evidence_bundle", "evidence_manifest_sha256", "scoring_cases_file",
             "scoring_cases_sha256", "validator", "label", "output_root"}
@@ -201,7 +280,6 @@ def score(config, *, trusted_root_key_sha256):
     from Evaluator.reporting import build_run_payload
     from Evaluator.runner import evaluate_cases
     from shared.validation.dataset_validator import ValidatorConfig
-    from shared.verifiers.builtins.assertion_verifier import has_correctness_config
 
     raw_scoring = Path(config["scoring_cases_file"])
     with NativeTree(raw_scoring.parent) as tree:
@@ -215,9 +293,9 @@ def score(config, *, trusted_root_key_sha256):
     # supports corpus/model/media modes that bypass the retained chat client.
     # This host admits only configured assertions on already generated text.
     for case in cases:
-        if (set(case.metadata) - {"messages", "correct", "provenance"}
-                or not has_correctness_config(case.metadata.get("correct"))):
+        if set(case.metadata) - {"messages", "correct", "provenance"} or "correct" not in case.metadata:
             raise ValueError("native evaluation scoring metadata differs")
+        validate_correctness_declaration(case.metadata["correct"])
     workload = selection["request"]["workload"]
     if len(rows) != receipt["case_count"]:
         raise ValueError("native evaluation scoring coverage differs")

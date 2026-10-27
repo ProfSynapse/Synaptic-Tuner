@@ -229,7 +229,8 @@ def complete_evidence(signed_selection, monkeypatch):
         invocation=object(), pin=config["root_public_key_sha256"])
 
 
-def test_complete_export_portable_scoring_and_collision_preservation(complete_evidence):
+@pytest.mark.parametrize("correctness_form", ["any", "all", "assertions"])
+def test_complete_export_portable_scoring_and_collision_preservation(complete_evidence, correctness_form):
     p = complete_evidence
     receipt = host.readback(p.config, p.selection, p.invocation)
     assert receipt["case_count"] == 1 and not receipt["training_submitted"]
@@ -242,9 +243,10 @@ def test_complete_export_portable_scoring_and_collision_preservation(complete_ev
     with pytest.raises(FileExistsError): host.export(p.config, p.selection, p.invocation, p.root / "bundle")
     assert {f.name: f.read_bytes() for f in (p.root / "bundle").iterdir()} == before
     case = read_cases(p.raw_cases, p.workload)[0]
+    assertions = [{"type": "jsonpath_equals", "path": "$.content", "value": "answer"}]
+    correct = ({"any": [{"assertions": assertions}]} if correctness_form == "any" else {correctness_form: assertions})
     scoring = canonical([{"id": case["id"], "question": "question", "messages": case["messages"],
-        "tags": ["declared"], "correct": {"any": [{"assertions": [
-            {"type": "jsonpath_equals", "path": "$.content", "value": "answer"}]}]}}])
+        "tags": ["declared"], "correct": correct}])
     (p.root / "scoring.json").write_bytes(scoring)
     config = {"schema": "synaptic-native-evaluation-scoring/v1", "evidence_bundle": str(p.root / "bundle"),
         "evidence_manifest_sha256": result["manifest_sha256"], "scoring_cases_file": str(p.root / "scoring.json"),
@@ -261,7 +263,9 @@ def test_complete_export_portable_scoring_and_collision_preservation(complete_ev
 @pytest.mark.parametrize("index", [0, 1])
 @pytest.mark.parametrize("field", ["retrieval_config", "audio_config", "environment", "judge",
     "response_schema", "expected_context", "scoring", "future_verifier", "missing_correct",
-    "wrapper_ref", "tool_dynamic_ref", "tool_recursive_ref"])
+    "wrapper_ref", "tool_dynamic_ref", "tool_recursive_ref", "correct_empty_any", "correct_typo_any",
+    "correct_unknown_only", "correct_empty_all", "correct_empty_assertions", "correct_nested_empty",
+    "correct_negated_unknown"])
 def test_scoring_rejects_unadmitted_modes_before_any_case_dispatch(complete_evidence, monkeypatch, index, field):
     from Evaluator import runner
     from Evaluator.native_mlx_retained import NativeMLXRetainedClient
@@ -287,6 +291,14 @@ def test_scoring_rejects_unadmitted_modes_before_any_case_dispatch(complete_evid
         "correct": {"any": [{"assertions": [
             {"type": "jsonpath_equals", "path": "$.content", "value": "answer"}]}]}} for case in cases]
     if field in {"wrapper_ref", "tool_dynamic_ref", "tool_recursive_ref"}: pass
+    elif field.startswith("correct_"):
+        scoring[index]["correct"] = {
+            "correct_empty_any": {"any": []}, "correct_typo_any": {"any": "typo"},
+            "correct_unknown_only": {"future_verifier": {"mode": "new"}},
+            "correct_empty_all": {"all": []}, "correct_empty_assertions": {"assertions": []},
+            "correct_nested_empty": {"assertions": [{"type": "all", "assertions": []}]},
+            "correct_negated_unknown": {"assertions": [{"type": "not", "assertion": {"type": "future_verifier"}}]},
+        }[field]
     elif field == "missing_correct": del scoring[index]["correct"]
     elif field == "retrieval_config": scoring[index][field] = {"model": "unadmitted/model",
         "corpus": "unused", "queries": "unused", "qrels": "unused", "metrics": ["recall@1"]}
@@ -311,9 +323,74 @@ def test_scoring_rejects_unadmitted_modes_before_any_case_dispatch(complete_evid
     monkeypatch.setattr(runner.RetrievalVerifier, "evaluate_retrieval", forbidden)
     monkeypatch.setattr(runner.AudioVerifier, "evaluate_audio", forbidden)
     monkeypatch.setattr(NativeMLXRetainedClient, "chat", forbidden)
-    with pytest.raises(ValueError, match="validator must be inline" if field.endswith("ref") else "scoring metadata differs"):
+    refusal = ("validator must be inline" if field.endswith("ref") else
+        "correctness declaration differs" if field.startswith("correct_") else "scoring metadata differs")
+    with pytest.raises(ValueError, match=refusal):
         preparation.score(config, trusted_root_key_sha256=p.pin)
     assert not calls and not (p.root / "scored").exists()
+
+
+@pytest.mark.parametrize("form", ["any", "all", "assertions", "nested"])
+def test_admitted_correctness_forms_preserve_actual_assertions(form):
+    from shared.verifiers.builtins.assertion_verifier import evaluate_correctness
+    leaf = {"type": "jsonpath_equals", "path": "$.content", "value": "answer"}
+    if form == "any": correct = {"any": [{"name": "declared", "assertions": [leaf]}]}
+    elif form == "nested": correct = {"assertions": [{"type": "all", "assertions": [
+        {"type": "any", "assertions": [leaf, {"type": "text_contains", "text": "other"}]},
+        {"type": "not", "assertion": {"type": "text_regex", "pattern": "^wrong$"}}]}]}
+    else: correct = {form: [leaf]}
+    preparation.validate_correctness_declaration(correct)
+    result = evaluate_correctness(correct, {"content": "answer"})
+    assert result.passed and result.matched_path is not None and result.paths
+    assert not evaluate_correctness(correct, {"content": "wrong"}).passed
+
+
+@pytest.mark.parametrize("bad", [None, {}, {"any": [None]}, {"any": [{}]}, {"any": [{"assertions": [None]}]},
+    {"any": [{"assertions": [{"type": "exists"}], "typo": True}]},
+    {"all": [{"type": "exists"}], "assertions": [{"type": "exists"}]},
+    {"assertions": [{"type": "equals"}]}, {"assertions": [{"type": "regex"}]},
+    {"assertions": [{"type": "regex", "pattern": "["}]},
+    {"assertions": [{"type": "length_min", "value": True}]},
+    {"assertions": [{"type": "contains", "value": "a", "text": "b"}]},
+    {"assertions": [{"type": "exists", "path": "$.a", "selector": "$.b"}]},
+    {"assertions": [{"type": "exists", "typo": True}]},
+    {"assertions": [{"type": "any", "assertions": [None]}]},
+    {"assertions": [{"type": "not", "assertion": {}}]}])
+def test_malformed_correctness_trees_refuse_without_evaluating(bad):
+    with pytest.raises(ValueError, match="correctness declaration differs"):
+        preparation.validate_correctness_declaration(bad)
+
+
+@pytest.mark.parametrize("kind", ["exists", "absent", "equals", "not_equals", "contains", "not_contains",
+    "regex", "not_regex", "length_equals", "length_min", "length_max", "json_subset"])
+def test_existing_leaf_operations_and_aliases_are_admitted(kind):
+    from shared.verifiers.builtins.assertion_verifier import evaluate_correctness
+    fields = {"exists": {}, "absent": {}, "equals": {"value": "answer"}, "not_equals": {"value": "other"},
+        "contains": {"text": "ans"}, "not_contains": {"value": "other"},
+        "regex": {"pattern": "^answer$"}, "not_regex": {"pattern": "^other$"},
+        "length_equals": {"length": 6}, "length_min": {"min": 6}, "length_max": {"max": 6},
+        "json_subset": {"value": "answer"}}[kind]
+    aliases = [kind] if kind == "json_subset" else [kind, "jsonpath_" + kind]
+    if kind in {"contains", "not_contains", "regex", "not_regex"}: aliases.append("text_" + kind)
+    for alias in aliases:
+        correct = {"assertions": [{"type": alias, "selector": "$.missing" if kind == "absent" else "$.content", **fields}]}
+        preparation.validate_correctness_declaration(correct)
+        result = evaluate_correctness(correct, {"content": "answer"})
+        assert result.passed and result.paths and result.paths[0].assertions
+
+
+def test_correctness_list_depth_and_node_limits_have_exact_boundaries():
+    leaf = {"type": "exists"}
+    preparation.validate_correctness_declaration({"assertions": [leaf] * 128})
+    with pytest.raises(ValueError): preparation.validate_correctness_declaration({"assertions": [leaf] * 129})
+    nested = leaf
+    for _ in range(32): nested = {"type": "not", "assertion": nested}
+    preparation.validate_correctness_declaration({"assertions": [nested]})
+    with pytest.raises(ValueError):
+        preparation.validate_correctness_declaration({"assertions": [{"type": "not", "assertion": nested}]})
+    groups = [{"type": "all", "assertions": [leaf] * 63} for _ in range(64)]
+    preparation.validate_correctness_declaration({"assertions": groups})  # 64*(1+63) = 4096 nodes.
+    with pytest.raises(ValueError): preparation.validate_correctness_declaration({"assertions": [*groups, leaf]})
 
 
 @pytest.mark.parametrize("fault", ["manifest", "case", "directory", "receipt", "result", "extra_file", "key", "signature"])

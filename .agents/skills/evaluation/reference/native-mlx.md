@@ -55,6 +55,15 @@ validates complete retained evidence, joins exact prompts/case IDs and invokes
 the existing evaluator's assertions/reporting with an explicit validator config.
 Before any case dispatch, it checks every case against the closed metadata set
 `messages`, `correct`, and optional `provenance`, requiring configured assertions.
+Correctness declares exactly one nonempty `any` path list, `all` assertion list,
+or direct `assertions` list. Paths and nested `all`/`any`/`not` trees must contain
+recognized assertions with their required fields; empty, unknown, mixed or
+malformed declarations refuse before dispatch. The host admits the existing
+existence/absence, equality, containment, regex, length and JSON-subset operations
+and their existing aliases. Length bounds are nonnegative integers, selectors
+are unambiguous, and regex patterns must compile. Each list allows 1–128 members,
+with at most 32 nested levels and 4,096 assertion nodes per case. These are this
+host's admission limits; the shared evaluator retains its existing semantics.
 Retrieval, audio, environment, judge and other scenario modes are not admitted by
 this retained-response scorer; they must refuse before model/media or chat work.
 Validator schemas must be inline: reference keywords also refuse before dispatch

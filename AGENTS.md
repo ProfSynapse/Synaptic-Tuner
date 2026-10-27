@@ -45,6 +45,9 @@ This repository has a few cloud-training constraints that are easy to relearn th
   unknown metadata must reject before any response consumption or verifier work.
   Validator schemas must be inline; reject schema reference keywords before
   dispatch so schema resolution cannot perform unadmitted resource retrieval.
+  Require nonempty recognized correctness paths and nested assertion trees;
+  reject malformed, unknown or vacuous declarations before dispatch rather than
+  treating the shared evaluator's presence check as structural validation.
 
 - Native model-quality evaluation is generation-only and requires its own exact
   source/runtime/model/adapter/case selection and fresh bounded admission; never
