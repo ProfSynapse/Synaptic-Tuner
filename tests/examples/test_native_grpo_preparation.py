@@ -393,9 +393,63 @@ def test_tokenizer_profile_refuses_changed_inputs_or_bounds_and_preserves_failur
 
 def test_tokenizer_profile_darwin_path_without_changing_linux_preparation(tokenizer_case, monkeypatch):
     from types import SimpleNamespace
+    from tuner.training import grpo_preparation
+
+    def linux_only(*args, **kwargs):
+        raise AssertionError("Linux-only publication custody must not run on Darwin")
+
+    monkeypatch.setattr(grpo_preparation, "_private", linux_only)
     monkeypatch.setattr(prepare, "sys", SimpleNamespace(platform="darwin"))
     assert prepare.run("profile-tokenizer", tokenizer_case.configuration)[0] == 0
     assert prepare.run("prepare", tokenizer_case.configuration)[1]["phase"] == "configuration"
+
+
+@pytest.mark.parametrize("mode", [0o400, 0o600])
+def test_tokenizer_profile_accepts_sealed_original_or_native_copy(tokenizer_case, mode):
+    publication = Path(tokenizer_case.config["prepared_publication"])
+    for path in publication.iterdir():
+        path.chmod(mode)
+    assert prepare.run("profile-tokenizer", tokenizer_case.configuration)[0] == 0
+
+
+@pytest.mark.parametrize("fault", ["extra", "writable", "hardlink", "symlink"])
+def test_tokenizer_profile_rejects_publication_custody_before_load(tokenizer_case, fault):
+    t = tokenizer_case
+    publication = Path(t.config["prepared_publication"])
+    member = publication / "dataset.jsonl"
+    if fault == "extra":
+        (publication / "extra.json").write_bytes(b"{}")
+    elif fault == "writable":
+        member.chmod(0o640)
+    elif fault == "hardlink":
+        os.link(member, t.root / "hardlink.jsonl")
+    else:
+        member.rename(t.root / "original.jsonl")
+        member.symlink_to(t.root / "original.jsonl")
+    status, result = prepare.run("profile-tokenizer", t.configuration)
+    assert status == 2 and result["phase"] == "input_admission"
+    assert not t.loads and not (t.root / t.config["output_root"]).exists()
+
+
+def test_tokenizer_profile_rejects_identical_publication_replacement_after_load(tokenizer_case, monkeypatch):
+    t = tokenizer_case
+    member = Path(t.config["prepared_publication"]) / "dataset.jsonl"
+    original = sys.modules["transformers"].AutoTokenizer.from_pretrained
+
+    def replacing_load(*args, **kwargs):
+        raw = member.read_bytes()
+        # Retain the original inode to exclude inode reuse from the test.
+        member.rename(t.root / "original.jsonl")
+        member.write_bytes(raw)
+        member.chmod(0o600)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(sys.modules["transformers"].AutoTokenizer, "from_pretrained", replacing_load)
+    status, result = prepare.run("profile-tokenizer", t.configuration)
+    assert status == 2 and result["phase"] == "custody"
+    output = t.root / t.config["output_root"]
+    assert (output / "failure.json").exists()
+    assert not (output / "token-evidence.json").exists()
 
 
 def test_actual_tokenizer_profile_cli_with_stubs_blocks_model_imports_and_network(tokenizer_case):

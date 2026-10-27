@@ -71,6 +71,10 @@ example now provides `profile-tokenizer <reviewed-tokenizer-profile.json>`.
 Its separate config binds an actual recompiled GRPO workload, existing verified
 publication, private complete tokenizer snapshot, exact installed Transformers
 version, finite tokenizer/evidence byte budgets and a fresh private output.
+The read-only profile uses retained native POSIX custody plus the existing pure
+publication/input verifier on Darwin and Linux. It does not call or relax the
+preparation service's Linux-only filesystem reader. Sealed 0400 originals and
+separate 0600 native copies are allowed; member identity replacement rejects.
 It uses the worker's shared prompt-ID helper, not SFT text tokenization. The
 pinned Transformers5.20.2 API defaults to a mapping; GRPO explicitly requests
 `return_dict=False` with `tokenize=True`/`add_generation_prompt=True` and the

@@ -12,6 +12,7 @@ import importlib.metadata
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 
 ENGINE_ROOT = Path(__file__).resolve().parents[3]
@@ -24,7 +25,9 @@ from tuner.runtime.native_mlx_material import canonical, strict_json
 from tuner.training.grpo_preparation import (
     GRPONormalizerConfigV1, GRPOPreparedInputFormatVerifierV1,
     GRPOTrainingInputNormalizerV1, snapshot_grpo_publication,
+    _identity, verify_grpo_publication_bytes,
 )
+from tuner.training.grpo_compilation import admit_grpo_snapshot
 from tuner.training.input_preparation import (
     PosixPrivatePreparedRootAuthorityV1, TrainingInputPreparationServiceV1,
 )
@@ -161,6 +164,40 @@ def run(action, configuration):
             return 2, summary
 
 
+def _profile_publication(tree, projection):
+    """Read sealed publication bytes with native POSIX custody, including Darwin.
+
+    The generic preparation verifier intentionally requires Linux. Keep its pure
+    byte/identity/input checks, using the native reader for this read-only action.
+    Canonical sealed originals (0400) and separate native copies (0600) are valid.
+    """
+    def inventory():
+        if tree.members() != ("dataset.jsonl", "manifest.json"):
+            raise ValueError("GRPO publication inventory differs")
+        result = {}
+        for name in tree.members():
+            info = os.stat(name, dir_fd=tree.fd, follow_symlinks=False)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) not in (0o400, 0o600)):
+                raise ValueError("GRPO publication member custody differs")
+            result[name] = file_identity(info)
+        return result
+
+    before = inventory()
+    raw = tree.read("dataset.jsonl", maximum=65536)
+    manifest = verify_grpo_publication_bytes(tree.path,
+        tree.read("manifest.json", maximum=4096), raw)
+    training = TrainingInputV1.from_dict(projection.workload.document["training_input"])
+    if (_identity(manifest) != projection.source
+            or manifest["prompt_column"] != training.hyperparameters.prompt_column):
+        raise ValueError("GRPO prepared input or prompt column differs")
+    admit_grpo_snapshot(training, projection.source, raw)
+    if inventory() != before:
+        raise ValueError("GRPO publication changed during read")
+    tree.check()
+    return raw, before
+
+
 def profile_tokenizer(configuration):
     """Tokenize the verified publication exactly as the worker, without MLX.
 
@@ -194,11 +231,8 @@ def profile_tokenizer(configuration):
                 raise ValueError("tokenizer profile requires a compiled GRPO workload")
             publication = _path(config["prepared_publication"], path.parent)
             publication_tree = stack.enter_context(NativeTree(publication, private=True))
-            verifier = GRPOPreparedInputFormatVerifierV1()
-            training_json = canonical(projection.workload.document["training_input"]).decode("utf-8")
-            verifier.validate_training_input(publication, projection.source, training_json)
-            observed = verifier.verify(publication)
-            prompts = prepared_prompts(observed.snapshot, projection)
+            publication_bytes, publication_identity = _profile_publication(publication_tree, projection)
+            prompts = prepared_prompts(publication_bytes, projection)
             snapshot = _snapshot(strict_json(_read(_path(config["tokenizer_snapshot_file"], path.parent), 1024 * 1024)))
             if (snapshot.repository, snapshot.revision) != (projection.profile.model_ref, projection.profile.tokenizer_revision):
                 raise ValueError("tokenizer profile source pin differs")
@@ -230,8 +264,8 @@ def profile_tokenizer(configuration):
             phase = "custody"
             if token_tree.inventory(maximum_total=budget.aggregate) != snapshot.files:
                 raise ValueError("tokenizer changed during profiling")
-            verifier.validate_training_input(publication, projection.source, training_json)
-            publication_tree.check()
+            if _profile_publication(publication_tree, projection) != (publication_bytes, publication_identity):
+                raise ValueError("GRPO publication changed during profiling")
             phase = "publication"
             evidence = canonical({"schema": "synaptic-native-grpo-token-evidence/v1",
                 "workload_digest": projection.workload.fingerprint, "source": projection.source.to_dict(),

@@ -106,6 +106,14 @@ Review its explicit tokenizer/evidence byte bounds and fresh output root.
 The snapshot source/revision must equal the compiled workload's tokenizer pins;
 no model-specific mapping or substitute profile is constructed here.
 
+This read-only action retains the publication through `NativeTree` on both
+Linux and Darwin, then uses the existing pure publication, identity and input
+verifiers. The preparation service's Linux-only filesystem reader stays on the
+preparation path. Publication members must be single-link owner files, sealed
+0400 originals or separate byte-identical 0600 native copies under a 0700 root.
+Exact member identities and bytes are rechecked after tokenizer use; replacement
+by an identical file still rejects.
+
 After root approval, using the already selected interpreter:
 
 ```bash
