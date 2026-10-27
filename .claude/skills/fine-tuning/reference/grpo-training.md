@@ -2,8 +2,10 @@
 
 Group Relative Policy Optimization — optimizes model behavior using reward functions against generated completions.
 
-Native MLX now has a separate **unqualified implementation candidate** through
-the existing public native composition. Start with `native-local-training.md`
+Native MLX has a separate implementation through the existing public native
+composition, with one restricted M4 mechanics success. Read the exact-source
+`docs/review/native-mlx-grpo-qualification.md` and its limits (repo root);
+ordinary native qualification remains gated. Start with `native-local-training.md`
 and `docs/architecture/native-mlx-grpo.md` (repo root). Do not apply the legacy
 CLI commands below to that candidate or infer Mac qualification from Modal
 evidence. Its attributed objective, bounded regex-V0 reward engine, strict public

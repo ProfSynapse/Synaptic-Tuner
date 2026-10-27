@@ -1,7 +1,10 @@
 # Native MLX GRPO candidate
 
-Status: CPU review candidate, 2026-10-27. No Apple execution or hardware
-qualification is claimed. The existing qualified SFT environment stays intact.
+Status: one restricted M4 mechanics attempt succeeded on 2026-10-27; see the
+[exact-source evidence and limits](../review/native-mlx-grpo-qualification.md).
+Ordinary qualification and broad support remain gated. The existing qualified
+SFT environment stays intact. Historical CPU-only evidence below retains its
+original source and scope.
 
 ## Source decision
 

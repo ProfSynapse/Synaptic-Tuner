@@ -1,6 +1,6 @@
 # Native MLX API v1 host integration
 
-Native SFT uses the existing `TrainingAPI` and `RunsAPI`. The optional
+Native SFT and restricted GRPO use the existing `TrainingAPI` and `RunsAPI`. The optional
 `synaptic_tuner.api.v1.native_mlx` module exposes its explicit host composition
 types, compiler, command catalog and `native_mlx_family` factory, following the
 same opt-in pattern as `api.v1.modal`. The base API remains provider-neutral.
@@ -106,14 +106,15 @@ tokenizer/template, runtime and workload identities travel in the manifests.
 Desktop serving and format conversion need their own qualified engine path.
 
 The optional module also exposes `NativeMLXGRPOProfile` and
-`compile_native_grpo` for a separate, **hardware-unqualified** GRPO source
-candidate. It uses the same native planner/family/owned process and public
+`compile_native_grpo` for a separate named GRPO profile. One bounded M4 mechanics
+attempt now passes; see its [exact-source report](../review/native-mlx-grpo-qualification.md).
+Ordinary qualification remains gated. It uses the same native planner/family/owned process and public
 five-role verification, with method-specific prompt, rollout, reward and saved
 adapter evidence. No SFT qualification transfers to it. See
 [native GRPO architecture and audit](native-mlx-grpo.md) for the exact upstream
 pin, separate runtime closure, supported controls and root-owned next gates.
 
-The native verifier checks actual optimizer count, finite nonzero saved adapter
+For SFT, the native verifier checks actual optimizer count, finite nonzero saved adapter
 delta, exact tensor/checkpoint inventory and held-out evaluation after loading
 the saved final adapter. An exit code or the upstream in-loop loss is not this
 evidence. See the [real M4 qualification report](../review/native-mlx-sft-qualification.md)

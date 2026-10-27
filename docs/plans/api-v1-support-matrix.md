@@ -30,10 +30,21 @@ Real Mac process and numerical controls passed. See the
 The rows below reconcile later GRPO/Windows/native evidence without relabeling
 older execution sources as this candidate. A host must authenticate qualification
 for its exact selection; no default native admission is shipped. Public native
-logs/cancel/reconcile/GRPO remain unavailable. Broad stable-v1 active cancellation,
+logs/cancel/reconcile remain unavailable. Ordinary GRPO qualification stays gated.
+Broad stable-v1 active cancellation,
 caller-loss/reconciliation and final release checks remain separate gates.
 HF Jobs qualification remains owner-paused. Existing Windows/Modal runs are not
 retrained to repair documentation, packaging or local readback.
+
+2026-10-27 increment: two practical conversation SFT datasets each completed
+50 updates and saved-adapter reload evaluation on all 20 held-out rows at exact
+`d57dc55e`; their preparation example retains the source-specific evidence.
+Native GRPO at exact `ad17275a` completed one separately admitted three-update
+M4 mechanics fixture, with varied rewards, saved parameter changes, reload
+consistency and five verified/delivered roles. See the
+[bounded GRPO report](../review/native-mlx-grpo-qualification.md). These exact
+attempts do not relabel earlier evidence or qualify training quality/general
+native support.
 
 ## Historical integration baseline — 2026-10-20
 
@@ -130,7 +141,8 @@ existing APIs. Nontraining smoke results remain bounded synthetic evidence.
 | SFT Modal cancel/reconcile/cost quote | Merged public configured lifecycle; default flags remain off | Initial recipe opt-in binds the descriptor before planning; current caller permission and the original authenticated submit/assessment/call target are required. Cancel acknowledgment and provider-input terminal observation are separate. Merged #246 permits known-run observation after an orphaned cancel receipt, preserves its unadvanced intent/history, and refuses cancel/reconcile replay. Neither observation nor acknowledgment proves physical quiescence. Quote/log/capability promotion and real final-source lifecycle parity remain separately gated. |
 | SFT HF Jobs public API v1 | Implemented/installed; owner-paused qualification | Job `6ad7403a5275124786e158ba` ended ERROR with closed DISPATCH/23 (nonzero trainer subprocess). Cause remains unknown; retained bucket contains input only. No replay or cancellation occurred. The unused cancellation lane is not replacement-job authority. No new HF work is planned. HF model-repository publication is a separate operation and is not implicitly waived. |
 | GRPO Modal public training route | Live-qualified, bounded on `ba228d6c` | Run `modal-10201ea947d40c7bffa0c92c`, call `fc-01M5JJG31MGCHJGRNW37BZSWSZ`, completed three updates, changed the aggregate 120-tensor parameter-set digest, and produced grouped rewards 0/1 with variance 0.25 over three nonconstant callbacks. Public verification and five delivered artifacts passed. This does not prove every tensor changed, writing quality, arbitrary recipes or execution of the later integrated closure. Other GRPO backends remain deferred. |
-| Apple-silicon local training | Live-qualified, bounded native API v1 SFT fixture | Exact integrated `06e0fcf2` raw r69 and assistant-only r70 passed on M4/24GiB/macOS27.0.1 with the pinned private runtime/model and unchanged prepared publications. Each completed three updates and five verified/delivered MLX roles; independent saved-adapter changes and final reload losses passed. The public optional module and host-owned synchronous consumer are implemented. Real Mac51 process/host controls and three realMLX loss/autograd cases passed. Ordinary qualification remains independently authenticated; public logs/cancel/reconcile, native GRPO, checkpoint resume and broad model/OS support are unavailable. |
+| Apple-silicon local training | Live-qualified, bounded native API v1 SFT fixture | Exact integrated `06e0fcf2` raw r69 and assistant-only r70 passed on M4/24GiB/macOS27.0.1 with the pinned private runtime/model and unchanged prepared publications. Each completed three updates and five verified/delivered MLX roles; independent saved-adapter changes and final reload losses passed. The public optional module and host-owned synchronous consumer are implemented. Real Mac51 process/host controls and three realMLX loss/autograd cases passed. Ordinary qualification remains independently authenticated; public logs/cancel/reconcile, ordinary native GRPO qualification, checkpoint resume and broad model/OS support are unavailable. |
+| Native MLX GRPO | One bounded M4 mechanics fixture at `ad17275a` | Fresh signed attempt completed three actual updates, three varied reward groups/48 calls and 102 generated tokens. All 40,960 saved parameters changed; final saved-adapter reload replay objective is finite. Public verification and five-role download/hash checks pass. See [exact report](../review/native-mlx-grpo-qualification.md). Ordinary qualification, quality, repeatability and broad lifecycle support remain gated. |
 | Training restart/recovery, all providers | Exact known-run cold reads; bounded Modal/Mac evidence | Fresh-process observation/show passed for the scoped Modal SFT evidence and Mac consumer. Both integrated Mac r69/r70 passed fresh-process observation, reverification and five-role redelivery after signed start expiry with original keys/catalogs and identical manifests. Use `runs.reverify` on already verified artifacts. Active caller-loss/public cancellation and broad stable lifecycle acceptance remain open. No unknown-job adoption, automatic resubmission, arbitrary checkpoint continuation or restoration of a lost source lease is promised. HF qualification is paused. |
 
 ## Earlier exact live evidence

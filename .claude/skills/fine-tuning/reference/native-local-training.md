@@ -34,8 +34,10 @@ attempt. Never renew a consumed or uncertain submission.
 ## Native GRPO implementation candidate — 2026-10-27
 
 The optional public native module also exposes `NativeMLXGRPOProfile` and
-`compile_native_grpo`. This is a CPU-tested source candidate, not MLX hardware
-qualification. See `docs/architecture/native-mlx-grpo.md` and the separate
+`compile_native_grpo`. One restricted M4 mechanics attempt now succeeds; read
+`docs/review/native-mlx-grpo-qualification.md` for the exact source, controls,
+artifact hashes and limits. This does not enable ordinary qualification or broad
+native support. See `docs/architecture/native-mlx-grpo.md` and the separate
 `Trainers/mlx_grpo_mac/runtime-candidate` closure. Never install into or relabel
 the qualified SFT environment. The original SFT 50/54-package locks stay intact.
 
