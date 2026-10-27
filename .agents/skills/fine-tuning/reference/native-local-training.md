@@ -1,5 +1,18 @@
 # Native local training preparation
 
+For representative public conversation and explicitly positive local tool subsets,
+use the checked-in config-first host workflow in
+`examples/training_qualification/native_sft_datasets/README.md` (repo root).
+It fills the source acquisition/selection CLI gap and delegates immutable publication
+to the existing conversation normalizer; it never trains, installs a model/runtime,
+or creates admission. Retain source hashes and original split provenance, audit
+exclusions and complete examples, and run the existing tokenizer-only mask doctor
+on every selected row. Legacy `tool_call:` text is an explicit projection and does
+not establish compatibility with the current Nexus API or native structured calls.
+Canonical publication members remain sealed 0400. Native staging creates separate
+byte-identical 0600 members under a new 0700 content-addressed directory, then
+revalidates their identity; never chmod canonical originals to satisfy the reader.
+
 ## Current evidence — 2026-10-26
 
 The M4 now has successful bounded raw-text and assistant-only prompt/completion
@@ -18,7 +31,125 @@ the independent signature, exact selection and current clock before the sole
 start. Preserve rejected records; use fresh identities for a separately reviewed
 attempt. Never renew a consumed or uncertain submission.
 
-## Read-only host diagnosis
+## Native GRPO implementation candidate — 2026-10-27
+
+The optional public native module also exposes `NativeMLXGRPOProfile` and
+`compile_native_grpo`. One restricted M4 mechanics attempt now succeeds; read
+`docs/review/native-mlx-grpo-qualification.md` for the exact source, controls,
+artifact hashes and limits. This does not enable ordinary qualification or broad
+native support. See `docs/architecture/native-mlx-grpo.md` and the separate
+`Trainers/mlx_grpo_mac/runtime-candidate` closure. Never install into or relabel
+the qualified SFT environment. The original SFT 50/54-package locks stay intact.
+
+The candidate consumes the existing immutable `synaptic-grpo-prompts/v1`
+publication and public response-reward declaration through the same planner,
+family, host grants/catalogs, owned process and five verified artifact roles.
+Profile data binds the exact model/source/runtime, pinned attributed objective,
+quantization, rollout/reward/evidence budgets, and timeout-bounded regex-V0
+reward semantics. Only selected prompt messages reach generation; generated IDs
+and completion masks feed a detached-old/base-reference, token-mean unclipped
+on-policy objective. Unsupported controls reject rather than silently default.
+Constant grouped rewards or unchanged saved parameters cannot verify success.
+Final saved-adapter rollout replay is not held-out writing-quality evaluation.
+
+Evidence publication must pass the profile's exact `maximum_evidence_bytes` to
+both the exclusive write and its same-tree readback. `NativeTree.write_exclusive`
+retains its 1 MiB default for SFT/control documents; larger writes require an
+explicit finite limit within the existing native per-file ceiling. An admitted
+GRPO record above 1 MiB must round-trip through actual publication and five-role
+verification in CPU controls. Reject over-budget bytes before creating the file;
+do not fix mismatched limits by silently increasing every caller's default.
+
+Native-only input preparation has a separate source-checkout host example:
+`python -B examples/training_qualification/native_grpo_preparation/prepare.py
+inspect <reviewed-config.json>`, then `prepare` after reviewing it. It composes
+the existing GRPO preparation service on Linux with fresh create-only private
+roots, exact seed hash/size and actual prepared identity/request outputs. Read
+its README for safe-parent and retained-failure rules. It does not consume a
+Modal profile, construct a native profile/admission, import ML or run on the Mac.
+
+For separately reviewed tokenizer-only diagnosis on Linux/Darwin, the same
+example now provides `profile-tokenizer <reviewed-tokenizer-profile.json>`.
+Its separate config binds an actual recompiled GRPO workload, existing verified
+publication, private complete tokenizer snapshot, exact installed Transformers
+version, finite tokenizer/evidence byte budgets and a fresh private output.
+The read-only profile uses retained native POSIX custody plus the existing pure
+publication/input verifier on Darwin and Linux. It does not call or relax the
+preparation service's Linux-only filesystem reader. Sealed 0400 originals and
+separate 0600 native copies are allowed; member identity replacement rejects.
+It uses the worker's shared prompt-ID helper, not SFT text tokenization. The
+pinned Transformers5.20.2 API defaults to a mapping; GRPO explicitly requests
+`return_dict=False` with `tokenize=True`/`add_generation_prompt=True` and the
+unchanged configured template kwargs. Reserved renderer-control collisions and
+malformed IDs reject before ML imports. Read the example README for the schema,
+exact command and retained-failure/collision rules. Evidence contains private
+actual IDs and binding digests, while stdout contains bounded counts/hashes.
+This imports only the existing local tokenizer, no MLX or model; it grants no
+runtime/source admission, isolated-import proof or training qualification.
+The static API defect does not retrospectively establish historical122's cause.
+
+The existing restricted `native_host.py` consumer accepts proposal `method:
+grpo`, exact `grpo_profile`/`grpo_controls`, attempt kind `grpo_on_policy`, and
+reviewed `input_review.prompt_rows`/`publication_sha256`. Its inspect, fresh root
+admission, synchronous start, original-authority retained reads and no-replay
+rules are unchanged. The separate native source capture must include the new
+worker/math/verifier bytes. No new provider verb or accepting authority exists.
+
+Linux CPU controls must not import MLX. The real tiny numerical test additionally
+requires `SYNAPTIC_TEST_NATIVE_GRPO_MLX=1` on Darwin arm64; root/source/runtime
+review and a bounded authorized command must precede it. Mac execution, GPU fit,
+real grouped reward variation, saved adapter changes and public artifact
+readback remain separate gates. Public logs/cancel/reconcile remain disabled.
+
+## Read-only host diagnosis (commands)
+
+### Closed native GRPO child exits
+
+After reviewed capture imports, a GRPO child uses the following static exits.
+Interpret a code only with that attempt's exact admitted source, method `grpo`,
+`reason: worker_exited` and confirmed termination. Guardian failures have their
+own codes; a matching integer in another outcome is not a GRPO phase.
+
+| Exit | Last entered boundary |
+|------|-----------------------|
+| 130 | Request compilation, support imports and transport admission |
+| 131 | Runtime material validation |
+| 132 | Portable tokenizer publication and local load |
+| 133 | Prepared prompt/snapshot/quantization admission |
+| 134 | Tokenizer import and local load |
+| 135 | Chat-template tokenization, token bounds and EOS admission |
+| 136 | ML imports |
+| 137 | Seed and model load |
+| 138 | Adapter preparation and parameter realization |
+| 139 | Initial adapter save/readback and optimizer construction |
+| 140 | Bounded rollout generation |
+| 141 | Response decoding and bounded reward scoring |
+| 142 | Detached old-policy and base-reference log probabilities |
+| 143 | Group advantages, objective and gradient validation |
+| 144 | Clipped optimizer update, realization and bounded evidence accumulation |
+| 145 | Final update-count check, save/readback and parameter delta |
+| 146 | Fresh model/adapter reload and final objective replay |
+| 147 | Evidence and control-document publication |
+| 148 | Final source/output custody checks |
+
+The trusted child-local callback transports only literal phase labels to this
+static map. No request/config field can select a callback. Diagnostics add no
+artifact, stderr message, exception text, traceback, path, prompt, argv or
+environment value. Public failure remains `native_worker_failed`; existing SFT
+exits 120/121/122 and native bootstrap 120/capture-import 121 stay unchanged.
+Success files and all runtime, custody, deadline and output bounds are unchanged.
+
+A phase locates a boundary, not its cause or a successful prior operation.
+Repeated loop phases carry no iteration count. CPU failure injection and a
+synthetic success publication test are not hardware qualification. A historical
+122 without these exact diagnostic bytes cannot be retrospectively classified;
+stderr byte counts cannot establish content. Preserve its consumed state.
+Ordinary host tokenizer-only success does not prove isolated imports or GRPO
+tokenization/model/adapter behavior. Refresh affected closures, package and exact
+source/runtime capture after independent review; any later model attempt still
+requires a fresh separately reviewed admission, never automatic replay.
+
+### Host metadata commands
 
 Consumer integration uses the optional public
 `synaptic_tuner.api.v1.native_mlx` composition module with existing

@@ -2,6 +2,32 @@
 
 Group Relative Policy Optimization — optimizes model behavior using reward functions against generated completions.
 
+Native MLX has a separate implementation through the existing public native
+composition, with one restricted M4 mechanics success. Read the exact-source
+`docs/review/native-mlx-grpo-qualification.md` and its limits (repo root);
+ordinary native qualification remains gated. Start with `native-local-training.md`
+and `docs/architecture/native-mlx-grpo.md` (repo root). Do not apply the legacy
+CLI commands below to that candidate or infer Mac qualification from Modal
+evidence. Its attributed objective, bounded regex-V0 reward engine, strict public
+control refusals and new private runtime require exact independent review and
+fresh root admission before ML imports. The qualified SFT environment is not a
+GRPO environment; no native public lifecycle capability is promoted.
+
+Native GRPO failure diagnosis uses the closed numeric phase exits documented in
+`native-local-training.md`, interpreted with the exact admitted worker source and
+confirmed process outcome. No exception text or raw stderr is diagnostic
+authority. Historical coarse exit 122 remains unclassified and consumed;
+ordinary tokenizer-only evidence does not qualify the isolated GRPO path.
+
+The checked-in native preparation example also offers `profile-tokenizer` with
+a separate reviewed config. It verifies the actual workload/publication/private
+tokenizer snapshot, then executes GRPO's shared prompt-tokenization helper with
+explicit `return_dict=False` (Transformers5 defaults to a mapping), unchanged
+generation scaffold/kwargs and strict list-ID/EOS bounds. It retains private
+bounded token evidence and emits only counts/hashes. See its README and
+`native-local-training.md`; root owns any Mac execution. It loads no model and
+does not classify the consumed historical failure or grant replay authority.
+
 ## Public GRPO declarations and CPU preparation
 
 The provider-neutral `TrainingInputV1` accepts explicit method `grpo` with
@@ -100,6 +126,20 @@ training; a lost submission reply preserves the consumed claim and uncertain
 workflow, even if the scripted provider completed. Cold public-host/fresh-process
 GRPO recovery and live image/model qualification remain separate acceptance
 steps. No new GRPO candidate profile is shipped by this runner join.
+
+For standalone **native-only Linux host preparation**, use the checked-in
+`examples/training_qualification/native_grpo_preparation/prepare.py
+{inspect,prepare} <reviewed-config.json>` wrapper. Read its README first. It
+hash/size-binds the approved JSONL, copies it into a fresh 0700 source root at
+0600, and invokes the same service/normalizer/verifier below. It emits actual
+prepared identity/publication and the canonical public request with its actual
+prepared ref. Its output root is create-only; failures and stages are retained,
+and summaries are bounded fixed-phase records. No Modal profile, runtime/model
+download, ML import or execution grant is needed. Use a safe private home-root
+parent when a shared cache ancestor is group-writable; do not chmod shared
+parents or weaken custody checks. The included two-color example is controlled
+synthetic mechanics data with unguaranteed reward variation, not quality or
+research evidence. Root still reviews actual native bounds/capture/admission.
 
 Use the existing generic preparation service with explicit host-owned roots:
 
@@ -603,7 +643,8 @@ env-GRPO smoke job and confirm the run does not raise a length/logprob mismatch.
 
 ## Platform Note
 
-GRPO requires **WSL/Linux only** — native Windows is not supported.
+The legacy CUDA/TRL GRPO commands require **WSL/Linux**; native Windows is not
+supported. The distinct native MLX candidate above remains hardware-unqualified.
 
 
 ## Captured ordinary candidate configuration

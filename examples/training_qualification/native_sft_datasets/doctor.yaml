@@ -1,0 +1,69 @@
+# Tokenizer-only diagnosis through the strict trainer config loader. Not launch authority.
+model:
+  model_name: mlx-community/Qwen3-0.6B-4bit
+  max_seq_length: 2048
+  dtype: null
+  load_in_4bit: true
+  model_revision: 73e3e38d981303bc594367cd910ea6eb48349da8
+  anonymous: false
+  trust_remote_code: null
+  use_safetensors: null
+  cache_dir: null
+lora:
+  r: 4
+  lora_alpha: 32
+  lora_dropout: 0
+  bias: none
+  target_modules:
+  - self_attn.q_proj
+  - self_attn.v_proj
+  use_gradient_checkpointing: unsloth
+  random_state: 3407
+  use_rslora: false
+  use_dora: false
+training:
+  output_dir: .tracking/doctor-only
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 1
+  learning_rate: 2e-4
+  max_grad_norm: 1.0
+  lr_scheduler_type: linear
+  max_seq_length: 2048
+  packing: false
+  completion_only_loss: true
+  assistant_only_loss: false
+  gradient_checkpointing: true
+  optim: adamw_8bit
+  fp16: false
+  bf16: true
+  num_train_epochs: 1
+  warmup_ratio: 0.02
+  logging_steps: 5
+  save_steps: 50
+  save_total_limit: 3
+  dataloader_num_workers: 0
+  dataloader_pin_memory: true
+  group_by_length: false
+  eval_strategy: 'no'
+  eval_steps: 50
+  prompt_render: prompt_completion
+  chat_template_kwargs:
+    enable_thinking: false
+  max_dropped_row_fraction: 0
+  require_memory_efficient_loss: false
+dataset:
+  dataset_name: null
+  dataset_file: null
+  local_file: null
+  num_proc: 1
+  test_size: 0.1
+  split_dataset: false
+  validation_group_key: null
+  filter_desirable: false
+  use_preassigned_splits: true
+wandb:
+  enabled: false
+  project: null
+  run_name: null
+  entity: null
+seed: 42

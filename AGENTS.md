@@ -39,6 +39,39 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Native MLX candidate
 
+- For representative native SFT subsets, use the config-driven host example in
+  `examples/training_qualification/native_sft_datasets/`; preserve declared source
+  splits, explicit positive-label eligibility, complete conversation context,
+  original source commitments and audited exclusions. Publish through the existing
+  conversation normalizer. Review tokenizer-only masks before fresh root admission;
+  serialized legacy tool demonstrations do not establish current Nexus API support.
+
+- Native GRPO prompt tokenization must request list IDs explicitly with
+  `return_dict=False`; the pinned Transformers5 default is a mapping. Preserve
+  configured template/scaffold arguments, reject renderer-control collisions and
+  malformed IDs before ML imports. Tokenizer-only GRPO diagnosis must call the
+  same worker helper through the checked-in config-first preparation example;
+  its host-only success neither classifies a historical failure nor qualifies MLX.
+
+- Native GRPO child diagnostics use only fixed numeric phase exits, with a trusted
+  child-local callback and no request/config callback fields or diagnostic files.
+  Interpret them only with the exact admitted source and confirmed worker outcome;
+  a phase is not a cause, and historical exit 122 remains unclassified. Preserve
+  SFT exits 120/121/122, the public `native_worker_failed` result, success inventory,
+  retained failed claims and fresh source/runtime/admission review before execution.
+
+- Native GRPO uses its own named config-driven profile and private runtime
+  closure; never modify/relabel the qualified SFT environment. Bind the exact
+  attributed objective and reward engine/deadlines, keep sampled token IDs and
+  generated-only masks, and detach old/reference probabilities and advantages.
+  Recompile every public control or reject it. Grouped reward variation must
+  survive the objective's float32 conversion, and native verification requires
+  independently recomputed saved parameter changes and complete bounded groups.
+  Evidence publication and readback must use the same admitted byte limit;
+  preserve the generic exclusive writer's existing default for SFT/control files.
+  CPU/source checks do not qualify hardware; root review precedes ML imports.
+  Preserve original SFT canonical bytes and all native no-replay/capability gates.
+
 - Restricted native start admissions expire within one hour of the current host
   clock. Check the full signed selection and this window before start; signature
   validity alone is insufficient. Preserve rejected admissions and use fresh

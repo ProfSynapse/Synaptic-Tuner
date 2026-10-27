@@ -155,14 +155,20 @@ def compile_native_sft(
     return NativeSFTProjection(workload, source, controls, tokenization, lora, optimizer, profile)
 
 
-def parse_native_workload(raw: bytes) -> NativeSFTProjection:
+def parse_native_workload(raw: bytes):
+    """Recompile an exact method-specific native document; never infer a profile."""
     document = strict_json(raw, maximum=1024 * 1024)
     if type(document) is not dict:
         raise ValueError("native workload must be an object")
-    projected = compile_native_sft(
+    if document.get("schema_version") == "synaptic-native-mlx-grpo-workload/v1":
+        from tuner.training.native_mlx_grpo_compilation import NativeMLXGRPOProfile, compile_native_grpo
+        compiler, profile_type = compile_native_grpo, NativeMLXGRPOProfile
+    else:
+        compiler, profile_type = compile_native_sft, NativeMLXProfile
+    projected = compiler(
         TrainingInputV1.from_dict(document["training_input"]),
         PreparedTrainingInputIdentity.from_dict(document["prepared_input"]),
-        NativeMLXProfile.from_dict(document["profile"]),
+        profile_type.from_dict(document["profile"]),
     )
     if projected.workload.canonical_bytes != raw:
         raise ValueError("native workload differs from public-input compilation")

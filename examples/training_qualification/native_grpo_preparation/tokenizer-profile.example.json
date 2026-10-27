@@ -1,0 +1,10 @@
+{
+  "schema": "synaptic-native-grpo-tokenizer-profile-example/v1",
+  "workload_file": "reviewed-workload.json",
+  "prepared_publication": "prepared-color-mechanics/publications/dataset-<actual-semantic-digest>",
+  "tokenizer_snapshot_file": "reviewed-tokenizer-snapshot.json",
+  "transformers_version": "5.20.2",
+  "tokenizer_budget": {"per_file": 16777216, "aggregate": 33554432},
+  "maximum_token_evidence_bytes": 65536,
+  "output_root": "tokenizer-only-grpo-new-attempt"
+}

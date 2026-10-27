@@ -1,0 +1,94 @@
+{
+  "schema": "synaptic-native-qualification-proposal/v1",
+  "status": "ROOT_REVIEW_REQUIRED_NOT_EXECUTION_AUTHORITY",
+  "profile_ref": "native-mlx-qwen3-06b-4bit-m4-everyday-sft-v1",
+  "method": "sft",
+  "source_requirement": "Exact independently reviewed pushed feature/integration commit; root issues the source and attempt binding after review.",
+  "runtime": {
+    "python_version": "3.11.14",
+    "mlx_version": "0.32.2",
+    "mlx_lm_version": "0.32.2",
+    "dependency_lock_sha256": "7c167018ee6bd61a3609971e3f834082c798e7bd2a3fa0c5c2564887da4fde4f",
+    "hardware": "Apple M4",
+    "physical_memory_bytes": 25769803776,
+    "capture_requirement": "Exact source including shared namespace, private interpreter/framework, stdlib, 54-package combined inventory, static native dependency graph, startup files, OS build and selected-wheel archive provenance; original 50 lock remains unchanged; no self-issued promotion."
+  },
+  "model": {
+    "repository": "mlx-community/Qwen3-0.6B-4bit",
+    "revision": "73e3e38d981303bc594367cd910ea6eb48349da8",
+    "tokenizer_repository": "mlx-community/Qwen3-0.6B-4bit",
+    "tokenizer_revision": "73e3e38d981303bc594367cd910ea6eb48349da8",
+    "download_budget_bytes": 536870912,
+    "trust_remote_code": false,
+    "snapshot_requirement": "Revalidate the already reviewed complete private model/tokenizer snapshots and retained inventories; no download or conversion authorized."
+  },
+  "training": {
+    "batch_size": 2,
+    "max_seq_length": 512,
+    "max_batch_tokens": 1024,
+    "iterations": 50,
+    "seed": 17,
+    "steps_per_report": 10,
+    "steps_per_eval": 50,
+    "steps_per_save": 50
+  },
+  "lora": {
+    "layers": 2,
+    "rank": 4,
+    "scale": 8,
+    "dropout": 0,
+    "targets": [
+      "self_attn.q_proj",
+      "self_attn.v_proj"
+    ]
+  },
+  "optimizer": {
+    "learning_rate": 0.0001,
+    "beta1": 0.9,
+    "beta2": 0.999,
+    "epsilon": 1e-08,
+    "weight_decay": 0,
+    "bias_correction": true,
+    "schedule": "constant"
+  },
+  "bounds": {
+    "maximum_training_attempts": 1,
+    "maximum_total_optimizer_updates": 50,
+    "timeout_seconds_per_attempt": 300,
+    "termination_grace_seconds": 5,
+    "maximum_output_bytes_per_stream": 1048576,
+    "maximum_artifact_file_bytes": 67108864,
+    "maximum_artifact_set_bytes": 134217728
+  },
+  "input_review": {
+    "source": "Pinned public conversations",
+    "rows_per_attempt": {
+      "train": 100,
+      "validation": 20
+    },
+    "prepared_identity": {
+      "content_digest": "5128095bab31e4e965ac8db65605830af39291b364bbff9c69f902bb1ff26f1c",
+      "format": "synaptic-conversation-sft-row/v1",
+      "ref": "prepared://sha256/38f84d342479589e7de6220c5cc7359418543e26b67e4e3c9816bfba23a27483",
+      "revision": "38f84d342479589e7de6220c5cc7359418543e26b67e4e3c9816bfba23a27483",
+      "size_bytes": 151954
+    },
+    "semantics": "Final assistant target only; all earlier turns remain ordered masked context; enable_thinking=false. All rows fit intact.",
+    "coverage": "Batch2 x 50updates = exactly one seeded permutation of100trainingrows; all20validationrows evaluated each validation pass and saved-final-adapter reload.",
+    "checks": [
+      "Exact source commitments and split/group eligibility",
+      "Complete representative originals/projections/generation scaffolds",
+      "Every selected row tokenized intact without truncation, dropping or resplitting",
+      "Shared native exact-ID/label and batch contract; actual per-split padded tokens retained"
+    ]
+  },
+  "acceptance": [
+    "Fresh independent final-source/runtime/profile/admission review, one original single-use start only",
+    "Exactly50completed optimizer updates,100unique training row IDs visited in first pass, no row/tail loss",
+    "All20heldoutrows included in every native validation traversal and separately reloaded saved-final-adapter validation",
+    "Finite nonzero saved-adapter delta, exact native artifact verification and public role readback",
+    "300second worker wall deadline plus5second termination grace; a timeout is retained failure, never replay authority",
+    "A completed pass and held-out loss are workflow evidence, not a conversational or current Nexus API quality claim"
+  ],
+  "time_feasibility": "No measured representative-data throughput exists. Review actual padded tokens and memory; worker stays bounded300seconds even if completion is infeasible. At batch2,50updates visit the full100rows; lowering updates would reduce coverage and is not a one-pass success."
+}

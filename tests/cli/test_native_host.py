@@ -430,3 +430,39 @@ def test_cold_public_readback_survives_expiry_and_remote_ref_advance(host_case):
     with pytest.raises(ValueError, match="expired"):
         native_host.operate(config, action="start", trusted_root_key_sha256=trusted)
     assert len(calls) == 1
+
+
+def test_existing_consumer_inspects_grpo_with_separate_profile_and_old_signature_refuses(host_case):
+    from tests.runtime.test_native_mlx_grpo import inputs as grpo_inputs
+    from tuner.training.native_mlx_grpo_compilation import compile_native_grpo, NativeMLXGRPOProfile
+    from tuner.training.native_mlx_compilation import NativeMLXProfile
+    from tuner.training.grpo_preparation import _manifest
+
+    config, _, _, calls = host_case
+    old_profile = strict_json(Path(config["profile_file"]).read_bytes())
+    training, identity, profile, raw = grpo_inputs()
+    profile = replace(profile, runtime_digest=old_profile["runtime_digest"], source_digest=old_profile["source_digest"])
+    projection = compile_native_grpo(training, identity, profile)
+    proposal = strict_json(Path(config["proposal_file"]).read_bytes())
+    proposal.update(method="grpo", profile_ref=profile.profile_ref,
+        grpo_controls=asdict(projection.controls), input_review={"prompt_rows": 2, "publication_sha256": identity.content_digest},
+        grpo_profile={key: asdict(profile)[key] for key in
+            set(NativeMLXGRPOProfile.__dataclass_fields__) - set(NativeMLXProfile.__dataclass_fields__)})
+    proposal["training"].update(batch_size=4, max_batch_tokens=512)
+    for path, value in ((config["proposal_file"], proposal), (config["profile_file"], asdict(profile)),
+                        (config["training_input_file"], training.to_dict()), (config["prepared_identity_file"], identity.to_dict())):
+        Path(path).write_bytes(canonical(value))
+    publication = Path(config["profile_file"]).parent / ("dataset-" + identity.revision)
+    publication.mkdir(mode=0o700)
+    (publication / "dataset.jsonl").write_bytes(raw)
+    (publication / "manifest.json").write_bytes(canonical(_manifest(raw, "prompt")))
+    config.update(attempt_kind="grpo_on_policy", prepared_publication=str(publication))
+    observed, _ = native_host.inspect(config)
+    assert observed["admission_candidate"]["maximum_updates"] == 3 and calls == []
+    assert native_host.profile_candidate(config) == asdict(profile)
+    with pytest.raises(ValueError, match="admission"):
+        native_host.inspect(config, require_admission=True, trusted_root_key_sha256=config["root_public_key_sha256"])
+    assert calls == []
+    (publication / "dataset.jsonl").write_bytes(raw.replace(b"blue", b"BLUE"))
+    with pytest.raises(ValueError, match="commitments"):
+        native_host.inspect(config)

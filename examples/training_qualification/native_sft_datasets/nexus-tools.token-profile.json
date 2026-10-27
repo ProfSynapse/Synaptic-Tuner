@@ -1,0 +1,25 @@
+{
+  "schema": "synaptic-sft-token-profile/v1",
+  "controls": {
+    "batch_size": 2,
+    "max_seq_length": 3072,
+    "max_batch_tokens": 6144,
+    "iterations": 50,
+    "seed": 17,
+    "steps_per_report": 10,
+    "steps_per_eval": 50,
+    "steps_per_save": 50
+  },
+  "chat_template_kwargs": {
+    "enable_thinking": false
+  },
+  "representative_rows": [
+    0,
+    9,
+    24,
+    48,
+    72,
+    96
+  ],
+  "maximum_output_bytes": 16777216
+}

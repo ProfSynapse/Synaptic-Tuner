@@ -38,12 +38,13 @@ Python boundary, and the storage/authority Syntunia must own. HF Jobs
 qualification remains paused. The support matrix records the exact qualified
 Modal GRPO, NVIDIA Docker/CUDA and native Apple-silicon SFT fixtures.
 
-For native Mac SFT, use the optional `synaptic_tuner.api.v1.native_mlx`
-[host integration contract](docs/architecture/native-mlx-host.md) and
-[real M4 qualification evidence](docs/review/native-mlx-sft-qualification.md).
+For native Mac training, use the optional `synaptic_tuner.api.v1.native_mlx`
+[host integration contract](docs/architecture/native-mlx-host.md),
+[SFT evidence](docs/review/native-mlx-sft-qualification.md) and the separate
+[bounded GRPO mechanics result](docs/review/native-mlx-grpo-qualification.md).
 The host owns runtime/model preparation, authority and durable stores;
-submission is bounded and synchronous. Public native logs/cancel/reconcile and
-GRPO remain unavailable. Full desktop app distribution is a separate concern.
+submission is bounded and synchronous. Ordinary native qualification and public
+logs/cancel/reconcile remain gated. Full desktop distribution is separate.
 
 Download a reviewed wheel from its GitHub release, then install that exact file
 and inspect the packaged CLI:

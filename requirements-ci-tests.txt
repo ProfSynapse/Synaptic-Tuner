@@ -12,6 +12,7 @@ PyYAML>=6,<7
 jsonschema>=4.18,<5
 referencing
 numpy>=1.24,<3
+regex==2026.9.29
 pandas>=2,<3
 requests>=2.32,<3
 python-dotenv>=1,<2

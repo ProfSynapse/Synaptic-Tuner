@@ -51,6 +51,32 @@ def test_tree_retains_real_file_bytes_and_bytecode(private_tree):
             tree.read("_virtualenv.pth", maximum=2)
 
 
+def test_exclusive_writer_preserves_default_and_explicit_readback_bounds(private_tree):
+    small = b"x" * (1024 * 1024)
+    large = small + b"y"
+    with NativeTree(private_tree, private=True) as tree:
+        tree.write_exclusive("default.json", small)
+        assert tree.read("default.json", maximum=len(small)) == small
+        with pytest.raises(ValueError, match="bounded direct-child"):
+            tree.write_exclusive("rejected.json", large)
+        assert tree.members() == ("default.json",)
+        tree.write_exclusive("explicit.json", large, maximum=len(large))
+        assert tree.read("explicit.json", maximum=len(large)) == large
+        with pytest.raises(ValueError, match="bounded regular"):
+            tree.read("explicit.json", maximum=len(large) - 1)
+        with pytest.raises(FileExistsError):
+            tree.write_exclusive("explicit.json", b"replacement", maximum=len(large))
+        assert tree.read("explicit.json", maximum=len(large)) == large
+
+
+@pytest.mark.parametrize("maximum", [0, -1, True, 1.0, None, 512 * 1024 * 1024 + 1])
+def test_exclusive_writer_rejects_invalid_limits_before_creation(private_tree, maximum):
+    with NativeTree(private_tree, private=True) as tree:
+        with pytest.raises(ValueError, match="bounded direct-child"):
+            tree.write_exclusive("rejected.json", b"x", maximum=maximum)
+        assert tree.members() == ()
+
+
 def test_tree_rejects_symlink_and_parent_substitution(private_tree):
     (private_tree / "file").write_bytes(b"abc")
     (private_tree / "alias").symlink_to("file")

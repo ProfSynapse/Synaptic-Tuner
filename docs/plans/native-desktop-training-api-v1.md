@@ -5,6 +5,14 @@ training on NVIDIA and Apple silicon, alongside Modal SFT and GRPO. HF Jobs
 remains paused. This plan complements the
 [stable release gate](stable-v1-release.md); it does not qualify a runtime.
 
+2026-10-27 update: the historical preparation gaps below have subsequent scoped
+SFT and GRPO implementation/evidence. Read the current
+[host contract](../architecture/native-mlx-host.md),
+[SFT report](../review/native-mlx-sft-qualification.md) and
+[restricted GRPO report](../review/native-mlx-grpo-qualification.md).
+The selected deliverable is the OSS engine and Mac training integration; full
+desktop distribution remains separate. Broad native lifecycle gates remain open.
+
 ## Existing code and evidence
 
 | Boundary | Reuse | Gap |
