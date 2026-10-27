@@ -53,6 +53,22 @@ roots, exact seed hash/size and actual prepared identity/request outputs. Read
 its README for safe-parent and retained-failure rules. It does not consume a
 Modal profile, construct a native profile/admission, import ML or run on the Mac.
 
+For separately reviewed tokenizer-only diagnosis on Linux/Darwin, the same
+example now provides `profile-tokenizer <reviewed-tokenizer-profile.json>`.
+Its separate config binds an actual recompiled GRPO workload, existing verified
+publication, private complete tokenizer snapshot, exact installed Transformers
+version, finite tokenizer/evidence byte budgets and a fresh private output.
+It uses the worker's shared prompt-ID helper, not SFT text tokenization. The
+pinned Transformers5.20.2 API defaults to a mapping; GRPO explicitly requests
+`return_dict=False` with `tokenize=True`/`add_generation_prompt=True` and the
+unchanged configured template kwargs. Reserved renderer-control collisions and
+malformed IDs reject before ML imports. Read the example README for the schema,
+exact command and retained-failure/collision rules. Evidence contains private
+actual IDs and binding digests, while stdout contains bounded counts/hashes.
+This imports only the existing local tokenizer, no MLX or model; it grants no
+runtime/source admission, isolated-import proof or training qualification.
+The static API defect does not retrospectively establish historical122's cause.
+
 The existing restricted `native_host.py` consumer accepts proposal `method:
 grpo`, exact `grpo_profile`/`grpo_controls`, attempt kind `grpo_on_policy`, and
 reviewed `input_review.prompt_rows`/`publication_sha256`. Its inspect, fresh root

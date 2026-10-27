@@ -39,6 +39,13 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Native MLX candidate
 
+- Native GRPO prompt tokenization must request list IDs explicitly with
+  `return_dict=False`; the pinned Transformers5 default is a mapping. Preserve
+  configured template/scaffold arguments, reject renderer-control collisions and
+  malformed IDs before ML imports. Tokenizer-only GRPO diagnosis must call the
+  same worker helper through the checked-in config-first preparation example;
+  its host-only success neither classifies a historical failure nor qualifies MLX.
+
 - Native GRPO child diagnostics use only fixed numeric phase exits, with a trusted
   child-local callback and no request/config callback fields or diagnostic files.
   Interpret them only with the exact admitted source and confirmed worker outcome;

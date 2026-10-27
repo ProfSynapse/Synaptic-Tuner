@@ -265,3 +265,166 @@ def test_actual_cli_failure_has_no_exception_or_source_text(case):
     assert b"PRIVATE-MARKER" not in result.stdout
     assert json.loads(result.stdout) == {"schema": prepare.RESULT_SCHEMA, "status": "REFUSED",
         "phase": "preparation", "automatic_retry": False}
+
+
+@pytest.fixture
+def tokenizer_case(case, monkeypatch):
+    from dataclasses import asdict, replace
+    from types import ModuleType, SimpleNamespace
+    from tests.runtime.test_native_mlx_grpo import inputs
+    from tests.runtime.test_native_mlx_grpo_tokenization import MappingDefaultTokenizer
+    from tuner.runtime.native_mlx_input import NativeModelSnapshot
+    from tuner.training.native_mlx_grpo_compilation import compile_native_grpo
+
+    root, configuration, _ = case
+    status, summary = prepare.run("prepare", configuration)
+    assert status == 0
+    prepared = Path(summary["output_root"])
+    training = TrainingInputV1.from_json((prepared / "training-input.json").read_text())
+    source = PreparedTrainingInputIdentity.from_dict(strict_json((prepared / "identity.json").read_bytes()))
+    profile = replace(inputs()[2], model_ref=training.model.ref, model_revision=training.model.revision,
+        tokenizer_revision=training.model.tokenizer_revision)
+    projection = compile_native_grpo(training, source, profile)
+    (root / "workload.json").write_bytes(projection.workload.canonical_bytes)
+    token_root = root / "tokenizer"
+    token_root.mkdir(mode=0o700)
+    (token_root / "tokenizer.json").write_bytes(b'{"fixture":true}')
+    (token_root / "tokenizer_config.json").write_bytes(b'{"fixture":true}')
+    with NativeTree(token_root, private=True) as tree:
+        snapshot = NativeModelSnapshot(profile.model_ref, profile.tokenizer_revision, str(token_root), tree.inventory())
+    (root / "tokenizer-snapshot.json").write_bytes(canonical(asdict(snapshot)))
+    config = {"schema": prepare.TOKENIZER_SCHEMA, "workload_file": "workload.json",
+        "prepared_publication": summary["publication"], "tokenizer_snapshot_file": "tokenizer-snapshot.json",
+        "transformers_version": "5.20.2", "tokenizer_budget": {"per_file": 1024, "aggregate": 4096},
+        "maximum_token_evidence_bytes": 65536, "output_root": "tokenizer-profile"}
+    path = root / "tokenizer-profile-config.json"
+    path.write_bytes(canonical(config))
+    tokenizer, loads = MappingDefaultTokenizer(), []
+    def load(*args, **kwargs):
+        loads.append((args, kwargs))
+        # Third-party output must not escape the standalone host summary.
+        print("PRIVATE-TOKENIZER-MARKER")
+        print("PRIVATE-TOKENIZER-MARKER", file=sys.stderr)
+        return tokenizer
+    module = ModuleType("transformers")
+    module.AutoTokenizer = SimpleNamespace(from_pretrained=load)
+    monkeypatch.setitem(sys.modules, "transformers", module)
+    original = prepare.importlib.metadata.version
+    monkeypatch.setattr(prepare.importlib.metadata, "version", lambda name:
+        "5.20.2" if name == "transformers" else original(name))
+    return SimpleNamespace(root=root, configuration=path, config=config, projection=projection,
+        snapshot=snapshot, tokenizer=tokenizer, loads=loads)
+
+
+def test_tokenizer_profile_exact_shared_ids_private_evidence_and_collision(tokenizer_case, capsys):
+    t = tokenizer_case
+    status, result = prepare.run("profile-tokenizer", t.configuration)
+    assert status == 0 and result["status"] == "TOKENIZER_ONLY_COMPLETE"
+    assert result["rows"] == 2 and result["total_prompt_tokens"] == 6
+    assert t.loads == [((t.snapshot.root,), {"local_files_only": True, "trust_remote_code": False,
+        "use_fast": t.projection.tokenization.use_fast})]
+    assert capsys.readouterr() == ("", "")
+    output = t.root / t.config["output_root"]
+    raw = (output / "token-evidence.json").read_bytes()
+    evidence = strict_json(raw)
+    assert evidence["prompt_tokens"] == [[41, 42, 43], [41, 42, 43]]
+    assert evidence["eos_token_id"] == 99 and evidence["return_dict"] is False
+    assert evidence["add_generation_prompt"] is True
+    assert evidence["tokenization"] == t.projection.tokenization.to_dict()
+    assert evidence["source"] == t.projection.source.to_dict()
+    assert result["token_evidence_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert output.stat().st_mode & 0o777 == 0o700
+    with NativeTree(output, private=True) as tree:
+        assert set(tree.members()) == {"configuration.json", "token-evidence.json", "result.json"}
+        before = tree.inventory()
+        assert prepare.run("profile-tokenizer", t.configuration)[1]["phase"] == "output"
+        assert tree.inventory() == before
+    assert len(t.loads) == 1
+    assert all(path.stat().st_mode & 0o777 == 0o600 for path in output.iterdir())
+
+
+@pytest.mark.parametrize("fault,phase", [("workload", "input_admission"), ("source", "input_admission"),
+    ("snapshot", "input_admission"), ("version", "tokenizer_load"), ("tokens", "input_tokenization"),
+    ("during_load", "custody"), ("evidence", "publication")])
+def test_tokenizer_profile_refuses_changed_inputs_or_bounds_and_preserves_failures(tokenizer_case, monkeypatch, fault, phase):
+    t = tokenizer_case
+    if fault == "workload":
+        value = strict_json((t.root / "workload.json").read_bytes())
+        value["controls"]["beta"] = .9
+        (t.root / "workload.json").write_bytes(canonical(value))
+    elif fault == "source":
+        publication = Path(t.config["prepared_publication"])
+        (publication / "dataset.jsonl").chmod(0o600)  # fixture-owned publication only
+        (publication / "dataset.jsonl").write_bytes(b'{"prompt":"changed"}\n')
+    elif fault == "snapshot":
+        (Path(t.snapshot.root) / "tokenizer.json").write_bytes(b'changed')
+    elif fault == "version":
+        t.config["transformers_version"] = "0.0.1"
+    elif fault == "tokens":
+        monkeypatch.setattr(t.tokenizer, "apply_chat_template", lambda *a, **k: {"input_ids": [1]})
+    elif fault == "during_load":
+        auto = sys.modules["transformers"].AutoTokenizer
+        load = auto.from_pretrained
+        def load_then_tamper(*args, **kwargs):
+            value = load(*args, **kwargs)
+            (Path(t.snapshot.root) / "tokenizer.json").write_bytes(b"changed during load")
+            return value
+        monkeypatch.setattr(auto, "from_pretrained", load_then_tamper)
+    else:
+        t.config["maximum_token_evidence_bytes"] = 1
+    t.configuration.write_bytes(canonical(t.config))
+    status, result = prepare.run("profile-tokenizer", t.configuration)
+    assert status == 2 and result["phase"] == phase and result["automatic_retry"] is False
+    output = t.root / t.config["output_root"]
+    if phase == "input_admission":
+        assert not output.exists() and not t.loads
+    else:
+        assert (output / "configuration.json").exists()
+        assert strict_json((output / "failure.json").read_bytes()) == result
+        assert not (output / "result.json").exists() and not (output / "token-evidence.json").exists()
+        with NativeTree(output, private=True) as tree:
+            before = tree.inventory()
+            # A tampered source is refused even before the occupied output is
+            # reached. Neither admission refusal nor collision repairs it.
+            expected = "input_admission" if fault == "during_load" else "output"
+            assert prepare.run("profile-tokenizer", t.configuration)[1]["phase"] == expected
+            assert tree.inventory() == before
+
+
+def test_tokenizer_profile_darwin_path_without_changing_linux_preparation(tokenizer_case, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(prepare, "sys", SimpleNamespace(platform="darwin"))
+    assert prepare.run("profile-tokenizer", tokenizer_case.configuration)[0] == 0
+    assert prepare.run("prepare", tokenizer_case.configuration)[1]["phase"] == "configuration"
+
+
+def test_actual_tokenizer_profile_cli_with_stubs_blocks_model_imports_and_network(tokenizer_case):
+    t = tokenizer_case
+    code = '''
+import importlib.abc, importlib.metadata, runpy, socket, sys, types
+class Guard(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'mlx', 'mlx_lm', 'torch', 'modal', 'huggingface_hub'}:
+            raise AssertionError('unexpected ML/provider import')
+sys.meta_path.insert(0, Guard())
+def forbidden(*a, **k):
+    raise AssertionError('unexpected network')
+socket.socket.connect = socket.socket.connect_ex = socket.create_connection = socket.getaddrinfo = forbidden
+module = types.ModuleType('transformers')
+class Tokenizer:
+    eos_token_id = 99
+    def apply_chat_template(self, messages, *, tokenize=True, return_dict=True, add_generation_prompt=False, **kw):
+        assert tokenize is True and add_generation_prompt is True and kw == {'enable_thinking':False}
+        return {'input_ids':[41,42,43], 'attention_mask':[1,1,1]} if return_dict else [41,42,43]
+module.AutoTokenizer = types.SimpleNamespace(from_pretrained=lambda *a, **kw: Tokenizer())
+sys.modules['transformers'] = module
+version = importlib.metadata.version
+importlib.metadata.version = lambda name: '5.20.2' if name == 'transformers' else version(name)
+script, configuration = sys.argv[1:]
+sys.argv = [script, 'profile-tokenizer', configuration]
+runpy.run_path(script, run_name='__main__')
+'''
+    result = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(EXAMPLE / "prepare.py"), str(t.configuration)],
+        cwd=t.root, capture_output=True, timeout=15)
+    assert result.returncode == 0 and result.stderr == b"" and len(result.stdout) <= 8192
+    assert json.loads(result.stdout)["status"] == "TOKENIZER_ONLY_COMPLETE"

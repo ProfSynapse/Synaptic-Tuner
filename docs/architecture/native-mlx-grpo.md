@@ -192,3 +192,29 @@ and a confirmed worker-exited outcome; guardian codes belong to a different
 boundary. A phase is not a cause, retry authority or retrospective diagnosis of
 the consumed historical attempt. New source packaging/capture, independent
 review and a fresh root admission remain prerequisites for any later execution.
+
+## Explicit prompt-ID return contract
+
+The exact pinned Transformers5.20.2 `apply_chat_template` source defaults to
+`return_dict=True` and returns a mapping. Iterating that result yields keys,
+which the original GRPO worker then rejects as noninteger IDs. Root's extracted
+pinned-method CPU reproduction (rendering/encoding stubbed) confirms this API
+mismatch; it does not establish the consumed historical122's cause.
+
+GRPO now explicitly requests `return_dict=False` through `tokenize_prompts` in
+the existing worker module. It preserves `tokenize=True`, the generation prompt,
+and configured template kwargs; the existing public parser reserves these
+renderer controls and the helper revalidates collisions. Only a nonempty list
+of nonnegative exact integer IDs within the prompt bound is admitted; malformed
+IDs fail in phase135 before ML imports. SFT and all dependency pins are unchanged.
+
+The existing preparation example's separate config-first `profile-tokenizer`
+action reuses that helper against the actual recompiled GRPO workload, verified
+prepared publication and private tokenizer snapshot on Linux/Darwin. Its bounded
+create-only private evidence records exact IDs and bindings, with a closed
+counts/hash summary and no model/MLX/generation/training operation. CPU controls
+use a realistic mapping-default tokenizer double, check unchanged scaffold/IDs,
+reserved-kwargs negatives, malformed outputs before imports, private collision
+and failure retention, source/snapshot custody and exact configured byte/version
+bounds. This is ordinary tokenizer/control evidence; root still owns final
+independent review, capture, admission and any actual model qualification.
