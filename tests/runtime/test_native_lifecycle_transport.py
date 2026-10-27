@@ -4,6 +4,8 @@ from dataclasses import asdict, replace
 import hashlib
 import hmac
 import json
+import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -93,7 +95,12 @@ def test_live_progress_is_retained_before_completion_with_sqlite(invocation, lau
                 cold.start_once(invocation)
 
 
-def test_worker_inherits_only_numeric_progress_pipe(invocation, launch):
+def test_worker_inherits_only_numeric_progress_pipe(invocation, launch, monkeypatch):
+    # Neither arbitrary parent credentials nor parent spellings of variables
+    # initialized by Darwin's interpreter/shell may cross the fresh environment.
+    monkeypatch.setenv("NATIVE_CREDENTIAL_SENTINEL", "fixture-must-not-inherit")
+    monkeypatch.setenv("SHLVL", "7777")
+    monkeypatch.setenv("__CF_USER_TEXT_ENCODING", "fixture-must-not-inherit")
     script = EMIT + """import fcntl
 opened = []
 for candidate in range(3, 4096):
@@ -111,8 +118,18 @@ emit(1)
         assert done["outcome"]["exit_code"] == 0
     report = json.loads(Path(invocation.private_root, "fds.json").read_bytes())
     assert report["opened"] == [report["progress"]]
-    assert set(report["environment"]) <= {"PATH", "HOME", "TMPDIR", "PWD", "HF_HUB_OFFLINE",
-                                         "TRANSFORMERS_OFFLINE", "TOKENIZERS_PARALLELISM", "LC_CTYPE"}
+    allowed = {"PATH", "HOME", "TMPDIR", "PWD", "HF_HUB_OFFLINE",
+               "TRANSFORMERS_OFFLINE", "TOKENIZERS_PARALLELISM", "LC_CTYPE"}
+    if sys.platform == "darwin":
+        # Actual pinned -I -S -B CPython initializes CF user encoding on Darwin;
+        # the fixture's /bin/sh shim additionally initializes numeric SHLVL.
+        # Production dispatch uses the captured Mach-O directly, without a shell.
+        allowed |= {"SHLVL", "__CF_USER_TEXT_ENCODING"}
+        assert report["environment"].get("SHLVL") in {"0", "1", "2"}
+        encoding = report["environment"]["__CF_USER_TEXT_ENCODING"]
+        assert re.fullmatch(r"(?:0x[0-9A-Fa-f]+|[0-9]+)(?::(?:0x[0-9A-Fa-f]+|[0-9]+)){2}", encoding)
+        assert int(encoding.split(":")[0], 0) == os.getuid()
+    assert set(report["environment"]) <= allowed
     # The fixture shell shim supplies PWD; production uses a captured Mach-O.
     assert report["environment"].get("PWD", invocation.private_root) == invocation.private_root
 

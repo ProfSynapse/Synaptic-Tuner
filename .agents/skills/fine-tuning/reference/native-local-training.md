@@ -642,3 +642,13 @@ and create-only reports. `logs` provides later bounded public readback.
 Source/CPU acceptance does not qualify Darwin/MLX or enable default capabilities;
 fresh final capture/admission, real lifecycle evidence and independent review
 remain required. Full desktop distribution and model-quality work are excluded.
+
+Actual Darwin CPython startup can initialize `__CF_USER_TEXT_ENCODING` even with
+`-I -S -B` and an explicit clean environment. The CPU fixture's `/bin/sh` shim
+also initializes numeric `SHLVL`; production uses the captured Mach-O directly.
+Do not confuse these observed initialized names with inherited credentials or
+broaden the production environment declaration. Tests admit them only on Darwin,
+check their bounded numeric/user identity and still reject parent sentinels.
+For a high-descriptor CPU test, an explicitly reviewed test child may raise its
+soft descriptor limit while preserving the hard limit and parent process limits;
+never lower pytest's hard resource limits to accommodate guardian tests.
