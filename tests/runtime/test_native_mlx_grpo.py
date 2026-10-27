@@ -376,3 +376,87 @@ def test_reward_variation_must_survive_actual_float32_objective(publication):
         row["rewards"] = [0., 1e-100, 0., 1e-100]
     with pytest.raises(ValueError, match="inconclusive"):
         verify_rollout_evidence(evidence, binding, projection)
+
+
+def r1_large_evidence(publication, *, maximum_evidence_bytes):
+    """Exact R1 repro: 64 updates, batch four, 128 generated IDs per rollout.
+
+    This compiles public controls and uses genuine bounded artifact bytes from
+    the CPU fixture, without executing a model or substituting the writer.
+    """
+    from tuner.runtime.native_mlx_publication import NativeArtifactBudget
+    _, original, binding, _ = fixture_grpo_publication(publication)
+    training = original.workload.document["training_input"]
+    training["hyperparameters"].update(max_steps=64, max_seq_length=256,
+        max_prompt_length=128, max_completion_length=128, save_steps=65)
+    profile = replace(original.profile, maximum_updates=64, maximum_batch_tokens=1024,
+        maximum_rollout_tokens=32768, maximum_reward_calls=256,
+        maximum_evidence_bytes=maximum_evidence_bytes)
+    projection = compile_native_grpo(TrainingInputV1.from_dict(training), original.source, profile)
+    binding["workload_digest"] = projection.workload.fingerprint
+    evidence = [{"step": step, "prompt_indices": [0, 1],
+        "completions": [[1] * 128, [2] * 128, [1] * 128, [2] * 128],
+        "texts": ["red", "blue", "red", "blue"], "rewards": [0., 1., 0., 1.],
+        "old": [[-1.1234568357467651] * 128 for _ in range(4)],
+        "reference": [[-1.1234568357467651] * 128 for _ in range(4)]} for step in range(1, 65)]
+    raw = canonical(evidence)
+    assert len(raw) == 1386552  # Recorded independently in the R1 finding.
+    result = strict_json((publication["output"] / "native_result.json").read_bytes())
+    result.update(completed_updates=64, workload_digest=projection.workload.fingerprint,
+        input_binding_digest=hashlib.sha256(canonical(binding)).hexdigest(),
+        evidence_sha256=hashlib.sha256(raw).hexdigest(),
+        metrics=[{"step": step, "loss": -.1, "gradient_norm": 1.} for step in range(2, 65, 2)])
+    # A fresh artifact root: the production publication function owns all five
+    # control documents. Only the two synthetic saved-adapter files preexist.
+    output = publication["output"].parent / "large-publication"
+    output.mkdir(mode=0o700)
+    from tuner.runtime.native_files import NativeTree
+    with NativeTree(output, private=True) as tree:
+        for name in ("initial-adapters.safetensors", "adapters.safetensors"):
+            tree.write_exclusive(name, (publication["output"] / name).read_bytes())
+    publication.update(output=output, workload=projection.workload.canonical_bytes,
+        budget=NativeArtifactBudget(4 * 1024 * 1024, 8 * 1024 * 1024))
+    return projection, binding, result, evidence, raw
+
+
+@pytest.mark.parametrize("maximum", [16 * 1024 * 1024, 1386552])
+def test_r1_large_evidence_real_publication_readback_and_five_role_verification(publication, maximum):
+    from tuner.runtime.native_files import NativeTree
+    from tuner.runtime.native_mlx_grpo import _publish_grpo_documents
+    projection, binding, result, evidence, raw = r1_large_evidence(publication, maximum_evidence_bytes=maximum)
+    expected = {"groups": 128, "varied_groups": 128, "generated_tokens": 32768, "reward_calls": 256}
+    assert verify_rollout_evidence(evidence, binding, projection) == expected
+    with NativeTree(publication["output"], private=True) as tree:
+        # Preserve the legacy default refusal for this exact valid R1 payload.
+        with pytest.raises(ValueError, match="bounded direct-child"):
+            tree.write_exclusive("default-must-reject.json", raw)
+        _publish_grpo_documents(tree, projection=projection, binding=binding, result=result, evidence=evidence)
+        assert tree.read("rollout_evidence.json", maximum=maximum) == raw
+        with pytest.raises(ValueError, match="bounded regular"):
+            tree.read("rollout_evidence.json", maximum=len(raw) - 1)
+        assert len(tree.members()) == 7
+    artifacts = verify_native_publication(**publication)
+    assert {item.descriptor.role for item in artifacts} == set(training_roles(projection))
+    for item in artifacts:
+        assert item.descriptor.size_bytes == len(item.content)
+        assert item.descriptor.sha256 == hashlib.sha256(item.content).hexdigest()
+    lineage_raw = next(item.content for item in artifacts if item.descriptor.role == "training_lineage")
+    assert len(lineage_raw) > 1024 * 1024
+    lineage = strict_json(lineage_raw)
+    assert lineage["grouped_reward_evidence"] == expected
+    assert canonical(lineage["rollouts"]) == raw
+
+
+def test_r1_evidence_over_admitted_bound_rejects_before_any_document_write(publication):
+    from tuner.runtime.native_files import NativeTree
+    from tuner.runtime.native_mlx_grpo import _publish_grpo_documents
+    projection, binding, result, evidence, raw = r1_large_evidence(publication, maximum_evidence_bytes=1386551)
+    with pytest.raises(ValueError, match="evidence inventory"):
+        verify_rollout_evidence(evidence, binding, projection)
+    with NativeTree(publication["output"], private=True) as tree:
+        before = tree.inventory()
+        with pytest.raises(ValueError, match="bounded direct-child"):
+            _publish_grpo_documents(tree, projection=projection, binding=binding, result=result, evidence=evidence)
+        assert tree.inventory() == before
+        assert tree.members() == ("adapters.safetensors", "initial-adapters.safetensors")
+    assert len(raw) == projection.profile.maximum_evidence_bytes + 1

@@ -105,7 +105,7 @@ model/runtime preparation, admissions, integration review and all Mac effects.
 Public logs/cancel/reconcile remain unavailable. CPU doubles prove controls,
 not MLX execution, hardware fit, training quality or general success.
 
-## CPU review evidence
+## CPU review evidence at initial candidate 57245717
 
 The native regression lane passed 266 tests with four explicit Apple numerical
 skips. After tightening quantization inventory, index types and float32 reward
@@ -132,3 +132,33 @@ including the complete embedded upstream MIT notice. Package equivalence is
 source/package evidence, not a captured Mac execution runtime.
 Private command records and XML/package/canonical-byte checks are retained at
 `~/.cache/synaptic-tuner-release-proof/resume-20261027/grpo-integration`.
+
+## R1 P2 response — bounded evidence publication
+
+Independent review R1 reproduced an admitted 1,386,552-byte evidence document
+that passed GRPO validation but exceeded the exclusive writer's fixed 1 MiB
+write/readback limit. The fix adds an explicit validated `maximum` argument to
+the generic writer, preserving its 1 MiB default and existing exclusive,
+no-follow, 0600, fsync and same-tree readback behavior. The explicit limit may
+not exceed the existing 512 MiB native per-file ceiling; the GRPO profile still
+caps evidence at 16 MiB. Other control/SFT writes retain their original default.
+
+The actual worker publication function uses the exact profile evidence limit
+for writing and readback. Evidence is published before the other control
+documents so an over-budget value creates none of them. This is not an atomic
+multi-file transaction or replay authority after any failed consumed attempt.
+
+CPU regression uses the exact reviewed 64-update, batch-four, 128-generated-token
+fixture and full valid 1,386,552-byte canonical evidence. The real production
+publication function and NativeTree round-trip it at both the admitted 16 MiB
+ceiling and an exact-fit limit, then verify all five artifacts and the complete
+large lineage. A one-byte-smaller admitted limit rejects before any document
+write; default-limit, bounded-read, collision and invalid-limit negatives remain.
+No MLX, model or training execution is needed for these artifact controls.
+The fix passes 279 native CPU checks with four explicit Apple numerical skips,
+including ten new writer/evidence boundary controls. All six existing closure
+maintainers remain CURRENT without changing pins or inventories. Skills sync,
+Ruff and diff checks pass; raw and prompt/completion SFT canonical hashes match
+the independent R1 baseline exactly. Fresh source archives are checked without
+installing packages; historical 57245717 installed-consumer evidence above is
+preserved as historical rather than attributed to the new source.

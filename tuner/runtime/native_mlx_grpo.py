@@ -95,6 +95,24 @@ def generate_completion(model, prompt, eos, maximum, *, mx, make_cache):
     return tuple(generated)
 
 
+def _publish_grpo_documents(destination, *, projection, binding, result, evidence):
+    """Use the exact admitted evidence limit for exclusive write and readback.
+
+    Publish evidence first so an over-budget record rejects before creating
+    any control documents. Other documents retain the existing writer default.
+    This does not make the artifact set an atomic filesystem transaction.
+    """
+    destination.write_exclusive("rollout_evidence.json", canonical(evidence),
+        maximum=projection.profile.maximum_evidence_bytes)
+    for name, value in (("input_binding.json", binding), ("native_result.json", result),
+                        ("adapter_config.json", {
+                            "fine_tune_type": "lora", "num_layers": projection.lora.layers,
+                            "lora_parameters": {"rank": projection.lora.rank, "scale": projection.lora.scale,
+                                "dropout": projection.lora.dropout, "keys": list(projection.lora.targets)}})):
+        destination.write_exclusive(name, canonical(value))
+    destination.write_exclusive("workload.json", projection.workload.canonical_bytes)
+
+
 def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapshot,
                         runtime_material, dependency_lock, output):
     """All inputs must already be host admitted; verify bytes before ML imports."""
@@ -222,13 +240,8 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
             "final_validation": {"phase": "reloaded_saved_final_adapter_rollout_replay",
                 "adapter_sha256": hashlib.sha256(final).hexdigest(), "loss": final_loss},
             "metrics": metrics, "evidence_sha256": hashlib.sha256(canonical(evidence)).hexdigest()}
-        for name, value in (("input_binding.json", binding), ("native_result.json", result),
-                            ("rollout_evidence.json", evidence), ("adapter_config.json", {
-                                "fine_tune_type": "lora", "num_layers": projection.lora.layers,
-                                "lora_parameters": {"rank": projection.lora.rank, "scale": projection.lora.scale,
-                                    "dropout": projection.lora.dropout, "keys": list(projection.lora.targets)}})):
-            destination.write_exclusive(name, canonical(value))
-        destination.write_exclusive("workload.json", projection.workload.canonical_bytes)
+        _publish_grpo_documents(destination, projection=projection, binding=binding,
+            result=result, evidence=evidence)
         model_snapshot.verify(model_tree)
         tokenizer_snapshot.verify(token_tree)
         destination.check()

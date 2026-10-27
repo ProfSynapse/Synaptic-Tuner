@@ -37,6 +37,14 @@ on-policy objective. Unsupported controls reject rather than silently default.
 Constant grouped rewards or unchanged saved parameters cannot verify success.
 Final saved-adapter rollout replay is not held-out writing-quality evaluation.
 
+Evidence publication must pass the profile's exact `maximum_evidence_bytes` to
+both the exclusive write and its same-tree readback. `NativeTree.write_exclusive`
+retains its 1 MiB default for SFT/control documents; larger writes require an
+explicit finite limit within the existing native per-file ceiling. An admitted
+GRPO record above 1 MiB must round-trip through actual publication and five-role
+verification in CPU controls. Reject over-budget bytes before creating the file;
+do not fix mismatched limits by silently increasing every caller's default.
+
 The existing restricted `native_host.py` consumer accepts proposal `method:
 grpo`, exact `grpo_profile`/`grpo_controls`, attempt kind `grpo_on_policy`, and
 reviewed `input_review.prompt_rows`/`publication_sha256`. Its inspect, fresh root

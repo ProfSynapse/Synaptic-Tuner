@@ -46,6 +46,8 @@ This repository has a few cloud-training constraints that are easy to relearn th
   Recompile every public control or reject it. Grouped reward variation must
   survive the objective's float32 conversion, and native verification requires
   independently recomputed saved parameter changes and complete bounded groups.
+  Evidence publication and readback must use the same admitted byte limit;
+  preserve the generic exclusive writer's existing default for SFT/control files.
   CPU/source checks do not qualify hardware; root review precedes ML imports.
   Preserve original SFT canonical bytes and all native no-replay/capability gates.
 
