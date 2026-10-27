@@ -110,6 +110,20 @@ workflow, even if the scripted provider completed. Cold public-host/fresh-proces
 GRPO recovery and live image/model qualification remain separate acceptance
 steps. No new GRPO candidate profile is shipped by this runner join.
 
+For standalone **native-only Linux host preparation**, use the checked-in
+`examples/training_qualification/native_grpo_preparation/prepare.py
+{inspect,prepare} <reviewed-config.json>` wrapper. Read its README first. It
+hash/size-binds the approved JSONL, copies it into a fresh 0700 source root at
+0600, and invokes the same service/normalizer/verifier below. It emits actual
+prepared identity/publication and the canonical public request with its actual
+prepared ref. Its output root is create-only; failures and stages are retained,
+and summaries are bounded fixed-phase records. No Modal profile, runtime/model
+download, ML import or execution grant is needed. Use a safe private home-root
+parent when a shared cache ancestor is group-writable; do not chmod shared
+parents or weaken custody checks. The included two-color example is controlled
+synthetic mechanics data with unguaranteed reward variation, not quality or
+research evidence. Root still reviews actual native bounds/capture/admission.
+
 Use the existing generic preparation service with explicit host-owned roots:
 
 ```python

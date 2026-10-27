@@ -45,6 +45,14 @@ GRPO record above 1 MiB must round-trip through actual publication and five-role
 verification in CPU controls. Reject over-budget bytes before creating the file;
 do not fix mismatched limits by silently increasing every caller's default.
 
+Native-only input preparation has a separate source-checkout host example:
+`python -B examples/training_qualification/native_grpo_preparation/prepare.py
+inspect <reviewed-config.json>`, then `prepare` after reviewing it. It composes
+the existing GRPO preparation service on Linux with fresh create-only private
+roots, exact seed hash/size and actual prepared identity/request outputs. Read
+its README for safe-parent and retained-failure rules. It does not consume a
+Modal profile, construct a native profile/admission, import ML or run on the Mac.
+
 The existing restricted `native_host.py` consumer accepts proposal `method:
 grpo`, exact `grpo_profile`/`grpo_controls`, attempt kind `grpo_on_policy`, and
 reviewed `input_review.prompt_rows`/`publication_sha256`. Its inspect, fresh root
