@@ -151,6 +151,16 @@ requires a fresh separately reviewed admission, never automatic replay.
 
 ### Public lifecycle implementation candidate
 
+The source-only `native_lifecycle_protocol.py` component defines bounded numeric
+progress and confirmed-terminal frames, exact invocation/policy HMAC binding,
+complete-prefix verification and rollback checks against a retained snapshot.
+Its derived capability requires a separately allowed host HMAC purpose and must
+stay in trusted supervision, never the ML child or files/argv/environment/logs.
+It is not yet connected to the guardian or public API and grants no execution or
+qualification. Review it before anonymous-channel key delivery. The host owns
+journal path custody and durable prefix retention; authenticated prefixes alone
+do not establish freshness or completion.
+
 The next functional work is public progress, cancellation and restart
 reconciliation; model-quality tuning is excluded. The internal caller-pumped
 `NativeProcessSession` candidate keeps record operations on the constructing

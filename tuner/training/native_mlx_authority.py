@@ -9,10 +9,25 @@ from tuner.execution.coordinator_v1.model import (
 )
 from tuner.training.modal_host_authority import ReaderEvidenceAuthority
 from tuner.runtime.native_mlx_material import canonical, strict_json
+from tuner.execution.foundation_v2.canonical import digest_text
 
 
 class NativeEvidenceAuthority(ReaderEvidenceAuthority):
     """Host constructs keys; no key generation, secret resolution, or storage."""
+
+    def lifecycle_key(self, invocation_digest, policy_digest):
+        """Derive one invocation/policy-scoped capability for trusted supervision.
+
+        Host HMAC policy must explicitly allow this new purpose. Deliver only
+        through an anonymous channel to the trusted guardian, never the ML child
+        or any file, argument, environment value or diagnostic. This is no start
+        admission, hardware proof, or default public lifecycle qualification.
+        """
+        digest_text(invocation_digest, "invocation_digest")
+        digest_text(policy_digest, "policy_digest")
+        scope = canonical({"schema": "synaptic-native-lifecycle-capability/v1",
+                           "invocation_digest": invocation_digest, "policy_digest": policy_digest})
+        return bytes.fromhex(self._tag("native-lifecycle-capability/v1", hashlib.sha256(scope).hexdigest()))
 
     def verification(self, content):
         if type(content) is not ArtifactVerificationContentV1:

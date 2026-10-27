@@ -46,6 +46,39 @@ CPU fixtures exercise actual guardian subprocesses with a simple worker and a
 real thread-affine SQLite store. They never import MLX, alter pytest's hard
 resource limits, admit hardware or qualify public lifecycle support.
 
+The startup writer uses `selectors.DefaultSelector`, including for descriptors
+above 1,023. A real-guardian regression covers R1's high-descriptor failure; the
+earlier consumed attempt is not replayed or repaired.
+
+## Bounded authenticated framing candidate
+
+`native_lifecycle_protocol.py` is a stdlib-only source component, currently
+unconnected to guardians, workers or public APIs. `NativeLifecyclePolicyV1`
+declares finite progress-record and journal-byte limits. Each canonical numeric
+event has an exact invocation/policy binding, sequence, prior-frame digest and
+domain-separated HMAC. Only fixed phases and named numeric metrics are accepted;
+terminal events require the existing closed confirmed-termination outcome.
+Before public terminal admission, also check output counts against the exact
+invocation's limits rather than just the codec's global ceiling.
+
+The writer accepts a host-owned fresh private descriptor, checks its retained
+identity/mode/link count/size/offset across appends and fsyncs each complete frame.
+It reserves a full record for termination. A partial write poisons that writer;
+it cannot continue or reopen the same attempt. The reader ignores a bounded
+uncommitted partial tail, authenticates every complete frame and refuses bytes
+after a terminal frame. Supplying the retained prior snapshot rejects rollback
+and replacement of committed prefixes. The host must retain that snapshot and
+its custody through the existing store/stream ports. A verified prefix alone
+does not establish freshness, completeness, public authority or artifact validity.
+
+`NativeEvidenceAuthority.lifecycle_key` derives an invocation/policy-scoped key
+only if the host explicitly allows the new HMAC purpose. The original key stays
+host-only. The proposed anonymous-channel delivery to trusted supervision is
+not implemented; this component performs no key delivery, source admission,
+process execution or public capability promotion. Independently review the
+framing/derivation before implementing that delivery. The ML child must receive
+only a bounded progress channel, never the derived authentication capability.
+
 ## Remaining joins
 
 1. **Versioned lifecycle selection.** Bind the opt-in policy and its finite

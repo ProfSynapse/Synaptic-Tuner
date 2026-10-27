@@ -45,6 +45,9 @@ This repository has a few cloud-training constraints that are easy to relearn th
   Structured progress and authenticated cold terminal evidence are required
   before enabling public logs/cancel/reconcile; an internal session method does
   not qualify those capabilities. See `docs/plans/native-mlx-lifecycle.md`.
+  Independently review lifecycle framing and one-attempt capability derivation
+  before anonymous-channel delivery to trusted supervision. The ML child must
+  never receive that capability; keep it out of files, argv, environment and logs.
 
 - Retained native evaluation scoring admits only messages, configured correctness
   assertions and optional provenance metadata. Validate every case before shared
