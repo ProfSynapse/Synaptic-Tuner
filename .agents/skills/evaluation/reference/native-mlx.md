@@ -53,6 +53,10 @@ independently authenticate model execution; preserve the stated operator witness
 `native_evaluation_cases.py score <config> --trusted-root-key-sha256 <pin>`
 validates complete retained evidence, joins exact prompts/case IDs and invokes
 the existing evaluator's assertions/reporting with an explicit validator config.
+Before any case dispatch, it checks every case against the closed metadata set
+`messages`, `correct`, and optional `provenance`, requiring configured assertions.
+Retrieval, audio, environment, judge and other scenario modes are not admitted by
+this retained-response scorer; they must refuse before model/media or chat work.
 `NativeMLXRetainedClient` loads no model and authenticates no execution by itself.
 The existing `Evaluator.compare` consumes these reports and their comparison
 bases. Backend policy identity binds stop/context/tokenizer/source/runtime

@@ -257,6 +257,57 @@ def test_complete_export_portable_scoring_and_collision_preservation(complete_ev
     with pytest.raises(FileExistsError): preparation.score(config, trusted_root_key_sha256=p.pin)
 
 
+@pytest.mark.parametrize("index", [0, 1])
+@pytest.mark.parametrize("field", ["retrieval_config", "audio_config", "environment", "judge",
+    "response_schema", "expected_context", "scoring", "future_verifier", "missing_correct"])
+def test_scoring_rejects_unadmitted_modes_before_any_case_dispatch(complete_evidence, monkeypatch, index, field):
+    from Evaluator import runner
+    from Evaluator.native_mlx_retained import NativeMLXRetainedClient
+    p = complete_evidence
+    # Extend this test-owned synthetic witness to two cases, so a bad later
+    # case must refuse before even the earlier retained response is consumed.
+    cases = read_cases(p.raw_cases, p.workload)
+    second = deepcopy(cases[0]);second["id"] = "held-out-2"
+    cases.append(second)
+    p.raw_cases = canonical({"schema": "synaptic-native-evaluation-cases/v1", "cases": cases})
+    p.workload.update(case_count=2, cases_sha256=host.sha(p.raw_cases))
+    (p.state / "cases.json").write_bytes(p.raw_cases)
+    raw_record = canonical(row_for(second))
+    (p.state / "output/case-0001.json").write_bytes(raw_record)
+    p.result.update(case_count=2, case_bytes=p.result["case_bytes"] + len(raw_record),
+        workload_sha256=host.sha(canonical(p.workload)))
+    p.result["case_files"].append({"name": "case-0001.json", "size": len(raw_record), "sha256": host.sha(raw_record)})
+    (p.state / "output/result.json").write_bytes(canonical(p.result))
+    (p.state / "selection.json").write_bytes(canonical(p.selection))
+    sign_fixture(p.config, p.selection, p.admission, p.key)
+    result = host.export(p.config, p.selection, p.invocation, p.root / "bundle")
+    scoring = [{"id": case["id"], "question": "question", "messages": case["messages"],
+        "correct": {"any": [{"assertions": [
+            {"type": "jsonpath_equals", "path": "$.content", "value": "answer"}]}]}} for case in cases]
+    if field == "missing_correct": del scoring[index]["correct"]
+    elif field == "retrieval_config": scoring[index][field] = {"model": "unadmitted/model",
+        "corpus": "unused", "queries": "unused", "qrels": "unused", "metrics": ["recall@1"]}
+    elif field == "audio_config": scoring[index][field] = {"audio_paths": ["unused"]}
+    else: scoring[index][field] = {"unadmitted": True}
+    raw = canonical(scoring)
+    (p.root / "scoring.json").write_bytes(raw)
+    config = {"schema": "synaptic-native-evaluation-scoring/v1", "evidence_bundle": str(p.root / "bundle"),
+        "evidence_manifest_sha256": result["manifest_sha256"], "scoring_cases_file": str(p.root / "scoring.json"),
+        "scoring_cases_sha256": host.sha(raw), "validator": {"wrapper_specs": [], "tool_schemas": {}},
+        "label": "synthetic CPU record", "output_root": str(p.root / "scored")}
+    calls = []
+    def forbidden(*a, **kw):
+        calls.append(True)
+        pytest.fail("unadmitted evaluator/model/media/client dispatch")
+    monkeypatch.setattr(runner, "evaluate_cases", forbidden)
+    monkeypatch.setattr(runner.RetrievalVerifier, "evaluate_retrieval", forbidden)
+    monkeypatch.setattr(runner.AudioVerifier, "evaluate_audio", forbidden)
+    monkeypatch.setattr(NativeMLXRetainedClient, "chat", forbidden)
+    with pytest.raises(ValueError, match="scoring metadata differs"):
+        preparation.score(config, trusted_root_key_sha256=p.pin)
+    assert not calls and not (p.root / "scored").exists()
+
+
 @pytest.mark.parametrize("fault", ["manifest", "case", "directory", "receipt", "result", "extra_file", "key", "signature"])
 def test_portable_evidence_refuses_tampering_even_with_new_manifest_hash(complete_evidence, fault):
     p = complete_evidence

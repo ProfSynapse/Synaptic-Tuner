@@ -39,6 +39,11 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Native MLX candidate
 
+- Retained native evaluation scoring admits only messages, configured correctness
+  assertions and optional provenance metadata. Validate every case before shared
+  evaluator dispatch; retrieval/audio/model/media/environment/judge modes and
+  unknown metadata must reject before any response consumption or verifier work.
+
 - Native model-quality evaluation is generation-only and requires its own exact
   source/runtime/model/adapter/case selection and fresh bounded admission; never
   submit or replay training to obtain inference authority. Keep references out

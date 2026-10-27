@@ -201,6 +201,7 @@ def score(config, *, trusted_root_key_sha256):
     from Evaluator.reporting import build_run_payload
     from Evaluator.runner import evaluate_cases
     from shared.validation.dataset_validator import ValidatorConfig
+    from shared.verifiers.builtins.assertion_verifier import has_correctness_config
 
     raw_scoring = Path(config["scoring_cases_file"])
     with NativeTree(raw_scoring.parent) as tree:
@@ -210,6 +211,13 @@ def score(config, *, trusted_root_key_sha256):
         cases = load_prompt_cases(raw_scoring)
         if tree.read(raw_scoring.name, maximum=2 << 20) != raw:
             raise ValueError("native evaluation scoring changed")
+    # Validate the entire collection before dispatch: the shared evaluator also
+    # supports corpus/model/media modes that bypass the retained chat client.
+    # This host admits only configured assertions on already generated text.
+    for case in cases:
+        if (set(case.metadata) - {"messages", "correct", "provenance"}
+                or not has_correctness_config(case.metadata.get("correct"))):
+            raise ValueError("native evaluation scoring metadata differs")
     workload = selection["request"]["workload"]
     if len(rows) != receipt["case_count"]:
         raise ValueError("native evaluation scoring coverage differs")
