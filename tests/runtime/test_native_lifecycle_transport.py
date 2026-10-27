@@ -478,3 +478,21 @@ def test_untrusted_retained_stream_entries_obey_frame_and_sequence_bounds(invoca
                               sequence=sequence, canonical=raw)
         with pytest.raises(ValueError, match="retained"):
             owner.progress(invocation)
+
+
+def test_unsigned_outcome_boolean_cannot_replace_authenticated_integer(invocation, launch):
+    invocation = prepared(invocation, launch, EMIT + "emit(1)\n")
+    records, streams = InMemoryDurableRecordStoreV1(), InMemoryDurableStreamStoreV1()
+    with session(records, launch, streams) as owner:
+        owner.start_once(invocation)
+        done = until(lambda: owner.observe(invocation), lambda value: value["state"] == "terminated")
+        assert done["outcome"]["exit_code"] == 0
+    key = "native-mlx/" + invocation.attempt + "/outcome"
+    entry = records.read(partition="effects", key=key)
+    document = json.loads(entry.canonical)
+    document["value"]["exit_code"] = False
+    assert records.compare_and_swap(partition="effects", key=key, expected_revision=entry.revision,
+        canonical=json.dumps(document, sort_keys=True, separators=(",", ":")).encode())
+    with session(records, launch, streams) as cold:
+        with pytest.raises(ValueError, match="terminal record differs"):
+            cold.observe(invocation)

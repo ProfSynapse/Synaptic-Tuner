@@ -293,11 +293,12 @@ class NativeProcessSession:
                 # Another authenticated reader may have committed this same
                 # terminal, or its write acknowledgement may have been lost.
                 retained = self._records.observe(invocation)
-                if retained["state"] != "terminated" or retained["outcome"] != outcome:
+                if retained["state"] != "terminated" or canonical(retained["outcome"]) != canonical(outcome):
                     raise
-        elif state["state"] != "terminated" or state["outcome"] != outcome:
+        elif state["state"] != "terminated" or canonical(state["outcome"]) != canonical(outcome):
             raise ValueError("native lifecycle terminal record differs")
-        return self._records.observe(invocation)
+        # Return the authenticated payload, not a later unsigned store read.
+        return {"state": "terminated", "outcome": outcome, "automatic_replay": False}
 
     def _outcome_bound(self, invocation, outcome):
         if any(outcome[name] > invocation.limits.maximum_output_bytes + 65536
