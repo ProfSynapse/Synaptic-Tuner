@@ -5,8 +5,8 @@ native training. Model-quality tuning is outside this work. These operations
 need implementation and qualification: the current family submits synchronously
 and explicitly refuses public logs, cancellation and reconciliation.
 
-This branch is an implementation candidate. Its first transport component does
-not enable public capabilities or qualify a new Mac operation.
+This branch is an implementation candidate. Its internal transport/journal join
+does not enable public capabilities or qualify a new Mac operation.
 
 ## Preserve the current boundary
 
@@ -37,10 +37,10 @@ Only the current owner's anonymous pipe can request stop. Cross-thread stop
 writes no store and is idempotent while active; polling/persistence stay on the
 owning thread. A new session cannot adopt or signal an existing live attempt.
 Stored claim/spawn/outcome records retain the existing invocation bindings.
-Missing terminal acknowledgement remains uncertain, including after a failed
-spawn-record write. Source drift before a claim prevents dispatch; an occupied
-claim prevents every later start. No restart recovery is claimed by this first
-component.
+The legacy session leaves missing terminal acknowledgement uncertain, including
+after a failed spawn-record write. The explicit journal opt-in below can recover
+an independently authenticated terminal. Source drift before a claim prevents
+dispatch; an occupied claim prevents every later start.
 
 CPU fixtures exercise actual guardian subprocesses with a simple worker and a
 real thread-affine SQLite store. They never import MLX, alter pytest's hard
@@ -52,8 +52,8 @@ earlier consumed attempt is not replayed or repaired.
 
 ## Bounded authenticated framing candidate
 
-`native_lifecycle_protocol.py` is a stdlib-only source component, currently
-unconnected to guardians, workers or public APIs. `NativeLifecyclePolicyV1`
+`native_lifecycle_protocol.py` is a stdlib-only source component joined to the
+opt-in guardian/session, but not ML callbacks or public APIs. `NativeLifecyclePolicyV1`
 declares finite progress-record and journal-byte limits. Each canonical numeric
 event has an exact invocation/policy binding, sequence, prior-frame digest and
 domain-separated HMAC. Only fixed phases and named numeric metrics are accepted;
@@ -73,11 +73,57 @@ does not establish freshness, completeness, public authority or artifact validit
 
 `NativeEvidenceAuthority.lifecycle_key` derives an invocation/policy-scoped key
 only if the host explicitly allows the new HMAC purpose. The original key stays
-host-only. The proposed anonymous-channel delivery to trusted supervision is
-not implemented; this component performs no key delivery, source admission,
-process execution or public capability promotion. Independently review the
-framing/derivation before implementing that delivery. The ML child must receive
-only a bounded progress channel, never the derived authentication capability.
+host-only. R2 independently accepted framing/derivation before implementation of
+the delivery candidate below. Only fixed public test keys have exercised that
+candidate. Independently review delivery before using actual host authority.
+The ML child receives only a progress writer, never the derived capability.
+
+## Trusted guardian/session join candidate
+
+`NativeLifecycleLaunchV1` binds the policy and exact sibling codec source hash in
+the request already hashed by `NativeInvocation`. The session verifies this
+selection and source before claiming. After the claim, it creates a private
+exclusive journal and retains its device/inode binding through the record port.
+Existing collisions and interrupted setup stay consumed and uncertain.
+
+The session delivers the scoped key through an anonymous pipe to the trusted
+guardian. Descriptor numbers are control arguments; key bytes never enter
+arguments, environment, logs or files. A separate domain authenticates the full
+launch specification. Before loading the codec or spawning a worker, the guardian
+checks that tag, independently joins argv/environment/limits to the invocation
+digest, rechecks the exact request bytes/selection and verifies codec source bytes.
+It closes the key pipe before spawning. Only the new progress writer is passed
+to the worker; journal, owner and key descriptors are excluded. The omitted-policy
+path preserves the original protocol and supervisor call/receipt shapes.
+
+The guardian validates worker-origin events as data, injects its own authenticated
+scope/sequence and publishes terminal evidence only after owned group cleanup
+confirms termination. Worker-origin terminal/free-text events are refused. Invalid
+progress or interrupted publication may leave the attempt uncertain even when
+cleanup ran; neither a closed failure exit nor an unsigned stdout receipt proves
+termination. Complete valid terminal publication precedes stdout acknowledgement,
+so loss of that acknowledgement does not erase the independently retained proof.
+
+Host snapshots retain the private root and exact journal identity, use bounded
+`pread` over an observed prefix while permitting append growth, and authenticate
+all complete frames before retention. Frames enter the existing **effects stream**
+with exact sequence/readback checks, on the store-owning thread. The observation
+partition may be truncated and must not hold recovery authority. Each snapshot
+refreshes newer retained frames from other readers before checking rollback.
+An authenticated retained terminal needs no mutable journal/source file to
+establish the same outcome. Reads check the exact invocation's output limits;
+missing/partial/unconfirmed evidence stays uncertain, with no adoption or replay.
+
+CPU fixtures cover progress before completion, actual owner-process death,
+cancellation, stdout/record/stream acknowledgement loss, cold reads, descriptor
+exclusion, custody changes, concurrent-reader prefix rollback and launch tampering.
+No Darwin/MLX or public capability proof is claimed. The current production ML
+child still needs its versioned request/progress-argument and SFT/GRPO callback
+joins; do not use this opt-in with it yet. Actual host authority delivery still
+requires independent source review and later exact capture/admission review.
+Hosts must own session lifetime explicitly: returning from a CLI and immediately
+exiting intentionally loses ownership. Forked hosts must not leak the owner pipe
+to descendants; that host behavior is not qualified by these CPU fixtures.
 
 ## Remaining joins
 
@@ -96,13 +142,13 @@ only a bounded progress channel, never the derived authentication capability.
    resolve original submit/material bindings. A stop receipt records a request;
    only trusted terminal evidence establishes cancellation. Test completion
    races and do not require mutable source files to mint new stop authority.
-4. **Authenticated restart reconciliation.** The current parent-only terminal
-   write is insufficient when the owner dies. Review an independently retained
-   guardian terminal publication, scoped to one exact invocation and using
-   host-controlled authentication. Any derived signing capability must remain
-   in trusted host supervision, never the ML child, argv, environment, logs or
-   files. The original long-lived key must not be copied. Interrupted or absent
-   evidence remains uncertain, never absence proof or permission to replay.
+4. **Public authenticated restart reconciliation.** The legacy parent-only
+   terminal write is insufficient when the owner dies. Independently review the
+   opt-in guardian journal above, then bind its exact authenticated outcome into
+   public reconciliation. The derived signing capability remains in trusted host
+   supervision, never the ML child, argv, environment, logs or files. The original
+   long-lived key is not copied. Interrupted or absent evidence remains uncertain,
+   never absence proof or permission to replay.
 5. **Qualification.** Exercise normal completion, live progress before terminal
    publication, cancellation, caller loss, interrupted acknowledgement and cold
    reconciliation through the public facade. Start with CPU fixtures, then real

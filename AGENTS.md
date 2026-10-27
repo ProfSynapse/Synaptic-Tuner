@@ -48,6 +48,10 @@ This repository has a few cloud-training constraints that are easy to relearn th
   Independently review lifecycle framing and one-attempt capability derivation
   before anonymous-channel delivery to trusted supervision. The ML child must
   never receive that capability; keep it out of files, argv, environment and logs.
+  Authenticate the full lifecycle launch and exact invocation/request/codec before
+  worker dispatch. Retain recovery frames in the host effects stream, not the
+  truncatable observation partition. CPU fixture-key delivery is not Mac/public
+  qualification; review actual capability delivery before using host authority.
 
 - Retained native evaluation scoring admits only messages, configured correctness
   assertions and optional provenance metadata. Validate every case before shared

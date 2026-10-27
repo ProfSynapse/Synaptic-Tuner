@@ -9,7 +9,8 @@ import os
 import pytest
 
 from tuner.runtime.native_lifecycle_protocol import (
-    NativeLifecyclePolicyV1, NativeLifecycleWriter, validate_event, verify_lifecycle_journal,
+    NativeLifecyclePolicyV1, NativeLifecycleWriter, encode_worker_progress,
+    parse_worker_progress, validate_event, verify_lifecycle_journal,
 )
 from tuner.training.modal_host_authority import HMACAuthenticator
 from tuner.training.native_mlx_authority import NativeEvidenceAuthority
@@ -23,6 +24,18 @@ PROGRESS = {"kind": "progress", "phase": "training", "step": 1,
 OUTCOME = {"schema": "synaptic-native-process-outcome/v1", "reason": "worker_exited",
            "exit_code": 0, "termination_confirmed": True, "stdout_bytes": 13, "stderr_bytes": 0}
 TERMINAL = {"kind": "terminal", "outcome": OUTCOME}
+
+
+def test_worker_wire_accepts_only_canonical_progress():
+    raw = encode_worker_progress(PROGRESS)
+    assert raw.endswith(b"\n") and parse_worker_progress(raw[:-1]) == PROGRESS
+    with pytest.raises(ValueError):
+        encode_worker_progress(TERMINAL)
+    with pytest.raises(ValueError):
+        parse_worker_progress(json.dumps(TERMINAL, sort_keys=True, separators=(",", ":")).encode())
+    for invalid in (raw, b"", b"x" * 4096, b"{\"kind\":\"progress\"}"):
+        with pytest.raises(ValueError):
+            parse_worker_progress(invalid)
 
 
 @pytest.fixture

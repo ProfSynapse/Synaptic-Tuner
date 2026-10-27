@@ -156,16 +156,23 @@ progress and confirmed-terminal frames, exact invocation/policy HMAC binding,
 complete-prefix verification and rollback checks against a retained snapshot.
 Its derived capability requires a separately allowed host HMAC purpose and must
 stay in trusted supervision, never the ML child or files/argv/environment/logs.
-It is not yet connected to the guardian or public API and grants no execution or
-qualification. Review it before anonymous-channel key delivery. The host owns
-journal path custody and durable prefix retention; authenticated prefixes alone
-do not establish freshness or completion.
+The opt-in guardian/session join is now CPU-tested with fixed public fixture keys;
+it grants no public execution or qualification. Independently review delivery
+before using actual host authority. The host owns journal path custody and
+durable prefix retention through the effects stream; authenticated prefixes alone
+do not establish freshness or completion. The ML worker request/callback joins
+and public planning/logs/cancel/reconcile remain pending.
 
 The next functional work is public progress, cancellation and restart
 reconciliation; model-quality tuning is excluded. The internal caller-pumped
 `NativeProcessSession` candidate keeps record operations on the constructing
-thread and only live-owner pipe cancellation crosses threads. It does not yet
-enable public capabilities or authenticate cold recovery. Preserve the default
+thread and only live-owner pipe cancellation crosses threads. Its explicit
+`NativeLifecycleLaunchV1` candidate can authenticate cold terminal readback through
+the existing host effects stream after caller/acknowledgement loss, without
+signalling persisted PIDs or resubmission. Public capabilities stay disabled.
+Keep derived capability bytes in trusted supervision, authenticate the complete
+launch and exact invocation/request/codec before worker dispatch, and pass only
+the numeric progress pipe to the worker. Preserve the default
 synchronous transport and all existing canonical material when the versioned
 lifecycle policy is absent. See `docs/plans/native-mlx-lifecycle.md` for the
 implementation/qualification contract. Use structured numeric callbacks rather

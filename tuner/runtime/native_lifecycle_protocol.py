@@ -112,6 +112,23 @@ def validate_event(event):
         raise ValueError("native lifecycle event kind is invalid")
 
 
+def encode_worker_progress(event):
+    validate_event(event)
+    raw = _canonical(event) + b"\n"
+    if event["kind"] != "progress" or len(raw) > MAXIMUM_RECORD_BYTES:
+        raise ValueError("native worker progress is invalid")
+    return raw
+
+
+def parse_worker_progress(raw):
+    if type(raw) is not bytes or not raw or len(raw) >= MAXIMUM_RECORD_BYTES:
+        raise ValueError("native worker progress bound is invalid")
+    event = _parse(raw)
+    if encode_worker_progress(event) != raw + b"\n":
+        raise ValueError("native worker progress bytes differ")
+    return event
+
+
 class NativeLifecycleWriter:
     """Append/fsync complete frames to a caller-owned create-only descriptor.
 
