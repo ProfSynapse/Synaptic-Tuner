@@ -105,6 +105,14 @@ role is an MLX LoRA archive; it is not PEFT, a merged model, or GGUF. Base model
 tokenizer/template, runtime and workload identities travel in the manifests.
 Desktop serving and format conversion need their own qualified engine path.
 
+The optional module also exposes `NativeMLXGRPOProfile` and
+`compile_native_grpo` for a separate, **hardware-unqualified** GRPO source
+candidate. It uses the same native planner/family/owned process and public
+five-role verification, with method-specific prompt, rollout, reward and saved
+adapter evidence. No SFT qualification transfers to it. See
+[native GRPO architecture and audit](native-mlx-grpo.md) for the exact upstream
+pin, separate runtime closure, supported controls and root-owned next gates.
+
 The native verifier checks actual optimizer count, finite nonzero saved adapter
 delta, exact tensor/checkpoint inventory and held-out evaluation after loading
 the saved final adapter. An exit code or the upstream in-loop loss is not this

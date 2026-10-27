@@ -31,7 +31,47 @@ the independent signature, exact selection and current clock before the sole
 start. Preserve rejected records; use fresh identities for a separately reviewed
 attempt. Never renew a consumed or uncertain submission.
 
-## Read-only host diagnosis
+## Native GRPO implementation candidate — 2026-10-27
+
+The optional public native module also exposes `NativeMLXGRPOProfile` and
+`compile_native_grpo`. This is a CPU-tested source candidate, not MLX hardware
+qualification. See `docs/architecture/native-mlx-grpo.md` and the separate
+`Trainers/mlx_grpo_mac/runtime-candidate` closure. Never install into or relabel
+the qualified SFT environment. The original SFT 50/54-package locks stay intact.
+
+The candidate consumes the existing immutable `synaptic-grpo-prompts/v1`
+publication and public response-reward declaration through the same planner,
+family, host grants/catalogs, owned process and five verified artifact roles.
+Profile data binds the exact model/source/runtime, pinned attributed objective,
+quantization, rollout/reward/evidence budgets, and timeout-bounded regex-V0
+reward semantics. Only selected prompt messages reach generation; generated IDs
+and completion masks feed a detached-old/base-reference, token-mean unclipped
+on-policy objective. Unsupported controls reject rather than silently default.
+Constant grouped rewards or unchanged saved parameters cannot verify success.
+Final saved-adapter rollout replay is not held-out writing-quality evaluation.
+
+Evidence publication must pass the profile's exact `maximum_evidence_bytes` to
+both the exclusive write and its same-tree readback. `NativeTree.write_exclusive`
+retains its 1 MiB default for SFT/control documents; larger writes require an
+explicit finite limit within the existing native per-file ceiling. An admitted
+GRPO record above 1 MiB must round-trip through actual publication and five-role
+verification in CPU controls. Reject over-budget bytes before creating the file;
+do not fix mismatched limits by silently increasing every caller's default.
+
+The existing restricted `native_host.py` consumer accepts proposal `method:
+grpo`, exact `grpo_profile`/`grpo_controls`, attempt kind `grpo_on_policy`, and
+reviewed `input_review.prompt_rows`/`publication_sha256`. Its inspect, fresh root
+admission, synchronous start, original-authority retained reads and no-replay
+rules are unchanged. The separate native source capture must include the new
+worker/math/verifier bytes. No new provider verb or accepting authority exists.
+
+Linux CPU controls must not import MLX. The real tiny numerical test additionally
+requires `SYNAPTIC_TEST_NATIVE_GRPO_MLX=1` on Darwin arm64; root/source/runtime
+review and a bounded authorized command must precede it. Mac execution, GPU fit,
+real grouped reward variation, saved adapter changes and public artifact
+readback remain separate gates. Public logs/cancel/reconcile remain disabled.
+
+## Read-only host diagnosis (commands)
 
 Consumer integration uses the optional public
 `synaptic_tuner.api.v1.native_mlx` composition module with existing

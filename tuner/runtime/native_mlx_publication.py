@@ -88,6 +88,10 @@ def verify_native_publication(
     this CPU verifier does not rerun model inference.
     """
     projection = parse_native_workload(workload)
+    if projection.workload.method == "grpo":
+        from tuner.runtime.native_mlx_grpo_publication import verify_native_grpo_publication
+        return verify_native_grpo_publication(output=output, workload=workload, model=model,
+            tokenizer=tokenizer, tokenizer_members=tokenizer_members, budget=budget)
     if (type(model) is not NativeModelSnapshot or type(tokenizer) is not NativeModelSnapshot
             or type(budget) is not NativeArtifactBudget
             or type(tokenizer_members) is not tuple or not tokenizer_members

@@ -146,9 +146,15 @@ class NativeTree:
             self.check()
             return b"".join(chunks)
 
-    def write_exclusive(self, member: str, raw: bytes):
-        """Publish a small direct child without overwriting an existing artifact."""
-        if len(relative_member(member)) != 1 or type(raw) is not bytes or len(raw) > 1024 * 1024:
+    def write_exclusive(self, member: str, raw: bytes, *, maximum: int = 1024 * 1024):
+        """Publish bounded direct-child bytes; retain the 1 MiB default.
+
+        Larger callers must supply their admitted limit, within the existing
+        native per-file ceiling. Reject before creating any file, and use the
+        same limit for the authenticated same-tree readback.
+        """
+        if (type(maximum) is not int or not 1 <= maximum <= 512 * 1024 * 1024
+                or len(relative_member(member)) != 1 or type(raw) is not bytes or len(raw) > maximum):
             raise ValueError("native publication must be bounded direct-child bytes")
         self.check()
         fd = os.open(member, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -158,7 +164,7 @@ class NativeTree:
             stream.flush()
             os.fsync(stream.fileno())
         self.check()
-        if self.read(member, maximum=1024 * 1024) != raw:
+        if self.read(member, maximum=maximum) != raw:
             raise ValueError("native publication readback differs")
 
     def members(self, *, aliases: dict[str, str] | None = None) -> tuple[str, ...]:

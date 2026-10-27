@@ -46,6 +46,18 @@ This repository has a few cloud-training constraints that are easy to relearn th
   conversation normalizer. Review tokenizer-only masks before fresh root admission;
   serialized legacy tool demonstrations do not establish current Nexus API support.
 
+- Native GRPO uses its own named config-driven profile and private runtime
+  closure; never modify/relabel the qualified SFT environment. Bind the exact
+  attributed objective and reward engine/deadlines, keep sampled token IDs and
+  generated-only masks, and detach old/reference probabilities and advantages.
+  Recompile every public control or reject it. Grouped reward variation must
+  survive the objective's float32 conversion, and native verification requires
+  independently recomputed saved parameter changes and complete bounded groups.
+  Evidence publication and readback must use the same admitted byte limit;
+  preserve the generic exclusive writer's existing default for SFT/control files.
+  CPU/source checks do not qualify hardware; root review precedes ML imports.
+  Preserve original SFT canonical bytes and all native no-replay/capability gates.
+
 - Restricted native start admissions expire within one hour of the current host
   clock. Check the full signed selection and this window before start; signature
   validity alone is insufficient. Preserve rejected admissions and use fresh
