@@ -17,6 +17,15 @@ confirmed process outcome. No exception text or raw stderr is diagnostic
 authority. Historical coarse exit 122 remains unclassified and consumed;
 ordinary tokenizer-only evidence does not qualify the isolated GRPO path.
 
+The checked-in native preparation example also offers `profile-tokenizer` with
+a separate reviewed config. It verifies the actual workload/publication/private
+tokenizer snapshot, then executes GRPO's shared prompt-tokenization helper with
+explicit `return_dict=False` (Transformers5 defaults to a mapping), unchanged
+generation scaffold/kwargs and strict list-ID/EOS bounds. It retains private
+bounded token evidence and emits only counts/hashes. See its README and
+`native-local-training.md`; root owns any Mac execution. It loads no model and
+does not classify the consumed historical failure or grant replay authority.
+
 ## Public GRPO declarations and CPU preparation
 
 The provider-neutral `TrainingInputV1` accepts explicit method `grpo` with

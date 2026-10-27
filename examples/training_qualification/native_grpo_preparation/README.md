@@ -1,12 +1,19 @@
-# Native GRPO input preparation on the Linux host
+# Native GRPO input preparation and tokenizer-only diagnosis
 
-This example wraps the existing `TrainingInputPreparationServiceV1`,
+The Linux preparation actions wrap the existing `TrainingInputPreparationServiceV1`,
 `GRPOTrainingInputNormalizerV1` and `GRPOPreparedInputFormatVerifierV1`. It needs
 only the engine's CPU host dependencies. It selects no runtime/provider,
 downloads nothing, imports no ML library and never constructs an admission.
 The existing `prepare-dataset` CLI accepts SFT dataset-prep schemas; the `train`
 GRPO preparation join requires a Modal profile. Neither is a native-only input
 preparation command. This example supplies that missing host composition.
+
+The separate `profile-tokenizer` action supports Linux/Darwin host diagnosis
+using an already verified publication, reviewed compiled GRPO workload and
+private tokenizer snapshot. It imports the declared Transformers package for
+local tokenizer use only; it imports no MLX and loads no model. The ordinary SFT
+profiler does not execute GRPO's exact shared prompt-tokenization boundary.
+Preparation's existing Linux-only behavior and configuration remain unchanged.
 
 The checked-in two short color-choice rows are a **controlled synthetic
 mechanics fixture**, not quality evaluation or research data. Configuration
@@ -79,3 +86,55 @@ keys, fresh bounded admissions and later native-host execution. The controls
 proposal is data for that review; the preparation CLI does not consume it or
 declare a model/hardware qualification. Linux retained-descriptor preparation is
 separate from any later reviewed private copy to the Mac.
+
+## Tokenizer-only GRPO profile
+
+Root must review the final pushed source, actual workload, copied publication,
+snapshot inventory and existing environment before running this action on the
+Mac. This command supplies no source/runtime/admission authority and performs no
+model/rollout/training operation. Do not install packages, contact the Mac, or
+replay an earlier training attempt to obtain this evidence.
+
+Copy `tokenizer-profile.example.json` to a fresh private host configuration file
+at0600. Replace its placeholder paths with the **actual** reviewed canonical
+`workload.json`, immutable `dataset-<semantic-digest>` publication and existing
+tokenizer snapshot JSON (`repository`, `revision`, `root`, complete `files`
+inventory). Paths may be absolute or relative to the configuration. The example
+declares Transformers5.20.2 from the selected GRPO lock; the command checks the
+installed metadata version exactly without resolving or changing dependencies.
+Review its explicit tokenizer/evidence byte bounds and fresh output root.
+The snapshot source/revision must equal the compiled workload's tokenizer pins;
+no model-specific mapping or substitute profile is constructed here.
+
+After root approval, using the already selected interpreter:
+
+```bash
+python -B examples/training_qualification/native_grpo_preparation/prepare.py profile-tokenizer /absolute/private/tokenizer-profile.json
+```
+
+The action recompiles the exact public workload and verifies its GRPO prepared
+publication with the existing format verifier. Only selected prompt messages
+reach the worker's shared `tokenize_prompts` helper. It loads the exact verified
+private snapshot with `local_files_only=True`, `trust_remote_code=False` and the
+compiled `use_fast` setting. It verifies source/snapshot custody again afterward.
+The helper explicitly requests `tokenize=True`, `return_dict=False` and
+`add_generation_prompt=True`, forwarding the same configured template kwargs
+without changing the scaffold. Public validation reserves those renderer
+controls, including `return_dict`; conflicting kwargs reject before tokenizer
+calls. IDs must be a nonempty list of nonnegative exact integers within each
+prompt budget, with a valid integer EOS; no truncation, key iteration or repair.
+
+A create-only0700 output contains0600 `configuration.json`, bounded private
+`token-evidence.json` (actual IDs, EOS, source/workload/snapshot bindings and
+tokenization controls), and `result.json`. Stdout is a summary<=8KiB with token
+counts and the evidence hash, without prompts/IDs; tokenizer Python output is
+suppressed. Failed claimed stages retain a closed `failure.json` and partial
+bytes. Existing output roots reject without adoption, overwrite or auto retry.
+
+This can prove the ordinary host's exact GRPO prompt-tokenization boundary. It
+does not prove isolated child import admission, MLX, model/adapter loading,
+generation, reward variation or training. The pinned API mapping-default defect
+is statically reproducible, but historical worker exit122 still has no retained
+phase/cause evidence and must not be relabeled or replayed. Fresh final-source
+review/capture and separate root admission remain necessary for any later model
+attempt.

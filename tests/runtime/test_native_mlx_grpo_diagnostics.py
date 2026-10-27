@@ -38,8 +38,13 @@ def pipeline(publication, monkeypatch):
     monkeypatch.setattr(child, "sys", SimpleNamespace(
         flags=SimpleNamespace(isolated=True, no_site=True), dont_write_bytecode=True,
         argv=["worker", "--request", str(state.root / "request.json")]))
-    tokenizer = SimpleNamespace(eos_token_id=0,
-        apply_chat_template=lambda *a, **k: [1, 2],
+    def apply_chat_template(messages, *, tokenize=True, return_dict=True,
+                            add_generation_prompt=False, **kwargs):
+        assert tokenize is True and add_generation_prompt is True
+        assert kwargs == {"enable_thinking": False}
+        # Actual pinned Transformers 5.20.2 defaults to a BatchEncoding mapping.
+        return {"input_ids": [1, 2], "attention_mask": [1, 1]} if return_dict else [1, 2]
+    tokenizer = SimpleNamespace(eos_token_id=0, apply_chat_template=apply_chat_template,
         decode=lambda tokens: "blue" if tokens[0] == 2 else "red")
     auto = SimpleNamespace(from_pretrained=lambda *a, **k: tokenizer)
     names = tuple(f"model.layers.{layer}.self_attn.{target}.lora_{suffix}"
@@ -216,4 +221,21 @@ def test_request_cannot_supply_callback(pipeline, monkeypatch, capsys):
     (pipeline.state.root / "request.json").write_bytes(canonical(request))
     assert child.main() == 130
     assert not list(pipeline.publication["output"].iterdir())
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize("ids", [{"input_ids": [1, 2]}, "12", (1, 2), [], [True], [-1], [1.0], [[1, 2]], [1] * 65])
+def test_malformed_token_ids_fail_in_phase135_before_any_ml_import(pipeline, monkeypatch, capsys, ids):
+    import builtins
+    imported = []
+    original = builtins.__import__
+    def guard(name, *args, **kwargs):
+        if name.split(".")[0] in {"mlx", "mlx_lm"}:
+            imported.append(name)
+            raise AssertionError("ML import reached before ID admission")
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(pipeline.tokenizer, "apply_chat_template", lambda *a, **k: ids)
+    monkeypatch.setattr(builtins, "__import__", guard)
+    assert child.main() == 135
+    assert not imported and not list(pipeline.publication["output"].iterdir())
     assert capsys.readouterr() == ("", "")

@@ -66,6 +66,33 @@ def response_reward(text, rewards, *, timeout_ms):
     return result
 
 
+def tokenize_prompts(prompts, *, tokenizer, projection):
+    """Exact GRPO generation boundary, shared with tokenizer-only host diagnosis.
+
+    Transformers 5 returns a mapping by default. Request list IDs explicitly;
+    never infer IDs from mapping iteration or repair/truncate malformed output.
+    """
+    from synaptic_tuner.api.v1.training_input import validate_chat_template_kwargs
+
+    kwargs = projection.tokenization.to_dict()["chat_template_kwargs"] or {}
+    if kwargs:
+        # The public parser already reserves renderer controls (return_dict,
+        # tokenize, add_generation_prompt, etc.); retain that rule at this join.
+        kwargs = validate_chat_template_kwargs(kwargs)
+    encoded = []
+    for prompt in prompts:
+        ids = tokenizer.apply_chat_template(prompt, tokenize=True, return_dict=False,
+            add_generation_prompt=True, **kwargs)
+        if (type(ids) is not list or not ids or len(ids) > projection.controls.max_prompt_length
+                or any(type(token) is not int or token < 0 for token in ids)):
+            raise ValueError("native GRPO prompt token IDs or budget differ")
+        encoded.append(tuple(ids))
+    eos = tokenizer.eos_token_id
+    if type(eos) is not int or eos < 0:
+        raise ValueError("native GRPO requires an explicit tokenizer EOS")
+    return tuple(encoded), eos
+
+
 @contextmanager
 def base_reference(model, *, lora_type):
     modules = [module for _, module in model.named_modules() if type(module) is lora_type]
@@ -143,15 +170,7 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_snapshot.root, local_files_only=True,
             trust_remote_code=False, use_fast=projection.tokenization.use_fast)
         stage("input_tokenization")
-        kwargs = projection.tokenization.to_dict()["chat_template_kwargs"] or {}
-        encoded = tuple(tuple(tokenizer.apply_chat_template(prompt, tokenize=True,
-            add_generation_prompt=True, **kwargs)) for prompt in prompts)
-        if any(not row or len(row) > controls.max_prompt_length
-               or any(type(t) is not int or t < 0 for t in row) for row in encoded):
-            raise ValueError("native GRPO prompt token budget exceeded")
-        eos = tokenizer.eos_token_id
-        if type(eos) is not int or eos < 0:
-            raise ValueError("native GRPO requires an explicit tokenizer EOS")
+        encoded, eos = tokenize_prompts(prompts, tokenizer=tokenizer, projection=projection)
         stage("ml_imports")
         import mlx.core as mx
         import mlx.nn as nn
