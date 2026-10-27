@@ -57,6 +57,8 @@ Before any case dispatch, it checks every case against the closed metadata set
 `messages`, `correct`, and optional `provenance`, requiring configured assertions.
 Retrieval, audio, environment, judge and other scenario modes are not admitted by
 this retained-response scorer; they must refuse before model/media or chat work.
+Validator schemas must be inline: reference keywords also refuse before dispatch
+because schema resolution can fetch external resources.
 `NativeMLXRetainedClient` loads no model and authenticates no execution by itself.
 The existing `Evaluator.compare` consumes these reports and their comparison
 bases. Backend policy identity binds stop/context/tokenizer/source/runtime

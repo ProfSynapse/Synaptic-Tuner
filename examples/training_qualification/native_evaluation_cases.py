@@ -225,8 +225,20 @@ def score(config, *, trusted_root_key_sha256):
             or row["messages_sha256"] != sha(canonical(case.chat_messages())) for case, row in zip(cases, rows)):
         raise ValueError("native evaluation scoring case join differs")
     validator = config["validator"]
-    if type(validator) is not dict or set(validator) != {"wrapper_specs", "tool_schemas"}:
+    if (type(validator) is not dict or set(validator) != {"wrapper_specs", "tool_schemas"}
+            or type(validator["wrapper_specs"]) is not list or type(validator["tool_schemas"]) is not dict):
         raise ValueError("native evaluation validator differs")
+    # JSON Schema references can retrieve resources even without a model or
+    # environment validator. This offline host admits inline schemas only.
+    pending = [validator]
+    while pending:
+        node = pending.pop()
+        if type(node) is dict:
+            if set(node) & {"$ref", "$dynamicRef", "$recursiveRef"}:
+                raise ValueError("native evaluation validator must be inline")
+            pending.extend(node.values())
+        elif type(node) is list:
+            pending.extend(node)
     validator_config = ValidatorConfig(validator["wrapper_specs"], validator["tool_schemas"])
     client = NativeMLXRetainedClient(rows, generation=workload["generation"], profile=workload["profile"])
     records = evaluate_cases(cases, client, parallel=False, validator_config=validator_config)

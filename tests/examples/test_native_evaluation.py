@@ -248,7 +248,8 @@ def test_complete_export_portable_scoring_and_collision_preservation(complete_ev
     (p.root / "scoring.json").write_bytes(scoring)
     config = {"schema": "synaptic-native-evaluation-scoring/v1", "evidence_bundle": str(p.root / "bundle"),
         "evidence_manifest_sha256": result["manifest_sha256"], "scoring_cases_file": str(p.root / "scoring.json"),
-        "scoring_cases_sha256": host.sha(scoring), "validator": {"wrapper_specs": [], "tool_schemas": {}},
+        "scoring_cases_sha256": host.sha(scoring), "validator": {"wrapper_specs": [], "tool_schemas": {
+            "configured": {"parameters": {"type": "object", "properties": {"value": {"type": "string"}}}}}},
         "label": "synthetic CPU record", "output_root": str(p.root / "scored")}
     scored = preparation.score(config, trusted_root_key_sha256=p.pin)
     assert scored["case_count"] == 1 and scored["model_executed"] is False
@@ -259,7 +260,8 @@ def test_complete_export_portable_scoring_and_collision_preservation(complete_ev
 
 @pytest.mark.parametrize("index", [0, 1])
 @pytest.mark.parametrize("field", ["retrieval_config", "audio_config", "environment", "judge",
-    "response_schema", "expected_context", "scoring", "future_verifier", "missing_correct"])
+    "response_schema", "expected_context", "scoring", "future_verifier", "missing_correct",
+    "wrapper_ref", "tool_dynamic_ref", "tool_recursive_ref"])
 def test_scoring_rejects_unadmitted_modes_before_any_case_dispatch(complete_evidence, monkeypatch, index, field):
     from Evaluator import runner
     from Evaluator.native_mlx_retained import NativeMLXRetainedClient
@@ -284,7 +286,8 @@ def test_scoring_rejects_unadmitted_modes_before_any_case_dispatch(complete_evid
     scoring = [{"id": case["id"], "question": "question", "messages": case["messages"],
         "correct": {"any": [{"assertions": [
             {"type": "jsonpath_equals", "path": "$.content", "value": "answer"}]}]}} for case in cases]
-    if field == "missing_correct": del scoring[index]["correct"]
+    if field in {"wrapper_ref", "tool_dynamic_ref", "tool_recursive_ref"}: pass
+    elif field == "missing_correct": del scoring[index]["correct"]
     elif field == "retrieval_config": scoring[index][field] = {"model": "unadmitted/model",
         "corpus": "unused", "queries": "unused", "qrels": "unused", "metrics": ["recall@1"]}
     elif field == "audio_config": scoring[index][field] = {"audio_paths": ["unused"]}
@@ -295,6 +298,11 @@ def test_scoring_rejects_unadmitted_modes_before_any_case_dispatch(complete_evid
         "evidence_manifest_sha256": result["manifest_sha256"], "scoring_cases_file": str(p.root / "scoring.json"),
         "scoring_cases_sha256": host.sha(raw), "validator": {"wrapper_specs": [], "tool_schemas": {}},
         "label": "synthetic CPU record", "output_root": str(p.root / "scored")}
+    if field == "wrapper_ref": config["validator"]["wrapper_specs"] = [{"properties": {
+        "value": {"$ref": "https://unadmitted.invalid/schema"}}}]
+    elif field in {"tool_dynamic_ref", "tool_recursive_ref"}:
+        keyword = "$dynamicRef" if field == "tool_dynamic_ref" else "$recursiveRef"
+        config["validator"]["tool_schemas"] = {"configured": {"properties": {"value": {keyword: "#/local"}}}}
     calls = []
     def forbidden(*a, **kw):
         calls.append(True)
@@ -303,7 +311,7 @@ def test_scoring_rejects_unadmitted_modes_before_any_case_dispatch(complete_evid
     monkeypatch.setattr(runner.RetrievalVerifier, "evaluate_retrieval", forbidden)
     monkeypatch.setattr(runner.AudioVerifier, "evaluate_audio", forbidden)
     monkeypatch.setattr(NativeMLXRetainedClient, "chat", forbidden)
-    with pytest.raises(ValueError, match="scoring metadata differs"):
+    with pytest.raises(ValueError, match="validator must be inline" if field.endswith("ref") else "scoring metadata differs"):
         preparation.score(config, trusted_root_key_sha256=p.pin)
     assert not calls and not (p.root / "scored").exists()
 

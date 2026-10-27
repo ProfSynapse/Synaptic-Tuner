@@ -43,6 +43,8 @@ This repository has a few cloud-training constraints that are easy to relearn th
   assertions and optional provenance metadata. Validate every case before shared
   evaluator dispatch; retrieval/audio/model/media/environment/judge modes and
   unknown metadata must reject before any response consumption or verifier work.
+  Validator schemas must be inline; reject schema reference keywords before
+  dispatch so schema resolution cannot perform unadmitted resource retrieval.
 
 - Native model-quality evaluation is generation-only and requires its own exact
   source/runtime/model/adapter/case selection and fresh bounded admission; never
