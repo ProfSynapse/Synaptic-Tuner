@@ -1,6 +1,10 @@
 # Native evaluation examples
 
-Source/CPU candidate. No actual Mac generation or quality result is claimed yet.
+The [bounded M4 comparison](../../../docs/review/native-mlx-evaluation-qualification.md)
+records 40 cases each for the pinned base and two saved adapters on `edc4c7aa`.
+All 120 generations stopped naturally. Reference loss improved on each adapter's
+own dataset; all three models passed 0/20 historical command checks. Semantic
+quality and current Nexus API behavior remain unqualified.
 Read [the contract](../../../docs/plans/native-mlx-evaluation.md) before use.
 All example placeholders require actual reviewed private paths/digests; no
 example admission or permissive execution authority is supplied.

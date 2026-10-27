@@ -68,3 +68,13 @@ Practical GRPO rewards follow these results; the existing native reward dialect
 is bounded response-only regex V0, not environment-backed tool correctness.
 Cancellation/caller-loss/reconciliation and full desktop distribution are later
 increments.
+
+## Recorded cohort
+
+The exact-source `edc4c7aa` M4 cohort completed all three 40-case attempts with
+separate admissions and complete exports. See the
+[evidence and limits](../review/native-mlx-evaluation-qualification.md).
+Reference loss improved on each adapter's own dataset, while historical command
+checks remained 0/20 for every model. Useful sampled GRPO rewards and current
+tool-schema behavior remain separate next experiments; no runtime format
+hardcoding or training replay is justified by this result.

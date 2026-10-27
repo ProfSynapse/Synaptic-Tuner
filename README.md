@@ -42,6 +42,9 @@ For native Mac training, use the optional `synaptic_tuner.api.v1.native_mlx`
 [host integration contract](docs/architecture/native-mlx-host.md),
 [SFT evidence](docs/review/native-mlx-sft-qualification.md) and the separate
 [bounded GRPO mechanics result](docs/review/native-mlx-grpo-qualification.md).
+For saved-model generation and held-out comparison, use the separate
+[restricted evaluation workflow](examples/training_qualification/native_evaluation_configs/README.md)
+and its [M4 evidence and quality limits](docs/review/native-mlx-evaluation-qualification.md).
 The host owns runtime/model preparation, authority and durable stores;
 submission is bounded and synchronous. Ordinary native qualification and public
 logs/cancel/reconcile remain gated. Full desktop distribution is separate.

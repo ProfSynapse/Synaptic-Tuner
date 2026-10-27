@@ -1,6 +1,11 @@
 # Restricted native MLX evaluation
 
-Implementation candidate; no live inference/quality qualification is claimed.
+The restricted M4 workflow completed 40 cases each for the pinned base and two
+saved SFT adapters on `edc4c7aa`; see the repository's
+`docs/review/native-mlx-evaluation-qualification.md`. All 120 generations stopped
+naturally. Reference loss improved on each adapter's own dataset, but every
+model passed 0/20 historical command checks. Semantic/current API quality and
+ordinary native capability remain unqualified.
 The existing evaluator registry and `VLLMStartupSpec` cannot load native MLX
 adapters through configuration. The native evaluation example supplies a
 generation-only host/worker composition, reusing the existing native guardian,
