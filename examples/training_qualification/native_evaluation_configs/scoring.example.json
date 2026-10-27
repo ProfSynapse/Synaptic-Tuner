@@ -1,0 +1,10 @@
+{
+  "schema": "synaptic-native-evaluation-scoring/v1",
+  "evidence_bundle": "/PRIVATE/COPIED-COMPLETE-EXPORT",
+  "evidence_manifest_sha256": "ACTUAL_EXPORT_MANIFEST_DIGEST",
+  "scoring_cases_file": "/PRIVATE/PREPARED-CASES/scoring-cases.json",
+  "scoring_cases_sha256": "ACTUAL_PREPARED_SCORING_DIGEST",
+  "validator": {"wrapper_specs": [], "tool_schemas": {}},
+  "label": "PINNED-BASE-OR-ADAPTER-LABEL",
+  "output_root": "/PRIVATE/NEW-SCORED-RESULTS"
+}

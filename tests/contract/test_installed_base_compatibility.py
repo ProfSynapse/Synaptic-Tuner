@@ -172,6 +172,8 @@ def test_installed_native_composition_has_no_ml_or_host_effects():
         for name in native.__all__:
             value = getattr(native, name)
             _installed(importlib.import_module(value.__module__), checkout)
+        for name in ('tuner.runtime.native_mlx_evaluation', 'Evaluator.native_mlx_retained'):
+            _installed(importlib.import_module(name), checkout)
     assert not any(name.partition('.')[0] in _OPTIONAL for name in sys.modules)
 
 

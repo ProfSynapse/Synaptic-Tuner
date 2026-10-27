@@ -1,0 +1,45 @@
+{
+  "schema": "synaptic-native-evaluation-host/v1",
+  "engine_root": "/PRIVATE/REVIEWED-ENGINE",
+  "engine_commit": "REVIEWED_PUSHED_COMMIT",
+  "engine_ref": "refs/heads/REVIEWED_BRANCH",
+  "engine_remote": "https://github.com/ProfSynapse/Synaptic-Tuner.git",
+  "runtime_capture_file": "/PRIVATE/EXACT-CAPTURE.json",
+  "dependency_lock_file": "/PRIVATE/REVIEWED-ENGINE/Trainers/mlx_grpo_mac/runtime-candidate/requirements.runtime.lock",
+  "model_snapshot_file": "/PRIVATE/model-snapshot.json",
+  "tokenizer_snapshot_file": "/PRIVATE/tokenizer-snapshot.json",
+  "cases_file": "/PRIVATE/PREPARED-CASES/cases.json",
+  "adapter_file": null,
+  "profile": {
+    "profile_ref": "mlx-m4-qwen3-06b-evaluation-v1",
+    "model_ref": "mlx-community/Qwen3-0.6B-4bit",
+    "model_revision": "73e3e38d981303bc594367cd910ea6eb48349da8",
+    "tokenizer_revision": "73e3e38d981303bc594367cd910ea6eb48349da8",
+    "quantization_bits": 4,
+    "maximum_cases": 40,
+    "maximum_context_tokens": 4096,
+    "maximum_response_bytes": 65536,
+    "maximum_evidence_bytes": 8388608
+  },
+  "generation": {
+    "mode": "greedy",
+    "max_prompt_tokens": 2560,
+    "max_completion_tokens": 1536,
+    "seed": 17,
+    "stop_token_ids": [151645],
+    "use_fast": true,
+    "chat_template_kwargs": {"enable_thinking": false}
+  },
+  "state_root": "/PRIVATE/NEW-EVALUATION-STATE",
+  "attempt": "NEW-UNUSED-ATTEMPT",
+  "limits": {
+    "timeout_seconds": 900,
+    "termination_grace_seconds": 5,
+    "maximum_output_bytes": 1048576,
+    "maximum_file_bytes": 16777216
+  },
+  "admission_file": "/PRIVATE/NEW-ADMISSION.json",
+  "admission_signature_file": "/PRIVATE/NEW-ADMISSION.sig",
+  "root_public_key_file": "/PRIVATE/root-public-key.pem",
+  "root_public_key_sha256": "EXTERNAL_REVIEWED_PUBLIC_KEY_PIN"
+}

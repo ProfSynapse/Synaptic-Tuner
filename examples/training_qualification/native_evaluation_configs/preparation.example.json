@@ -1,0 +1,26 @@
+{
+  "schema": "synaptic-native-evaluation-preparation/v1",
+  "publications": [
+    {
+      "label": "conversation-boundary",
+      "publication": "/PRIVATE/INPUT/everyday/dataset-38f84d342479589e7de6220c5cc7359418543e26b67e4e3c9816bfba23a27483",
+      "dataset_digest": "38f84d342479589e7de6220c5cc7359418543e26b67e4e3c9816bfba23a27483",
+      "content_sha256": "5128095bab31e4e965ac8db65605830af39291b364bbff9c69f902bb1ff26f1c",
+      "expected_train_rows": 100,
+      "expected_validation_rows": 20,
+      "reference_equals": [],
+      "assertions": [{"type": "jsonpath_regex", "path": "$.content", "pattern": "\\S"}]
+    },
+    {
+      "label": "historical-command",
+      "publication": "/PRIVATE/INPUT/nexus/dataset-c6bca71a6463a8d89cf4bcac970985315b1f480e4d5f3d27050a81fb728b64c2",
+      "dataset_digest": "c6bca71a6463a8d89cf4bcac970985315b1f480e4d5f3d27050a81fb728b64c2",
+      "content_sha256": "4357a998e862a4160bcf48e106368d513e49f12c82d116a20fad756f284d877c",
+      "expected_train_rows": 100,
+      "expected_validation_rows": 20,
+      "reference_equals": ["$.tool_calls[0].name", "$.tool_calls[0].arguments.tool"],
+      "assertions": [{"type": "jsonpath_length_equals", "path": "$.tool_calls", "value": 1}]
+    }
+  ],
+  "output_root": "/PRIVATE/PREPARED-CASES-NEW"
+}
