@@ -212,6 +212,11 @@ _GRPO_PHASE_EXITS = {
     "final_custody": 148,
 }
 
+_EVALUATION_PHASE_EXITS = {
+    "admission": 150, "tokenization": 151, "model": 152, "adapter": 153,
+    "generation": 154, "reference": 155, "publication": 156, "custody": 157,
+}
+
 
 def run_request(request, *, request_root, _stage=None):
     """After isolated import admission; all workload controls are recompiled."""
@@ -317,7 +322,15 @@ def main():
         phase = 121
         install_capture_imports(capture)
         phase = 122
-        if request["workload"].get("method") == "grpo":
+        if request.get("schema") == "synaptic-native-evaluation-child-request/v1":
+            from tuner.runtime.native_mlx_evaluation import execute_request
+
+            def mark_evaluation(stage):
+                nonlocal phase
+                phase = _EVALUATION_PHASE_EXITS[stage]
+            phase = _EVALUATION_PHASE_EXITS["admission"]
+            execute_request(request, request_root=path.parent, _stage=mark_evaluation)
+        elif request["workload"].get("method") == "grpo":
             def mark(stage):
                 nonlocal phase
                 phase = _GRPO_PHASE_EXITS[stage]

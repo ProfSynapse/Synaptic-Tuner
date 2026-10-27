@@ -722,6 +722,11 @@ def main(argv=None):
             pass
         elif args.action == "canonicalize":
             result = config
+            if args.destination is not None:
+                destination = args.destination
+                raw = canonical(config)
+                _write_owned(destination.parent, destination.name, raw, 4 << 20)
+                result = {"path": str(destination), "sha256": hashlib.sha256(raw).hexdigest()}
         elif args.action == "profile-candidate":
             result = profile_candidate(config)
         elif args.action == "inspect":

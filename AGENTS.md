@@ -39,6 +39,24 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Native MLX candidate
 
+- Retained native evaluation scoring admits only messages, configured correctness
+  assertions and optional provenance metadata. Validate every case before shared
+  evaluator dispatch; retrieval/audio/model/media/environment/judge modes and
+  unknown metadata must reject before any response consumption or verifier work.
+  Validator schemas must be inline; reject schema reference keywords before
+  dispatch so schema resolution cannot perform unadmitted resource retrieval.
+  Require nonempty recognized correctness paths and nested assertion trees;
+  reject malformed, unknown or vacuous declarations before dispatch rather than
+  treating the shared evaluator's presence check as structural validation.
+
+- Native model-quality evaluation is generation-only and requires its own exact
+  source/runtime/model/adapter/case selection and fresh bounded admission; never
+  submit or replay training to obtain inference authority. Keep references out
+  of generation prompts, preserve exact scaffold/IDs and stop-versus-length
+  evidence, and reuse configured evaluator assertions. Historical tool-format
+  fidelity, held-out reference loss and semantic/current-API correctness are
+  distinct claims. Never execute generated commands against the user's vault.
+
 - For representative native SFT subsets, use the config-driven host example in
   `examples/training_qualification/native_sft_datasets/`; preserve declared source
   splits, explicit positive-label eligibility, complete conversation context,
