@@ -149,6 +149,20 @@ tokenization/model/adapter behavior. Refresh affected closures, package and exac
 source/runtime capture after independent review; any later model attempt still
 requires a fresh separately reviewed admission, never automatic replay.
 
+### Public lifecycle implementation candidate
+
+The next functional work is public progress, cancellation and restart
+reconciliation; model-quality tuning is excluded. The internal caller-pumped
+`NativeProcessSession` candidate keeps record operations on the constructing
+thread and only live-owner pipe cancellation crosses threads. It does not yet
+enable public capabilities or authenticate cold recovery. Preserve the default
+synchronous transport and all existing canonical material when the versioned
+lifecycle policy is absent. See `docs/plans/native-mlx-lifecycle.md` for the
+implementation/qualification contract. Use structured numeric callbacks rather
+than parsing console text; retain uncertain claims and never signal saved PIDs
+or resubmit to recover. Independent source review and exact fresh admission
+still precede any new Mac ML qualification.
+
 ### Host metadata commands
 
 Consumer integration uses the optional public

@@ -39,6 +39,13 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Native MLX candidate
 
+- Native asynchronous lifecycle work is opt-in and separately qualified. Keep
+  caller-pumped record operations on the host store's owning thread, preserve
+  absent-policy legacy bytes, and retain only live-owner pipe stop authority.
+  Structured progress and authenticated cold terminal evidence are required
+  before enabling public logs/cancel/reconcile; an internal session method does
+  not qualify those capabilities. See `docs/plans/native-mlx-lifecycle.md`.
+
 - Retained native evaluation scoring admits only messages, configured correctness
   assertions and optional provenance metadata. Validate every case before shared
   evaluator dispatch; retrieval/audio/model/media/environment/judge modes and
