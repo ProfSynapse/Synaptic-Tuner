@@ -114,11 +114,15 @@ def _publish_grpo_documents(destination, *, projection, binding, result, evidenc
 
 
 def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapshot,
-                        runtime_material, dependency_lock, output):
+                        runtime_material, dependency_lock, output, _stage=None):
     """All inputs must already be host admitted; verify bytes before ML imports."""
+    # Trusted child-local milestone sink only; never read from workload/config.
+    stage = _stage if _stage is not None else lambda _: None
+    stage("runtime_material")
     profile, controls = projection.profile, projection.controls
     verify_native_material(runtime_material, expected_digest=profile.runtime_digest,
                            dependency_lock=dependency_lock)
+    stage("input_admission")
     prompts = prepared_prompts(dataset, projection)
     with (NativeTree(Path(model_snapshot.root), private=True) as model_tree,
           NativeTree(Path(tokenizer_snapshot.root), private=True) as token_tree,
@@ -133,10 +137,12 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
             raise ValueError("native GRPO quantization differs")
         if profile.quantization_bits != 4:
             raise ValueError("native GRPO initial candidate requires a pinned 4-bit snapshot")
+        stage("tokenizer_load")
         from transformers import AutoTokenizer
 
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_snapshot.root, local_files_only=True,
             trust_remote_code=False, use_fast=projection.tokenization.use_fast)
+        stage("input_tokenization")
         kwargs = projection.tokenization.to_dict()["chat_template_kwargs"] or {}
         encoded = tuple(tuple(tokenizer.apply_chat_template(prompt, tokenize=True,
             add_generation_prompt=True, **kwargs)) for prompt in prompts)
@@ -146,6 +152,7 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
         eos = tokenizer.eos_token_id
         if type(eos) is not int or eos < 0:
             raise ValueError("native GRPO requires an explicit tokenizer EOS")
+        stage("ml_imports")
         import mlx.core as mx
         import mlx.nn as nn
         import mlx.optimizers as optimizers
@@ -155,13 +162,16 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
         from mlx_lm.tuner.utils import linear_to_lora_layers
         from mlx_lm.utils import load_model
 
+        stage("model_load")
         mx.random.seed(controls.seed)
         model, _ = load_model(Path(model_snapshot.root), lazy=False, strict=True, trust_remote_code=False)
+        stage("adapter_preparation")
         parameters, shapes = attach_native_lora(model, projection.lora,
             convert=linear_to_lora_layers, flatten=tree_flatten)
         model.eval()  # Dropout is rejected; rollout and gradient modes agree.
         mx.eval(parameters)
         initial_path, final_path = Path(output) / "initial-adapters.safetensors", Path(output) / "adapters.safetensors"
+        stage("initial_save")
         mx.save_safetensors(str(initial_path), parameters)
         initial = destination.read(initial_path.name)
         adapter_tensors(initial)
@@ -170,12 +180,15 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
         evidence, metrics = [], []
         per_step_prompts = controls.batch_size // controls.num_generations
         for step in range(controls.iterations):
+            stage("generation")
             indices = [((step * per_step_prompts + i) % len(encoded)) for i in range(per_step_prompts)]
             selected = [encoded[index] for index in indices for _ in range(controls.num_generations)]
             completions = [generate_completion(model, prompt, {eos}, controls.max_completion_length,
                 mx=mx, make_cache=make_prompt_cache) for prompt in selected]
+            stage("reward")
             texts = [tokenizer.decode(list(tokens)) for tokens in completions]
             rewards = [response_reward(text, training["rewards"], timeout_ms=profile.reward_timeout_ms) for text in texts]
+            stage("reference")
             old, mask = completion_logprobs(model, selected, completions, mx=mx)
             old = mx.stop_gradient(old)
             mx.eval(old, mask)
@@ -183,6 +196,7 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
                 reference, _ = completion_logprobs(model, selected, completions, mx=mx)
                 reference = mx.stop_gradient(reference)
                 mx.eval(reference)
+            stage("objective")
             advantages = group_advantages(mx.array(rewards, dtype=mx.float32), controls.num_generations, mx=mx)
             mx.eval(advantages)
 
@@ -195,6 +209,7 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
             mx.eval(loss, norm)
             if not math.isfinite(float(loss.item())) or not math.isfinite(float(norm.item())):
                 raise ValueError("native GRPO gradient/loss is nonfinite")
+            stage("update")
             scale = min(1.0, controls.max_grad_norm / max(float(norm.item()), 1e-12))
             optimizer.update(model, tree_map(lambda g: g * scale, gradients))
             mx.eval(model.parameters(), optimizer.state)
@@ -206,6 +221,7 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
                 raise ValueError("native GRPO evidence byte budget exceeded")
             if (step + 1) % controls.logging_steps == 0 or step + 1 == controls.iterations:
                 metrics.append({"step": step + 1, "loss": float(loss.item()), "gradient_norm": float(norm.item())})
+        stage("final_save")
         completed = optimizer.step.item()
         if type(completed) is not int or completed != controls.iterations:
             raise ValueError("native GRPO optimizer count differs")
@@ -213,6 +229,7 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
         final = destination.read(final_path.name)
         delta = verify_adapter_delta(initial, final, expected_shapes=shapes)
         # Fresh-base reload verifies saved bytes rather than in-memory success.
+        stage("reload")
         reloaded, _ = load_model(Path(model_snapshot.root), lazy=False, strict=True, trust_remote_code=False)
         _, reload_shapes = attach_native_lora(reloaded, projection.lora,
             convert=linear_to_lora_layers, flatten=tree_flatten)
@@ -240,8 +257,10 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
             "final_validation": {"phase": "reloaded_saved_final_adapter_rollout_replay",
                 "adapter_sha256": hashlib.sha256(final).hexdigest(), "loss": final_loss},
             "metrics": metrics, "evidence_sha256": hashlib.sha256(canonical(evidence)).hexdigest()}
+        stage("publication")
         _publish_grpo_documents(destination, projection=projection, binding=binding,
             result=result, evidence=evidence)
+        stage("final_custody")
         model_snapshot.verify(model_tree)
         tokenizer_snapshot.verify(token_tree)
         destination.check()

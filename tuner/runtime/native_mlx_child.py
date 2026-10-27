@@ -199,8 +199,24 @@ def _load_published_tokenizer(archive_bytes, *, request_root, expected_members, 
         )
 
 
-def run_request(request, *, request_root):
+# Internal worker exits, interpreted only with the exact admitted source and a
+# confirmed worker_exited outcome. No request field selects a diagnostic hook.
+_GRPO_PHASE_EXITS = {
+    "request_compilation": 130, "runtime_material": 131,
+    "portable_tokenizer": 132, "input_admission": 133,
+    "tokenizer_load": 134, "input_tokenization": 135,
+    "ml_imports": 136, "model_load": 137, "adapter_preparation": 138,
+    "initial_save": 139, "generation": 140, "reward": 141,
+    "reference": 142, "objective": 143, "update": 144,
+    "final_save": 145, "reload": 146, "publication": 147,
+    "final_custody": 148,
+}
+
+
+def run_request(request, *, request_root, _stage=None):
     """After isolated import admission; all workload controls are recompiled."""
+    stage = _stage if _stage is not None else lambda _: None
+    stage("request_compilation")
     from tuner.runtime.native_files import NativeTree
     from tuner.runtime.native_mlx_composition import execute_native_sft
     from tuner.runtime.native_mlx_input import prepare_native_input
@@ -230,10 +246,12 @@ def run_request(request, *, request_root):
         dataset = tree.read(Path(request["dataset"]).name, maximum=64 * 1024 * 1024)
 
         if projection.workload.method == "grpo":
+            stage("runtime_material")
             from tuner.runtime.native_mlx_grpo import execute_native_grpo
             from tuner.runtime.native_mlx_material import verify_native_material
 
             verify_native_material(runtime, expected_digest=profile.runtime_digest, dependency_lock=lock)
+            stage("portable_tokenizer")
             with NativeTree(Path(tokenizer.root), private=True) as token_tree:
                 published_tokenizer = tokenizer_publication_bytes(
                     tokenizer, members, projection.tokenization, budget, token_tree,
@@ -243,7 +261,8 @@ def run_request(request, *, request_root):
                 expected_members=members, use_fast=projection.tokenization.use_fast)
             result = execute_native_grpo(projection=projection, dataset=dataset,
                 model_snapshot=model, tokenizer_snapshot=tokenizer, runtime_material=runtime,
-                dependency_lock=lock, output=Path(request["output"]))
+                dependency_lock=lock, output=Path(request["output"]), _stage=_stage)
+            stage("final_custody")
             tree.check()
             return result
 
@@ -298,7 +317,14 @@ def main():
         phase = 121
         install_capture_imports(capture)
         phase = 122
-        run_request(request, request_root=path.parent)
+        if request["workload"].get("method") == "grpo":
+            def mark(stage):
+                nonlocal phase
+                phase = _GRPO_PHASE_EXITS[stage]
+            phase = _GRPO_PHASE_EXITS["request_compilation"]
+            run_request(request, request_root=path.parent, _stage=mark)
+        else:
+            run_request(request, request_root=path.parent)
         return 0
     except BaseException:
         return phase

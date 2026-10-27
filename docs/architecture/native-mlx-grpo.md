@@ -162,3 +162,33 @@ Ruff and diff checks pass; raw and prompt/completion SFT canonical hashes match
 the independent R1 baseline exactly. Fresh source archives are checked without
 installing packages; historical 57245717 installed-consumer evidence above is
 preserved as historical rather than attributed to the new source.
+
+## Closed native child diagnosis
+
+The first separately admitted model attempt on source `19768026` failed with
+worker exit 122, confirmed termination, no stdout and no initial output file.
+Only the stderr byte count was retained. This locates the old `run_request`
+boundary and establishes no tokenizer, import, model or adapter cause. A later
+ordinary host tokenizer-only pass does not qualify the isolated GRPO path.
+The pinned MLX-LM source contains both `LoRALinear` and `make_prompt_cache`;
+missing-export speculation is not evidence. CPU recompilation and bound checks
+did not establish a deterministic configuration defect.
+
+Configuration cannot expose internal failure phases. The reusable child now
+accepts an internal trusted milestone callback, passed only by child main for
+GRPO and never selected by request/config data. Static worker exits 130–148
+identify compilation through final custody; their exact boundary table is in
+the canonical `native-local-training.md` reference. They contain no exception
+text, traceback, path, argv, environment or prompt. They do not add success files,
+change the public `native_worker_failed` result, or change SFT exits 120/121/122.
+Bootstrap/capture-import failures retain 120/121 for both methods.
+
+CPU controls inject actual operation failures throughout the existing pipeline,
+check closed exits and empty diagnostic streams, and round-trip a synthetic
+success through the unchanged seven output files and five-role public verifier.
+The synthetic array/gradient backend is a control-flow double, not MLX training
+or hardware qualification. Codes require the exact admitted source, GRPO method
+and a confirmed worker-exited outcome; guardian codes belong to a different
+boundary. A phase is not a cause, retry authority or retrospective diagnosis of
+the consumed historical attempt. New source packaging/capture, independent
+review and a fresh root admission remain prerequisites for any later execution.

@@ -46,6 +46,13 @@ This repository has a few cloud-training constraints that are easy to relearn th
   conversation normalizer. Review tokenizer-only masks before fresh root admission;
   serialized legacy tool demonstrations do not establish current Nexus API support.
 
+- Native GRPO child diagnostics use only fixed numeric phase exits, with a trusted
+  child-local callback and no request/config callback fields or diagnostic files.
+  Interpret them only with the exact admitted source and confirmed worker outcome;
+  a phase is not a cause, and historical exit 122 remains unclassified. Preserve
+  SFT exits 120/121/122, the public `native_worker_failed` result, success inventory,
+  retained failed claims and fresh source/runtime/admission review before execution.
+
 - Native GRPO uses its own named config-driven profile and private runtime
   closure; never modify/relabel the qualified SFT environment. Bind the exact
   attributed objective and reward engine/deadlines, keep sampled token IDs and
