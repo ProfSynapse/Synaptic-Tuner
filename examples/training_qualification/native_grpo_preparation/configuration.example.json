@@ -1,0 +1,69 @@
+{
+  "schema": "synaptic-native-grpo-preparation-example/v1",
+  "source": {
+    "file": "seed.jsonl",
+    "sha256": "0ad2f919297316ea42dc64533c91dfd16021744f36c6ceb70bb50bd3ad77c39f",
+    "size_bytes": 118,
+    "prompt_column": "prompt"
+  },
+  "output_root": "prepared-color-mechanics",
+  "request_id": "native-grpo-color-mechanics-preparation",
+  "project_ref": "native-grpo-controlled-mechanics",
+  "training_input": {
+    "schema_version": "synaptic-training-input/v1",
+    "method": "grpo",
+    "model": {
+      "ref": "mlx-community/Qwen3-0.6B-4bit",
+      "revision": "73e3e38d981303bc594367cd910ea6eb48349da8",
+      "tokenizer_revision": "73e3e38d981303bc594367cd910ea6eb48349da8"
+    },
+    "dataset": {"ref": "local:approved-color-mechanics-seed"},
+    "hyperparameters": {
+      "schema_version": "synaptic-grpo-hyperparameters/v1",
+      "batch_size": 4,
+      "gradient_accumulation_steps": 1,
+      "num_generations": 4,
+      "max_steps": 3,
+      "max_seq_length": 128,
+      "max_prompt_length": 64,
+      "max_completion_length": 8,
+      "learning_rate": 0.0001,
+      "temperature": 1.0,
+      "beta": 0.1,
+      "weight_decay": 0.0,
+      "warmup_ratio": 0.0,
+      "max_grad_norm": 1.0,
+      "seed": 17,
+      "logging_steps": 1,
+      "save_steps": 4,
+      "save_total_limit": 1,
+      "lora_rank": 4,
+      "lora_alpha": 32,
+      "lora_dropout": 0.0,
+      "lora_target_modules": ["self_attn.q_proj", "self_attn.v_proj"],
+      "use_dora": false,
+      "use_rslora": false,
+      "load_in_4bit": true,
+      "bf16": false,
+      "fp16": false,
+      "prompt_column": "prompt",
+      "chat_template_kwargs": {"enable_thinking": false}
+    },
+    "artifacts": {
+      "required_kinds": ["final_model", "tokenizer", "training_lineage", "training_metrics", "workload_record"],
+      "retain_checkpoints": false
+    },
+    "rewards": {
+      "items": [{"name": "blue_word", "weight": 1.0}],
+      "documents": {
+        "blue_word": {
+          "name": "blue_word",
+          "scope": "response",
+          "validation": [{"type": "regex", "match": "\\bblue\\b"}],
+          "scoring": {"strategy": "binary", "on_pass": 1.0, "on_fail": 0.0}
+        }
+      },
+      "schema": {}
+    }
+  }
+}

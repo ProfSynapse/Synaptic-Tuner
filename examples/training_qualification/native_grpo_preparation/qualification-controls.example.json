@@ -1,0 +1,27 @@
+{
+  "schema": "synaptic-native-grpo-mechanics-controls-proposal/v1",
+  "status": "ROOT_REVIEW_REQUIRED_NOT_EXECUTION_AUTHORITY",
+  "purpose": "Controlled synthetic mechanics fixture; not writing quality or research evaluation",
+  "preparation_configuration": "configuration.example.json",
+  "lora_layers": 2,
+  "lora_scale_policy": "alpha_over_rank",
+  "optimizer": {
+    "learning_rate": 0.0001,
+    "beta1": 0.9,
+    "beta2": 0.999,
+    "epsilon": 1e-8,
+    "weight_decay": 0.0,
+    "bias_correction": true,
+    "schedule": "constant"
+  },
+  "proposed_native_bounds": {
+    "maximum_updates": 3,
+    "maximum_batch_tokens": 512,
+    "maximum_rollout_tokens": 96,
+    "maximum_reward_calls": 12,
+    "maximum_evidence_bytes": 65536,
+    "reward_timeout_ms": 10
+  },
+  "constant_reward_policy": "Retain inconclusive/failed attempts; no automatic retry or replay",
+  "authority": "Root alone reviews bounds and constructs actual captured runtime, profile and signed admission"
+}
