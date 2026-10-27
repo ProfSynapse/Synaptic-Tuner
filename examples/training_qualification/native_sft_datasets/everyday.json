@@ -1,0 +1,66 @@
+{
+  "schema": "synaptic-sft-subset-preparation/v1",
+  "provenance": {
+    "repository": "HuggingFaceTB/everyday-conversations-llama3.1-2k",
+    "revision": "14f543216b9ba42b6b951dc5bd199460d193b162",
+    "license": "Apache-2.0",
+    "readme_sha256": "7c0b4d4c9c8de6651d3646d91e92638d46beb67f867f7200a996b72f2611d95a",
+    "declared_splits": {
+      "train_sft": 2260,
+      "test_sft": 119
+    }
+  },
+  "sources": [
+    {
+      "id": "train_sft",
+      "path": "data/train_sft-00000-of-00001.parquet",
+      "url": "https://huggingface.co/datasets/HuggingFaceTB/everyday-conversations-llama3.1-2k/resolve/14f543216b9ba42b6b951dc5bd199460d193b162/data/train_sft-00000-of-00001.parquet",
+      "sha256": "4750214d12b4b92d07fca953e0b5cc59e313c575282d08b605c639aa87531daa",
+      "size_bytes": 2050609,
+      "rows": 2260,
+      "format": "parquet",
+      "partition": "train",
+      "quotas": {
+        "train": 100,
+        "validation": 0
+      },
+      "required_label": null,
+      "group_paths": [
+        [
+          "full_topic"
+        ]
+      ]
+    },
+    {
+      "id": "test_sft",
+      "path": "data/test_sft-00000-of-00001.parquet",
+      "url": "https://huggingface.co/datasets/HuggingFaceTB/everyday-conversations-llama3.1-2k/resolve/14f543216b9ba42b6b951dc5bd199460d193b162/data/test_sft-00000-of-00001.parquet",
+      "sha256": "9a6dd47c31ce940f36ced9eba2a733a0a0035ef514158c68739073e043382adc",
+      "size_bytes": 123671,
+      "rows": 119,
+      "format": "parquet",
+      "partition": "validation",
+      "quotas": {
+        "train": 0,
+        "validation": 20
+      },
+      "required_label": null,
+      "group_paths": [
+        [
+          "full_topic"
+        ]
+      ]
+    }
+  ],
+  "projection": {
+    "messages_path": [
+      "messages"
+    ],
+    "normalization": "text_only",
+    "invalid_rows": "exclude_and_report"
+  },
+  "selection": {
+    "kind": "group_hash_rank",
+    "seed": "native-sft-datasets-20261027-v1"
+  }
+}

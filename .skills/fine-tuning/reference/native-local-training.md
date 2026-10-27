@@ -1,5 +1,15 @@
 # Native local training preparation
 
+For representative public conversation and explicitly positive local tool subsets,
+use the checked-in config-first host workflow in
+`examples/training_qualification/native_sft_datasets/README.md` (repo root).
+It fills the source acquisition/selection CLI gap and delegates immutable publication
+to the existing conversation normalizer; it never trains, installs a model/runtime,
+or creates admission. Retain source hashes and original split provenance, audit
+exclusions and complete examples, and run the existing tokenizer-only mask doctor
+on every selected row. Legacy `tool_call:` text is an explicit projection and does
+not establish compatibility with the current Nexus API or native structured calls.
+
 ## Current evidence — 2026-10-26
 
 The M4 now has successful bounded raw-text and assistant-only prompt/completion

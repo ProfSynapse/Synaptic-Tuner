@@ -39,6 +39,13 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Native MLX candidate
 
+- For representative native SFT subsets, use the config-driven host example in
+  `examples/training_qualification/native_sft_datasets/`; preserve declared source
+  splits, explicit positive-label eligibility, complete conversation context,
+  original source commitments and audited exclusions. Publish through the existing
+  conversation normalizer. Review tokenizer-only masks before fresh root admission;
+  serialized legacy tool demonstrations do not establish current Nexus API support.
+
 - Restricted native start admissions expire within one hour of the current host
   clock. Check the full signed selection and this window before start; signature
   validity alone is insufficient. Preserve rejected admissions and use fresh

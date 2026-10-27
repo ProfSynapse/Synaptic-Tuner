@@ -1,0 +1,116 @@
+{
+  "schema": "synaptic-sft-subset-preparation/v1",
+  "provenance": {
+    "repository": "ProfSynapse/Synaptic-Tuner",
+    "revision": "3e357a2f0d1d85bdf06c67274946d7a9846ff742",
+    "selection_authority": "explicit label true only; legacy CLI text imitation, not current Nexus API validation"
+  },
+  "sources": [
+    {
+      "id": "contentManager",
+      "path": "Datasets/tools_datasets/non_thinking/contentManager/tools_v2.3.jsonl",
+      "url": null,
+      "sha256": "f8a6ad0e52df460101b5ced15e11d29f6a0ab6fa73921a6a772093f20ddceb21",
+      "size_bytes": 3031791,
+      "rows": 488,
+      "format": "jsonl",
+      "partition": "grouped",
+      "quotas": {
+        "train": 20,
+        "validation": 4
+      },
+      "required_label": {
+        "field": "label",
+        "equals": true
+      },
+      "group_paths": []
+    },
+    {
+      "id": "memoryManager",
+      "path": "Datasets/tools_datasets/non_thinking/memoryManager/tools_v2.4.jsonl",
+      "url": null,
+      "sha256": "f0a870511d73be146526ba659ac679884453ab45d567e7804988f93f41330226",
+      "size_bytes": 2160972,
+      "rows": 560,
+      "format": "jsonl",
+      "partition": "grouped",
+      "quotas": {
+        "train": 20,
+        "validation": 4
+      },
+      "required_label": {
+        "field": "label",
+        "equals": true
+      },
+      "group_paths": []
+    },
+    {
+      "id": "promptManager",
+      "path": "Datasets/tools_datasets/non_thinking/promptManager/tools_v2.6.jsonl",
+      "url": null,
+      "sha256": "efbe43ec1b1eb5c75057669c75d7b5e2a02f3f5fb57a9697d92d032d4a8e2fc0",
+      "size_bytes": 1705761,
+      "rows": 466,
+      "format": "jsonl",
+      "partition": "grouped",
+      "quotas": {
+        "train": 20,
+        "validation": 4
+      },
+      "required_label": {
+        "field": "label",
+        "equals": true
+      },
+      "group_paths": []
+    },
+    {
+      "id": "searchManager",
+      "path": "Datasets/tools_datasets/non_thinking/searchManager/tools_v2.2.jsonl",
+      "url": null,
+      "sha256": "a028918581aef1ba00179cb784baeb5ad696dc516c94d7408325639a6f4f1ce3",
+      "size_bytes": 3362120,
+      "rows": 916,
+      "format": "jsonl",
+      "partition": "grouped",
+      "quotas": {
+        "train": 20,
+        "validation": 4
+      },
+      "required_label": {
+        "field": "label",
+        "equals": true
+      },
+      "group_paths": []
+    },
+    {
+      "id": "storageManager",
+      "path": "Datasets/tools_datasets/non_thinking/storageManager/tools_v2.4.jsonl",
+      "url": null,
+      "sha256": "da1554c2fcf3ebe1f02840d21b95e5174808886456ccfc5be69dfba4eecb92aa",
+      "size_bytes": 3915388,
+      "rows": 1074,
+      "format": "jsonl",
+      "partition": "grouped",
+      "quotas": {
+        "train": 20,
+        "validation": 4
+      },
+      "required_label": {
+        "field": "label",
+        "equals": true
+      },
+      "group_paths": []
+    }
+  ],
+  "projection": {
+    "messages_path": [
+      "conversations"
+    ],
+    "normalization": "existing_sft_tool_text",
+    "invalid_rows": "exclude_and_report"
+  },
+  "selection": {
+    "kind": "group_hash_rank",
+    "seed": "native-sft-datasets-20261027-v1"
+  }
+}
