@@ -47,9 +47,11 @@ For saved-model generation and held-out comparison, use the separate
 and its [M4 evidence and quality limits](docs/review/native-mlx-evaluation-qualification.md).
 The host owns runtime/model preparation, authority and durable stores;
 default submission is bounded and synchronous. The opt-in
-[public lifecycle candidate](docs/plans/native-mlx-lifecycle.md) adds owned progress,
-cancellation and cold reconciliation under separate authority; its current CPU
-checks do not qualify Darwin/MLX. Ordinary native qualification remains gated.
+[public lifecycle integration](docs/plans/native-mlx-lifecycle.md) adds owned progress,
+cancellation and cold reconciliation under separate authority. Its
+[bounded M4 evidence](docs/review/native-mlx-lifecycle-qualification.md) covers
+repeated SFT/GRPO completion, public cancellation and caller-loss recovery.
+Ordinary qualification remains independently authenticated.
 Full desktop distribution is separate.
 
 Download a reviewed wheel from its GitHub release, then install that exact file

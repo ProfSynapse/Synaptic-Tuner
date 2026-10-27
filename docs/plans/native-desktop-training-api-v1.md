@@ -11,7 +11,11 @@ SFT and GRPO implementation/evidence. Read the current
 [SFT report](../review/native-mlx-sft-qualification.md) and
 [restricted GRPO report](../review/native-mlx-grpo-qualification.md).
 The selected deliverable is the OSS engine and Mac training integration; full
-desktop distribution remains separate. Broad native lifecycle gates remain open.
+desktop distribution remains separate. Subsequent
+[bounded M4 lifecycle evidence](../review/native-mlx-lifecycle-qualification.md)
+covers public progress, cancellation and abrupt caller-loss/cold reconciliation
+for both methods. Ordinary authority, broader lifecycle combinations and final
+release/integration gates retain the report's explicit limits.
 
 ## Existing code and evidence
 

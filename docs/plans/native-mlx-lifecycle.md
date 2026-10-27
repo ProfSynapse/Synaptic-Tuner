@@ -4,10 +4,12 @@ The owner requested public progress, cancellation and recovery after successful
 native training. Model-quality tuning is outside this work. These operations
 needed implementation and qualification: the original family submitted
 synchronously and refused public logs, cancellation and reconciliation. The
-opt-in implementation below is now CPU-tested; actual Mac qualification remains.
+opt-in implementation below now has CPU and
+[bounded real Mac qualification evidence](../review/native-mlx-lifecycle-qualification.md).
 
-This branch is an implementation candidate. No default capability promotion or
-new Mac qualification follows from its source/CPU results.
+The exact M4 fixture covers two completions, cancellation and caller-loss recovery
+per method. Source/CPU results alone promote no capability; ordinary authority,
+current CI and independent final evidence review remain separate gates.
 
 ## Preserve the current boundary
 
@@ -183,10 +185,18 @@ config-first `qualify` mode owns/pumps the session and binds a selected completi
 public cancellation or abrupt caller-exit scenario into the externally signed
 selection. Cold `recover`/`logs` reuse the original authority without grants.
 See [the host workflow](../../examples/training_qualification/native-host.md#config-first-lifecycle-qualification-candidate).
-The workflow/source still needs independent review before actual Mac cycles.
+R4/R5 independently accepted the worker/public and host workflow source before
+the separately admitted Mac cycles recorded above.
 Do not use a throwaway launch script or fabricate admissions.
 
-## Remaining qualification and integration
+## Qualification and integration gates
+
+The [dated report](../review/native-mlx-lifecycle-qualification.md) records the
+completed actual Mac subset of the original gates below, without erasing their
+broader limits. Normal progress/completion, public cancellation and abrupt caller
+loss/cold recovery passed for SFT and GRPO. Actual-ML acknowledgement loss remains
+separate from the passing Darwin CPU controls. Final post-expiry readback,
+independent evidence/package/claims review and current CI remain integration work.
 
 1. **Source/host workflow review.** Independently review the complete worker and
    public join, complete the reusable host qualification mode, and bind its final

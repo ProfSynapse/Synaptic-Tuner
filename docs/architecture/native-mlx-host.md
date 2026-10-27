@@ -16,12 +16,14 @@ installing a wheel alone does not prepare a model or authenticate that source.
 The [lifecycle source candidate](../plans/native-mlx-lifecycle.md) adds an explicit
 `NativeLifecyclePolicyV1`/`NativeLifecycleLaunchV1`, independently authenticated
 `NativeLifecycleGrantV1` and host-owned `native_lifecycle_session`. Its versioned
-worker and public progress/cancel/reconcile paths are CPU-tested, including
-unknown acknowledgements and cold quiescence, but real Darwin/MLX qualification
-remains pending. Ordinary/default capability claims below remain unchanged.
+worker and public progress/cancel/reconcile paths have
+[bounded real M4 evidence](../review/native-mlx-lifecycle-qualification.md): two
+completions, public cancellation and abrupt caller-loss/cold recovery per method.
+Darwin CPU controls separately cover unknown acknowledgements and cold quiescence.
+Ordinary/default capability claims remain separately authenticated.
 Keep all API/store work on the session's owning thread and keep its context alive
-for the run. The current restricted CLI remains the legacy synchronous example;
-complete its checked-in lifecycle qualification mode before real Mac cycles.
+for the run. The restricted CLI preserves synchronous v1 and adds signed v2
+`qualify`/cold `recover`/`logs`; see its exact config-first workflow.
 
 ## Inputs and composition
 
@@ -88,10 +90,12 @@ caller timed out, a result was lost, a read failed or a local download failed.
 
 After start, `runs.outcome` obtains authenticated terminal observation;
 `runs.show` is retained state. Only `runs.verify` plus the verified manifest
-establishes artifact availability. Public logs, cancel and reconcile remain
-unavailable. Applications must query capabilities and display those limits;
-they must not expose a functional cancel button or claim resumable training
-based on the guardian's internal cleanup behavior.
+establishes artifact availability. Legacy selections keep public logs, cancel and
+reconcile unavailable. The explicit lifecycle selection supplies those operations
+only with matching independently authenticated authority and an owned session.
+Applications must query capabilities and display those limits. A cancellation
+request is distinct from confirmed cleanup; cold reconciliation does not resume
+training or acquire process ownership.
 
 For fresh-process readback, reopen the original private store and retain the
 original catalog, source/model/runtime inputs and signing authorities. The
