@@ -73,9 +73,15 @@ python -B "$config/prepare.py" prepare --config "$config/nexus-tools.json" \
   --source-root "$PWD" --output "$stage/nexus-tools"
 ```
 
-Every action's destination is new; files are exclusive 0600, directories 0700.
-The Linux publisher retains its existing descriptor custody, no-replace publish,
-fsync and independent readback. Originals are read-only bounded stable reads.
+Every action's destination is new. Preparation and audit files are exclusive
+0600, and directories are 0700. The Linux publisher seals canonical publication
+members at 0400 and retains its descriptor custody, no-replace publication,
+fsync and independent readback. Native host staging creates separate,
+byte-identical `manifest.json` and `dataset.jsonl` copies at 0600 inside a new
+0700 content-addressed directory. Preserve the sealed canonical originals;
+do not chmod them or weaken the native reader's custody checks. The native
+host revalidates the staged semantic and content identity before admission.
+Original source files are read-only bounded stable reads.
 Public acquisition disables proxy inheritance and credentials, restricts HTTPS
 redirect origins, limits redirects to three, reads at most declared bytes plus
 one, checks exact source size/hash before retaining a source member, and has a

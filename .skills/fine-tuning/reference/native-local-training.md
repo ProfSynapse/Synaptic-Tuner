@@ -9,6 +9,9 @@ or creates admission. Retain source hashes and original split provenance, audit
 exclusions and complete examples, and run the existing tokenizer-only mask doctor
 on every selected row. Legacy `tool_call:` text is an explicit projection and does
 not establish compatibility with the current Nexus API or native structured calls.
+Canonical publication members remain sealed 0400. Native staging creates separate
+byte-identical 0600 members under a new 0700 content-addressed directory, then
+revalidates their identity; never chmod canonical originals to satisfy the reader.
 
 ## Current evidence — 2026-10-26
 
