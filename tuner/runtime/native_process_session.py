@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 import hashlib
 import os
 from pathlib import Path
-import select
+import selectors
 import subprocess
 import threading
 import time
@@ -127,14 +127,16 @@ class NativeProcessSession:
             # Send the bounded protocol without waiting for training. Even a
             # guardian that stops reading cannot block the host indefinitely.
             deadline, offset = time.monotonic() + 5, 0
-            while offset < len(spec):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0 or not select.select([], [guardian.stdin], [], remaining)[1]:
-                    raise ValueError("native session startup deadline")
-                try:
-                    offset += os.write(guardian.stdin.fileno(), spec[offset:offset + 4096])
-                except BlockingIOError:
-                    continue
+            with selectors.DefaultSelector() as readiness:
+                readiness.register(guardian.stdin, selectors.EVENT_WRITE)
+                while offset < len(spec):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not readiness.select(remaining):
+                        raise ValueError("native session startup deadline")
+                    try:
+                        offset += os.write(guardian.stdin.fileno(), spec[offset:offset + 4096])
+                    except BlockingIOError:
+                        continue
             guardian.stdin.close()
             return {"state": "running", "automatic_replay": False}
         except BaseException:

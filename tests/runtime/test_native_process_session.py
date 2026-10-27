@@ -1,6 +1,8 @@
 """Owned transport fixtures only; no ML imports or public capability proof."""
 from dataclasses import replace
+import os
 from pathlib import Path
+import resource
 import threading
 import time
 
@@ -44,6 +46,44 @@ def test_nonblocking_start_and_poll_use_real_thread_affine_sqlite(invocation):
                 session.start_once(invocation)
         finally:
             session.close()
+
+
+def test_start_with_high_numbered_descriptors_uses_real_guardian(invocation, monkeypatch):
+    # Do not change pytest's resource limits. Exercise legal host descriptors
+    # above select()'s fixed FD_SETSIZE while retaining actual process cleanup.
+    soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft != resource.RLIM_INFINITY and soft < 1100:
+        pytest.skip("host soft descriptor limit below high-FD fixture bound")
+    occupied, stdin_fds = [], []
+    from tuner.runtime import native_process_session as transport
+    original_spawn = transport.subprocess.Popen
+
+    def spawn(*args, **kwargs):
+        child = original_spawn(*args, **kwargs)
+        stdin_fds.append(child.stdin.fileno())
+        return child
+
+    monkeypatch.setattr(transport.subprocess, "Popen", spawn)
+    records = InMemoryDurableRecordStoreV1()
+    session = NativeProcessSession(records)
+    try:
+        for _ in range(1052):
+            occupied.append(os.open(os.devnull, os.O_RDONLY))
+            if occupied[-1] >= 1050:
+                break
+        assert occupied[-1] >= 1050
+        assert session.start_once(invocation)["state"] == "running"
+        assert stdin_fds[0] > 1023
+        outcome = terminal(session, invocation)
+        assert outcome["outcome"]["exit_code"] == 0
+        assert outcome["outcome"]["termination_confirmed"] is True
+        assert NativeOwnedProcess(records).observe(invocation) == outcome
+        with pytest.raises(ValueError, match="already exists"):
+            session.start_once(invocation)
+    finally:
+        session.close()
+        for descriptor in occupied:
+            os.close(descriptor)
 
 
 def test_cross_thread_cancel_does_not_touch_thread_affine_store(invocation):
