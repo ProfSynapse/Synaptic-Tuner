@@ -68,6 +68,54 @@ readback remain separate gates. Public logs/cancel/reconcile remain disabled.
 
 ## Read-only host diagnosis (commands)
 
+### Closed native GRPO child exits
+
+After reviewed capture imports, a GRPO child uses the following static exits.
+Interpret a code only with that attempt's exact admitted source, method `grpo`,
+`reason: worker_exited` and confirmed termination. Guardian failures have their
+own codes; a matching integer in another outcome is not a GRPO phase.
+
+| Exit | Last entered boundary |
+|------|-----------------------|
+| 130 | Request compilation, support imports and transport admission |
+| 131 | Runtime material validation |
+| 132 | Portable tokenizer publication and local load |
+| 133 | Prepared prompt/snapshot/quantization admission |
+| 134 | Tokenizer import and local load |
+| 135 | Chat-template tokenization, token bounds and EOS admission |
+| 136 | ML imports |
+| 137 | Seed and model load |
+| 138 | Adapter preparation and parameter realization |
+| 139 | Initial adapter save/readback and optimizer construction |
+| 140 | Bounded rollout generation |
+| 141 | Response decoding and bounded reward scoring |
+| 142 | Detached old-policy and base-reference log probabilities |
+| 143 | Group advantages, objective and gradient validation |
+| 144 | Clipped optimizer update, realization and bounded evidence accumulation |
+| 145 | Final update-count check, save/readback and parameter delta |
+| 146 | Fresh model/adapter reload and final objective replay |
+| 147 | Evidence and control-document publication |
+| 148 | Final source/output custody checks |
+
+The trusted child-local callback transports only literal phase labels to this
+static map. No request/config field can select a callback. Diagnostics add no
+artifact, stderr message, exception text, traceback, path, prompt, argv or
+environment value. Public failure remains `native_worker_failed`; existing SFT
+exits 120/121/122 and native bootstrap 120/capture-import 121 stay unchanged.
+Success files and all runtime, custody, deadline and output bounds are unchanged.
+
+A phase locates a boundary, not its cause or a successful prior operation.
+Repeated loop phases carry no iteration count. CPU failure injection and a
+synthetic success publication test are not hardware qualification. A historical
+122 without these exact diagnostic bytes cannot be retrospectively classified;
+stderr byte counts cannot establish content. Preserve its consumed state.
+Ordinary host tokenizer-only success does not prove isolated imports or GRPO
+tokenization/model/adapter behavior. Refresh affected closures, package and exact
+source/runtime capture after independent review; any later model attempt still
+requires a fresh separately reviewed admission, never automatic replay.
+
+### Host metadata commands
+
 Consumer integration uses the optional public
 `synaptic_tuner.api.v1.native_mlx` composition module with existing
 `TrainingAPI`/`RunsAPI` and host-owned ports. See

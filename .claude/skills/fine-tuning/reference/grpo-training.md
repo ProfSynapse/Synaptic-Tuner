@@ -11,6 +11,12 @@ control refusals and new private runtime require exact independent review and
 fresh root admission before ML imports. The qualified SFT environment is not a
 GRPO environment; no native public lifecycle capability is promoted.
 
+Native GRPO failure diagnosis uses the closed numeric phase exits documented in
+`native-local-training.md`, interpreted with the exact admitted worker source and
+confirmed process outcome. No exception text or raw stderr is diagnostic
+authority. Historical coarse exit 122 remains unclassified and consumed;
+ordinary tokenizer-only evidence does not qualify the isolated GRPO path.
+
 ## Public GRPO declarations and CPU preparation
 
 The provider-neutral `TrainingInputV1` accepts explicit method `grpo` with
