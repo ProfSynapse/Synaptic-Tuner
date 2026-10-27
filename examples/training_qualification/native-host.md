@@ -12,7 +12,7 @@ This example composes the existing public `TrainingAPI` and `RunsAPI`, reference
 host record/stream stores, Foundation grants, and the native provider family.
 It has no engine database, global provider registration, background training
 job, replay, install, or model download. `inspect` and `profile-candidate` are
-read-only. `start` is a one-shot effect and requires a separate root-signed
+read-only. Legacy v1 `start` and opt-in v2 `qualify` are one-shot effects and require a separate root-signed
 admission for its exact compiled workload and host selection: source, runtime,
 hardware, model snapshots, prepared publication, project, request, run, attempt,
 private state root, process limits and artifact budget. An ordinary two-run qualification receipt is not
@@ -308,7 +308,7 @@ mkdir -m 700 "$private_root"
   --trusted-root-key-sha256 REVIEWED_ROOT_PUBLIC_KEY_SHA256
 
 # New process, same known run and preserved state. These are public API reads;
-# logs, cancel and reconcile are intentionally unavailable.
+# logs, cancel and reconcile are intentionally unavailable in this legacy v1 selection.
 "$candidate_python" -B examples/training_qualification/native_host.py \
   observe "$private_root/host-config.json" \
   --trusted-root-key-sha256 REVIEWED_ROOT_PUBLIC_KEY_SHA256
@@ -338,5 +338,111 @@ Host metadata commands use an owned subprocess with a combined output byte
 bound and deadline; exceeding either ends its process group.
 The normal capability receipt still needs two real accepted runs, native
 artifact verification, Darwin deadline/owner-loss evidence, and a real
-Syntunia bridge readback. Public logs/cancel/reconcile, GRPO, and asynchronous
-desktop operation remain unsupported.
+Syntunia bridge readback. The legacy v1 selection has no public
+logs/cancel/reconcile. The separately gated v2 candidate below is not a claim
+of general asynchronous desktop support.
+
+## Config-first lifecycle qualification candidate
+
+R4 independently accepted the worker/public lifecycle source at `e597b2c0`.
+Real Darwin/MLX lifecycle qualification still requires fresh final-source
+capture, source/workflow review and bounded external admission. No capability
+is enabled merely by selecting this workflow. Existing v1 configs and their
+canonical selections remain unchanged.
+
+For each **fresh** attempt use `schema: synaptic-native-host-config/v2`, the
+existing exact v1 fields, and one additional `lifecycle` object:
+
+```json
+{
+  "launch": {
+    "schema": "synaptic-native-lifecycle-launch/v1",
+    "policy": {
+      "schema": "synaptic-native-lifecycle-policy/v1",
+      "maximum_progress_records": 32,
+      "maximum_journal_bytes": 131072
+    },
+    "protocol_sha256": "REPLACE_WITH_FINAL_CAPTURED_CODEC_SHA256"
+  },
+  "scenario": "complete",
+  "trigger_step": null,
+  "poll_interval_ms": 100,
+  "host_timeout_seconds": 330,
+  "recovery_timeout_seconds": 30
+}
+```
+
+This fragment is a template, not an executable admission. The codec hash must
+match the exact captured `tuner/runtime/native_lifecycle_protocol.py` member.
+The complete config, including scenario and bounds, enters the existing signed
+selection digest. The restricted lifecycle grant is only a projection of that
+verified root admission; it cannot mint an ordinary hardware qualification or
+claim successful lifecycle evidence. Root must review each exact operation
+selection before signing. Start expiry stays within one hour of the Mac clock.
+
+`inspect` rejects progress budgets that cannot cover the compiled controls
+before any claim or ML import, using the same pure check as the worker.
+The host deadline must exceed worker time plus cleanup grace by at least ten
+seconds. The example limits above cover a 300-second worker and five-second
+grace. The process, artifacts and streams retain their existing independent
+bounds. At most 64 progress records, 128 UTF-8 bytes per run/project reference,
+and 1 MiB per host report are allowed;
+host report overflow refuses without deleting or replaying the attempt.
+
+Keep separate state roots, run/request/attempt IDs, admissions and reports for
+these scenarios:
+
+- `complete`, `trigger_step: null`: keep the session alive, pump public outcome
+  and paged numeric logs, and retain the observed terminal result. Newly seen
+  records bracketed by public running outcomes are recorded separately as
+  `pending_progress`; records first seen at terminal are not called live delivery. Successful
+  training still requires separate public verification and five-role delivery.
+- `cancel`, integer `trigger_step`: after observing that intermediate training
+  update while the public outcome is nonterminal, request public cancellation
+  once. Record the acknowledgement separately from the eventual outcome. The
+  trigger must precede the final update and reporting interval must be one.
+  A completion race is retained as observed; it is not called cancellation.
+- `caller-loss`, integer `trigger_step`: at the same intermediate boundary,
+  create/read back `caller-loss-trigger.json`, then exit the actual host process
+  with fixed status **86**, bypassing Python/session/store cleanup. The guardian
+  owns cleanup after anonymous owner-pipe EOF. Exit 86 and the trigger alone
+  prove neither worker termination nor successful recovery. Use a later process
+  and the same original config/authority for `recover`; never repeat `qualify`.
+
+Run `canonicalize`, `profile-candidate`, `inspect`, `admission-candidate` and
+external signature/sealing as above with the new exact config. Then, only for
+the separately reviewed bounded attempt:
+
+```bash
+"$candidate_python" -B examples/training_qualification/native_host.py \
+  qualify "$private_root/host-config.json" \
+  --trusted-root-key-sha256 REVIEWED_ROOT_PUBLIC_KEY_SHA256
+
+# A new process, the same attempt and original authority; no start grant:
+"$candidate_python" -B examples/training_qualification/native_host.py \
+  recover "$private_root/host-config.json" \
+  --trusted-root-key-sha256 REVIEWED_ROOT_PUBLIC_KEY_SHA256
+"$candidate_python" -B examples/training_qualification/native_host.py \
+  logs "$private_root/host-config.json" \
+  --trusted-root-key-sha256 REVIEWED_ROOT_PUBLIC_KEY_SHA256
+```
+
+`start` refuses a v2 config, preventing immediate CLI exit from being confused
+with normal asynchronous completion. `qualify` refuses a legacy config.
+All API/store calls stay on the constructing thread. Only the `cancel` scenario
+can bind a cancellation grant; its material authenticates the original submit
+and retained live-owner reference. No new start authority is issued after expiry.
+Cold `recover` has no dispatch or cancellation grant; it observes/reconciles
+authenticated evidence of the existing run within the selected finite read
+window. Uncertain claims remain uncertain. No persisted PID signaling,
+adoption, retraining or optimizer/checkpoint resume occurs.
+
+Reports are create-only 0600 under the selected 0700 state root:
+`lifecycle-observation.json`, `caller-loss-trigger.json`, and, on a separate cold
+read, `recovery-observation.json`. Repeating a report-producing operation refuses
+its existing destination. Use `show`, `observe` and `logs` for later readback;
+preserve reports and failed claims. Reports contain exact public numeric entries
+and outcomes, never raw console text, prompts, generated text or exceptions.
+Original key material stays on its existing host; the signing private key stays
+off the Mac. No installation, model acquisition or default capability promotion
+is performed by this workflow.

@@ -623,3 +623,22 @@ full-sequence, prompt-masked and noncontiguous labels. Run with the separate tes
 tools and a bounded process; it loads MLX but no model or training publication.
 Its three cases skip on non-Apple hosts. A skip or CPU algebra double is not
 real MLX numerical evidence and does not issue training authority.
+
+### Public lifecycle qualification candidate — 2026-10-27
+
+Use the existing `native_host.py` with exact v2 config and separately root-signed
+selection for `qualify`; see `native-host.md` for the full contract. The selected
+scenario is `complete`, `cancel`, or `caller-loss`; it is not chosen by a later
+unbound CLI flag. Numeric progress budgets use the child's pure compiled-control
+check before effects. The host owns/pumps the session and all SQLite/API calls
+on its thread. `start` rejects v2 to prevent immediate ownership loss.
+For caller loss, a private verified trigger precedes actual host exit86 without
+Python cleanup. Then `recover` in another process reads/reconciles the original
+attempt within finite bounds and original authority, including after expiry.
+Never repeat `qualify`, signal saved PIDs, adopt a live child or restart training.
+Only the signed cancel scenario can bind public cancellation; request and
+confirmed terminal are separate. Preserve completion races, uncertain claims
+and create-only reports. `logs` provides later bounded public readback.
+Source/CPU acceptance does not qualify Darwin/MLX or enable default capabilities;
+fresh final capture/admission, real lifecycle evidence and independent review
+remain required. Full desktop distribution and model-quality work are excluded.

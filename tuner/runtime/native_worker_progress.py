@@ -11,6 +11,24 @@ from tuner.runtime.native_lifecycle_journal import NativeLifecycleLaunchV1
 from tuner.runtime.native_lifecycle_protocol import MAXIMUM_RECORD_BYTES, encode_worker_progress
 
 
+def validate_progress_budget(projection, launch):
+    """Pure host/child check of the same compiled-control progress upper bound."""
+    controls, method = projection.controls, projection.workload.method
+    n = controls.iterations
+    if method == "sft":
+        # Pinned MLX-LM reports on interval/final and validates at first,
+        # interval/final before updating. Upper bounds include duplicates.
+        records = n // controls.steps_per_report + n // controls.steps_per_eval + 6
+    elif method == "grpo":
+        records = n // controls.logging_steps + 4
+    else:
+        raise ValueError("native progress method is unsupported")
+    policy = launch.policy
+    if (records > policy.maximum_progress_records
+            or (records + 1) * MAXIMUM_RECORD_BYTES > policy.maximum_journal_bytes):
+        raise ValueError("native progress budget cannot cover selected controls")
+
+
 class NativeWorkerProgress:
     def __init__(self, fd, launch):
         if (type(fd) is not int or fd < 3 or type(launch) is not NativeLifecycleLaunchV1
@@ -28,21 +46,8 @@ class NativeWorkerProgress:
     def bind(self, projection):
         if self._iterations is not None:
             raise ValueError("native progress is already bound")
-        controls, method = projection.controls, projection.workload.method
-        n = controls.iterations
-        if method == "sft":
-            # Pinned MLX-LM reports on interval/final and validates at first,
-            # interval/final before updating. Upper bounds include duplicates.
-            records = n // controls.steps_per_report + n // controls.steps_per_eval + 6
-        elif method == "grpo":
-            records = n // controls.logging_steps + 4
-        else:
-            raise ValueError("native progress method is unsupported")
-        policy = self._launch.policy
-        if (records > policy.maximum_progress_records
-                or (records + 1) * MAXIMUM_RECORD_BYTES > policy.maximum_journal_bytes):
-            raise ValueError("native progress budget cannot cover selected controls")
-        self._iterations = n
+        validate_progress_budget(projection, self._launch)
+        self._iterations = projection.controls.iterations
 
     def emit(self, phase, step, metrics):
         if (self._failed or self._fd is None or self._iterations is None

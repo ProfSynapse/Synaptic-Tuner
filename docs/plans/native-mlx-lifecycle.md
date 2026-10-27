@@ -178,9 +178,13 @@ Material-key policy must explicitly allow `native-cancellation-material/v1` in
 addition to its original purpose. Reader-key policy must explicitly allow the
 new capability, cancellation acknowledgement, stage acknowledgement, progress
 metadata and quiescence purposes. No default host policy acquires these rights.
-The existing restricted host CLI still provides the legacy synchronous workflow;
-a reusable config-first lifecycle qualification mode must be completed before
-actual Mac cycles. Do not use a throwaway launch script or fabricate admissions.
+The restricted host CLI preserves the legacy synchronous workflow. Its new v2
+config-first `qualify` mode owns/pumps the session and binds a selected completion,
+public cancellation or abrupt caller-exit scenario into the externally signed
+selection. Cold `recover`/`logs` reuse the original authority without grants.
+See [the host workflow](../../examples/training_qualification/native-host.md#config-first-lifecycle-qualification-candidate).
+The workflow/source still needs independent review before actual Mac cycles.
+Do not use a throwaway launch script or fabricate admissions.
 
 ## Remaining qualification and integration
 

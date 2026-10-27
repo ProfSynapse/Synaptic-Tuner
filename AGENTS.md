@@ -39,6 +39,15 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Native MLX candidate
 
+- Public lifecycle qualification uses the existing `native_host.py` v2 signed
+  configuration and `qualify`/cold `recover` workflow. Bind the completion,
+  cancellation or abrupt caller-exit scenario before effects; preserve the
+  original attempt on uncertainty. Host exit86 is only a deliberate caller-loss
+  trigger, not termination/recovery proof. Keep all API/SQLite calls on their
+  owner thread, reports create-only and ordinary capabilities gated until actual
+  Darwin/MLX evidence is independently accepted. Never replay `qualify`, adopt a
+  live child or signal a stored PID during cold recovery.
+
 - Native asynchronous lifecycle work is opt-in and separately qualified. Keep
   caller-pumped record operations on the host store's owning thread, preserve
   absent-policy legacy bytes, and retain only live-owner pipe stop authority.
