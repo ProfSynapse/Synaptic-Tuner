@@ -8,12 +8,14 @@ the exact admission candidate and consumes one fresh private state directory.
 from __future__ import annotations
 
 from dataclasses import asdict
+from io import BytesIO
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
 import re
+import stat
 import sys
 
 ENGINE_ROOT = Path(__file__).resolve().parents[2]
@@ -39,14 +41,69 @@ from synaptic_tuner.api.v1.native_mlx import (
     NativeProcessLimits, NativeRestrictedAdmissionV1, compile_native_sft, native_mlx_family,
 )
 from tuner.dataset_prep.training_input_source import LocalPreparedTrainingInputSource
+from tuner.dataset_prep.conversation_messages import (
+    MAX_BYTES as CONVERSATION_MAX_BYTES, MAX_DOCUMENT_BYTES as CONVERSATION_MAX_MANIFEST_BYTES,
+    ROW_SCHEMA as CONVERSATION_ROW_SCHEMA, verify_bytes as verify_conversation_bytes,
+)
 from tuner.execution.foundation_v2.commands import parse_exact_command
 from tuner.execution.foundation_v2.references import ExecutionScopeV1
-from tuner.runtime.native_files import NativeTree
+from tuner.runtime.native_files import NativeTree, file_identity
 from tuner.runtime.native_mlx_input import read_retained_native_source
 from tuner.runtime.native_mlx_material import canonical, native_runtime_spec, strict_json, verify_native_material
 from tuner.runtime.packaged_worker_closure import stable_read
 from tuner.training.coordinator_material import _domain, _runtime
 from tuner.training.modal_host_authority import HMACAuthenticator
+from tuner.training.contracts import RetainedTrainingInputStreamLease
+
+
+class NativePreparedTrainingInputSource(LocalPreparedTrainingInputSource):
+    """Host-only POSIX conversation read; legacy publication readers stay unchanged.
+
+    Retain the directory through bounded reads and semantic verification, then
+    recheck both named members before leasing the verified immutable byte copy.
+    No publication, normalization, model loading or execution authority is added.
+    """
+
+    __slots__ = ()
+
+    def open_lease(self):
+        if self.identity.format != CONVERSATION_ROW_SCHEMA:
+            return super().open_lease()
+        with NativeTree(self._path, private=True) as tree:
+            def inventory():
+                tree.check()
+                if stat.S_IMODE(os.fstat(tree.fd).st_mode) != 0o700:
+                    raise ValueError("native conversation publication must be private")
+                members = {}
+                with os.scandir(tree.fd) as entries:
+                    for entry in entries:
+                        if entry.name not in {"manifest.json", "dataset.jsonl"}:
+                            raise ValueError("native conversation inventory differs")
+                        info = os.stat(entry.name, dir_fd=tree.fd, follow_symlinks=False)
+                        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+                            raise ValueError("native conversation member custody differs")
+                        members[entry.name] = file_identity(info)
+                if set(members) != {"manifest.json", "dataset.jsonl"}:
+                    raise ValueError("native conversation inventory differs")
+                return members
+
+            before = inventory()
+            manifest = tree.read("manifest.json", maximum=CONVERSATION_MAX_MANIFEST_BYTES)
+            content = tree.read("dataset.jsonl", maximum=CONVERSATION_MAX_BYTES)
+            verified = verify_conversation_bytes(self._path, manifest, content)
+            if inventory() != before:
+                raise ValueError("native conversation publication changed during verification")
+            tree.check()
+        observed = verified.semantic_identity
+        current = PreparedTrainingInputIdentity(
+            ref=f"prepared://sha256/{observed.dataset_digest}",
+            revision=observed.dataset_digest, content_digest=observed.dataset_sha256,
+            size_bytes=observed.dataset_bytes, format=CONVERSATION_ROW_SCHEMA,
+        )
+        if current != self.identity:
+            raise ValueError("prepared publication changed before staging")
+        return RetainedTrainingInputStreamLease(current, BytesIO(content))
 
 
 def _read(path, maximum):
@@ -358,7 +415,7 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None,
         raise ValueError("native profile source/runtime differs")
     training = TrainingInputV1.from_dict(_document(config["training_input_file"]))
     identity = PreparedTrainingInputIdentity.from_dict(_document(config["prepared_identity_file"]))
-    prepared = LocalPreparedTrainingInputSource(Path(config["prepared_publication"]), identity)
+    prepared = NativePreparedTrainingInputSource(Path(config["prepared_publication"]), identity)
     dataset = read_retained_native_source(prepared, identity)
     rows = [strict_json(line, maximum=1 << 20) for line in dataset.splitlines()]
     counts = {name: sum(row.get("split") == name for row in rows)

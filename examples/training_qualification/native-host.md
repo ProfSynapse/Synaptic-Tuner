@@ -74,6 +74,18 @@ the publication when the consumer reads it. For the message attempt, review
 the actual shared preprocessor output; a `prompt_completion` label does not by
 itself prove assistant-only labels.
 
+For a faithful `synaptic-conversation-sft-row/v1` publication, the host uses
+`NativePreparedTrainingInputSource`: a descriptor-retained POSIX read through
+`NativeTree`, followed by the existing conversation byte verifier. The selected
+content-addressed directory must be mode 0700, contain exactly `manifest.json`
+and `dataset.jsonl`, and hold owner-only mode-0600 regular files with one link.
+The manifest is bounded to 2 MiB and the dataset to 64 MiB. Both member identities
+and directory custody are rechecked after semantic verification; the resulting
+lease carries the verified byte copy and exact selected publication identity.
+No rows, provenance, declared splits or message ordering are rewritten. Existing
+v1/v2 publication readers retain their original behavior. This read path grants
+no native qualification or training authority.
+
 ## R5 Mac preparation and remaining boundary
 
 The authorized preparation used a new 0700 directory at
