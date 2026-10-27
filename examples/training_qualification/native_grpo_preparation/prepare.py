@@ -172,15 +172,21 @@ def _profile_publication(tree, projection):
     Canonical sealed originals (0400) and separate native copies (0600) are valid.
     """
     def inventory():
-        if tree.members() != ("dataset.jsonl", "manifest.json"):
-            raise ValueError("GRPO publication inventory differs")
+        tree.check()
         result = {}
-        for name in tree.members():
-            info = os.stat(name, dir_fd=tree.fd, follow_symlinks=False)
-            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
-                    or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) not in (0o400, 0o600)):
-                raise ValueError("GRPO publication member custody differs")
-            result[name] = file_identity(info)
+        with os.scandir(tree.fd) as entries:
+            for entry in entries:
+                # Stop on the first unexpected direct entry, including an empty
+                # directory. Never recursively walk an unadmitted subtree.
+                if entry.name not in {"dataset.jsonl", "manifest.json"} or entry.name in result:
+                    raise ValueError("GRPO publication inventory differs")
+                info = os.stat(entry.name, dir_fd=tree.fd, follow_symlinks=False)
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                        or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) not in (0o400, 0o600)):
+                    raise ValueError("GRPO publication member custody differs")
+                result[entry.name] = file_identity(info)
+        if set(result) != {"dataset.jsonl", "manifest.json"}:
+            raise ValueError("GRPO publication inventory differs")
         return result
 
     before = inventory()

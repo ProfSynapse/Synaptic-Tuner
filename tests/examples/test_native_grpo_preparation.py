@@ -412,13 +412,18 @@ def test_tokenizer_profile_accepts_sealed_original_or_native_copy(tokenizer_case
     assert prepare.run("profile-tokenizer", tokenizer_case.configuration)[0] == 0
 
 
-@pytest.mark.parametrize("fault", ["extra", "writable", "hardlink", "symlink"])
+@pytest.mark.parametrize("fault", ["extra", "empty_directory", "nested_empty_directory", "writable", "hardlink", "symlink"])
 def test_tokenizer_profile_rejects_publication_custody_before_load(tokenizer_case, fault):
     t = tokenizer_case
     publication = Path(t.config["prepared_publication"])
     member = publication / "dataset.jsonl"
     if fault == "extra":
         (publication / "extra.json").write_bytes(b"{}")
+    elif fault == "empty_directory":
+        (publication / "unexpected").mkdir(mode=0o700)
+    elif fault == "nested_empty_directory":
+        (publication / "unexpected").mkdir(mode=0o700)
+        (publication / "unexpected" / "nested").mkdir(mode=0o700)
     elif fault == "writable":
         member.chmod(0o640)
     elif fault == "hardlink":
@@ -429,6 +434,25 @@ def test_tokenizer_profile_rejects_publication_custody_before_load(tokenizer_cas
     status, result = prepare.run("profile-tokenizer", t.configuration)
     assert status == 2 and result["phase"] == "input_admission"
     assert not t.loads and not (t.root / t.config["output_root"]).exists()
+
+
+def test_tokenizer_profile_rejects_empty_directory_added_during_load(tokenizer_case, monkeypatch):
+    t = tokenizer_case
+    original = sys.modules["transformers"].AutoTokenizer.from_pretrained
+
+    def adding_load(*args, **kwargs):
+        (Path(t.config["prepared_publication"]) / "unexpected").mkdir(mode=0o700)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(sys.modules["transformers"].AutoTokenizer, "from_pretrained", adding_load)
+    status, result = prepare.run("profile-tokenizer", t.configuration)
+    assert status == 2 and result["phase"] == "custody"
+    output = t.root / t.config["output_root"]
+    assert (output / "failure.json").exists()
+    assert not (output / "token-evidence.json").exists() and not (output / "result.json").exists()
+    before = {path.name: path.read_bytes() for path in output.iterdir()}
+    assert prepare.run("profile-tokenizer", t.configuration)[1]["phase"] == "input_admission"
+    assert {path.name: path.read_bytes() for path in output.iterdir()} == before
 
 
 def test_tokenizer_profile_rejects_identical_publication_replacement_after_load(tokenizer_case, monkeypatch):
