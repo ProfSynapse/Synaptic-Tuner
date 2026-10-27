@@ -46,8 +46,13 @@ For saved-model generation and held-out comparison, use the separate
 [restricted evaluation workflow](examples/training_qualification/native_evaluation_configs/README.md)
 and its [M4 evidence and quality limits](docs/review/native-mlx-evaluation-qualification.md).
 The host owns runtime/model preparation, authority and durable stores;
-submission is bounded and synchronous. Ordinary native qualification and public
-logs/cancel/reconcile remain gated. Full desktop distribution is separate.
+default submission is bounded and synchronous. The opt-in
+[public lifecycle integration](docs/plans/native-mlx-lifecycle.md) adds owned progress,
+cancellation and cold reconciliation under separate authority. Its
+[bounded M4 evidence](docs/review/native-mlx-lifecycle-qualification.md) covers
+repeated SFT/GRPO completion, public cancellation and caller-loss recovery.
+Ordinary qualification remains independently authenticated.
+Full desktop distribution is separate.
 
 Download a reviewed wheel from its GitHub release, then install that exact file
 and inspect the packaged CLI:

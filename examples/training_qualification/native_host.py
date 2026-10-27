@@ -8,6 +8,7 @@ the exact admission candidate and consumes one fresh private state directory.
 from __future__ import annotations
 
 from dataclasses import asdict
+from contextlib import ExitStack
 from io import BytesIO
 import hashlib
 import json
@@ -40,6 +41,8 @@ from synaptic_tuner.api.v1.native_mlx import (
     NativeMaterialAuthority, NativeModelSnapshot, NativePlanningV1,
     NativeProcessLimits, NativeRestrictedAdmissionV1, compile_native_sft, native_mlx_family,
     NativeMLXGRPOProfile, compile_native_grpo,
+    NativeLifecycleGrantV1,
+    native_lifecycle_session,
 )
 from tuner.dataset_prep.training_input_source import LocalPreparedTrainingInputSource
 from tuner.dataset_prep.conversation_messages import (
@@ -370,8 +373,16 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None,
         "project_ref", "request_id", "attempt", "attempt_kind", "state_root", "host",
         "tokenizer_members", "artifact_budget", "use_fast_tokenizer",
     }
+    lifecycle = None
+    if type(config) is dict and config.get("schema") == "synaptic-native-host-config/v2":
+        from native_host_lifecycle import validate_policy
+        fields.add("lifecycle")
+        lifecycle = validate_policy(config["lifecycle"])
+        if any(type(config.get(name)) is not str or len(config[name].encode("utf-8")) > 128
+               for name in ("run_id", "project_ref")):
+            raise ValueError("native lifecycle report scope exceeds host bound")
     if (type(config) is not dict or set(config) != fields
-            or config.get("schema") != "synaptic-native-host-config/v1"):
+            or config.get("schema") not in {"synaptic-native-host-config/v1", "synaptic-native-host-config/v2"}):
         raise ValueError("native host configuration invalid")
     if (type(config["host"]) is not dict or set(config["host"]) != {
             "authority_secret", "evidence_secret", "material_secret", "grant_ref",
@@ -519,6 +530,10 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None,
     run = TrainingRunRef(config["run_id"], config["project_ref"])
     base = dict(resolved=resolved, run=run, workload=projection.workload.canonical_bytes,
                 runtime_capture=capture, limits=limits, scope=scope, clock=Clock())
+    if lifecycle is not None:
+        from native_host_lifecycle import validate_controls
+        validate_controls(config["lifecycle"], projection, limits)
+        base["lifecycle"] = lifecycle
     candidate = NativePlanningV1(**base)
     selection_digest = hashlib.sha256(canonical({
         "schema": "synaptic-native-host-execution-selection/v1",
@@ -553,9 +568,19 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None,
                                   trusted_root_key_sha256, config["admission_signature_file"])
     if not root.authenticate(admission):
         raise ValueError("external restricted admission signature invalid")
-    planning = NativePlanningV1(**base, restricted_admission=admission,
-                               restricted_authority=root, selection_digest=selection_digest,
-                               retained_read=retained_read)
+    options = dict(restricted_admission=admission, restricted_authority=root,
+                   selection_digest=selection_digest, retained_read=retained_read)
+    if lifecycle is not None:
+        from native_host_lifecycle import RestrictedLifecycleAuthority
+        grant = NativeLifecycleGrantV1(
+            admission.profile_digest, admission.source_digest, admission.runtime_digest,
+            hashlib.sha256(canonical(lifecycle.to_dict())).hexdigest(), admission.hardware_digest,
+            "restricted", (), admission.selection_digest, admission.run_id, admission.attempt,
+            admission.authority_ref, admission.key_ref, admission.tag,
+        )
+        options.update(lifecycle_grant=grant,
+                       lifecycle_authority=RestrictedLifecycleAuthority(grant, admission, root))
+    planning = NativePlanningV1(**base, **options)
     if not (planning.restricted_selection() if retained_read else planning.restricted()):
         raise ValueError("restricted native admission expired or refused")
     return {"source": source, "hardware": hardware, "admission_candidate": admission_fields,
@@ -566,29 +591,33 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None,
 
 def operate(config, *, action="start", destination=None, trusted_root_key_sha256=None):
     """Start once, or recompose the same selected run for a cold public read."""
-    if action not in {"start", "show", "observe", "verify", "reverify", "download"}:
+    lifecycle = config.get("schema") == "synaptic-native-host-config/v2"
+    if action not in {"start", "qualify", "recover", "logs", "show", "observe", "verify", "reverify", "download"}:
         raise ValueError("native public action is unavailable")
+    if (lifecycle and action == "start") or (not lifecycle and action in {"qualify", "recover", "logs"}):
+        raise ValueError("native action requires its selected host workflow")
+    starting = action in {"start", "qualify"}
     state = Path(config["state_root"])
-    if action != "start":
+    if not starting:
         _private(state)
         if _document(state / "config.json", 4 << 20) != config:
             raise ValueError("retained native host configuration differs")
     _, selected = inspect(config, require_admission=True,
                           trusted_root_key_sha256=trusted_root_key_sha256,
-                          retained_read=action != "start")
+                          retained_read=not starting)
     planning, training, projection, dataset, lock, model, tokenizer = selected
-    if action == "start":
+    if starting:
         _create_private_dir(state)
     _private(state)
     private = state / "native"
-    if action == "start":
+    if starting:
         _create_private_dir(private)
     _private(private)
     output = private / "output"
-    if action == "start":
+    if starting:
         _create_private_dir(output)
     _private(output)
-    if action == "start":
+    if starting:
         _write_owned(private, "capture.json", planning.runtime_capture, 16 << 20)
         _write_owned(private, "dependency.lock", lock, 1 << 20)
         _write_owned(private, "dataset.jsonl", dataset, 64 << 20)
@@ -597,7 +626,9 @@ def operate(config, *, action="start", destination=None, trusted_root_key_sha256
           or _read(private / "dataset.jsonl", 64 << 20) != dataset):
         raise ValueError("retained native input differs")
     request_raw = canonical({
-        "schema": "synaptic-native-child-request/v1", "workload": projection.workload.document,
+        "schema": "synaptic-native-child-request/v2" if lifecycle else "synaptic-native-child-request/v1",
+        **({"lifecycle": planning.lifecycle.to_dict()} if lifecycle else {}),
+        "workload": projection.workload.document,
         "runtime_capture": str(private / "capture.json"), "dependency_lock": str(private / "dependency.lock"),
         "dataset": str(private / "dataset.jsonl"), "output": str(output),
         "model_snapshot": asdict(model), "tokenizer_snapshot": asdict(tokenizer),
@@ -606,7 +637,7 @@ def operate(config, *, action="start", destination=None, trusted_root_key_sha256
     })
     selection_document = {"plan": planning.plan.to_dict(),
                           "admission": asdict(planning._restricted_admission)}
-    if action == "start":
+    if starting:
         _write_owned(private, "request.json", request_raw, 2 << 20)
         _write_owned(state, "config.json", canonical(config), 4 << 20)
         _write_owned(state, "selection.json", canonical(selection_document), 2 << 20)
@@ -617,18 +648,24 @@ def operate(config, *, action="start", destination=None, trusted_root_key_sha256
         raise ValueError("retained native selection differs")
     _private(state / "scratch")
     secrets, clock = NamedSecrets(), Clock()
-    with SQLiteDurableStoreV1(state / "workflow.sqlite3", create=action == "start") as store:
+    with ExitStack() as lifetime:
+        store = lifetime.enter_context(SQLiteDurableStoreV1(state / "workflow.sqlite3", create=starting))
         key = secrets.resolve(SecretRef.from_dict(config["host"]["evidence_secret"])).encode()
         material_key = secrets.resolve(SecretRef.from_dict(config["host"]["material_secret"])).encode()
         host = config["host"]
+        material_purposes = {"native-command-material/v1"}
+        evidence_purposes = {"provider-run-observation/v1", "provider-log-page/v1",
+                             "native-artifact-verification/v1", "native-process-outcome/v1"}
+        if lifecycle:
+            material_purposes.add("native-cancellation-material/v1")
+            evidence_purposes.update({"native-lifecycle-capability/v1", "native-stage-ack/v1",
+                                      "native-cancellation-ack/v1", "native-progress-metadata/v1",
+                                      "native-quiescence/v1"})
         material_authority = NativeMaterialAuthority(host["material_authority_ref"],
             host["material_key_ref"], HMACAuthenticator({host["material_key_ref"]: material_key},
-                allowed_purposes=frozenset({"native-command-material/v1"})))
+                allowed_purposes=frozenset(material_purposes)))
         evidence = NativeEvidenceAuthority(host["reader_authority_ref"], host["reader_key_ref"],
-            HMACAuthenticator({host["reader_key_ref"]: key}, allowed_purposes=frozenset({
-                "provider-run-observation/v1", "provider-log-page/v1",
-                "native-artifact-verification/v1", "native-process-outcome/v1",
-            })))
+            HMACAuthenticator({host["reader_key_ref"]: key}, allowed_purposes=frozenset(evidence_purposes)))
         catalog = NativeCommandCatalogV1(store, material_authority)
         capture = strict_json(planning.runtime_capture)
         members = {str(Path(tree["root"]) / item["path"]): item["sha256"]
@@ -646,34 +683,51 @@ def operate(config, *, action="start", destination=None, trusted_root_key_sha256
             model=model, tokenizer=tokenizer, tokenizer_members=tuple(config["tokenizer_members"]),
             budget=NativeArtifactBudget(**config["artifact_budget"]),
             material_authority_ref=host["material_authority_ref"], material_key_ref=host["material_key_ref"])
-        grants = (_Grants(selection, catalog, material_authority)
-                  if action == "start" else _ReadOnlyGrants())
+        grants = (_Grants(selection, catalog, material_authority) if starting else _ReadOnlyGrants())
+        if lifecycle and starting:
+            from native_host_lifecycle import LifecycleGrants
+            grants = LifecycleGrants(grants, selection, catalog, material_authority)
         ports = ReferenceHostPortsV1(store, store, clock, grants, secrets)
         authority = compose_reference_authority(
             clock=clock, secrets=secrets,
             authority_secret=SecretRef.from_dict(host["authority_secret"]),
         )
+        session_options = {}
+        session = None
+        if lifecycle:
+            session = native_lifecycle_session(records=store, launch=planning.lifecycle,
+                                               authority=evidence, streams=store)
+            lifetime.callback(session.close)
+            session_options["lifecycle_session"] = session
         family = native_mlx_family(
             planning=planning, catalog=catalog, material_authority=material_authority,
             records=store, evidence_authority=evidence,
             foundation_authenticator=authority.foundation_authenticator,
-            assessment_authenticator=authority.assessment_authority, clock=clock,
+            assessment_authenticator=authority.assessment_authority, clock=clock, **session_options,
         )
         request = TrainingRequest(config["request_id"], config["project_ref"], training.canonical_json())
         requests = _Requests(request, planning.resolved, planning)
         api = compose_reference_host(
             family=family, ports=ports,
             requests=ReferenceRequestPortsV1(requests, requests, requests), authority=authority,
+            **({"allow_current_cancel_authorization": True} if lifecycle else {}),
         ).api()
-        if action == "start":
+        if starting:
             plan = api.training.plan(api.training.resolve(api.training.load(request.canonical_json)), planning.provider)
             preflight = api.training.preflight(plan)
             if not preflight.ready or not preflight.binds(plan):
                 raise ValueError("restricted native public preflight refused")
             started = api.training.start(plan, preflight)
+            if lifecycle:
+                from native_host_lifecycle import qualify
+                return qualify(config, api, started, state, _write_owned)
             return {"run": started.run.to_dict(), "accepted": started.accepted,
                     "stored": api.runs.show(started.run).to_dict()}
         run = planning.run
+        if action in {"recover", "logs"}:
+            from native_host_lifecycle import recover, logs
+            return (recover(config, api, run, state, _write_owned) if action == "recover"
+                    else logs(config, api, run))
         if action == "show":
             return api.runs.show(run).to_dict()
         if action == "observe":
@@ -693,7 +747,7 @@ def main(argv=None):
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("canonicalize", "profile-candidate", "inspect",
-                                          "admission-candidate", "seal-admission", "start",
+                                          "admission-candidate", "seal-admission", "start", "qualify", "recover", "logs",
                                           "show", "observe", "verify", "reverify", "download",
                                           "snapshot-candidate"))
     parser.add_argument("config", type=Path, nargs="?")

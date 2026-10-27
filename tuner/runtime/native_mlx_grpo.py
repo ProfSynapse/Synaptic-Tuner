@@ -141,7 +141,7 @@ def _publish_grpo_documents(destination, *, projection, binding, result, evidenc
 
 
 def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapshot,
-                        runtime_material, dependency_lock, output, _stage=None):
+                        runtime_material, dependency_lock, output, _stage=None, _progress=None):
     """All inputs must already be host admitted; verify bytes before ML imports."""
     # Trusted child-local milestone sink only; never read from workload/config.
     stage = _stage if _stage is not None else lambda _: None
@@ -240,6 +240,9 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
                 raise ValueError("native GRPO evidence byte budget exceeded")
             if (step + 1) % controls.logging_steps == 0 or step + 1 == controls.iterations:
                 metrics.append({"step": step + 1, "loss": float(loss.item()), "gradient_norm": float(norm.item())})
+                if _progress is not None:
+                    _progress("training", step + 1, {"loss": metrics[-1]["loss"],
+                              "gradient_norm": metrics[-1]["gradient_norm"]})
         stage("final_save")
         completed = optimizer.step.item()
         if type(completed) is not int or completed != controls.iterations:
@@ -264,6 +267,8 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
         final_loss = float(loss_fn(reloaded).item())
         if not math.isfinite(final_loss) or destination.read(final_path.name) != final:
             raise ValueError("native GRPO final replay differs")
+        if _progress is not None:
+            _progress("reload", completed, {"loss": final_loss})
         binding = {"schema": "synaptic-native-grpo-input-binding/v1", "source": projection.source.to_dict(),
             "tokenizer_snapshot_digest": tokenizer_snapshot.digest,
             "tokenization": projection.tokenization.to_dict(), "prompt_tokens": encoded,
@@ -279,6 +284,8 @@ def execute_native_grpo(*, projection, dataset, model_snapshot, tokenizer_snapsh
         stage("publication")
         _publish_grpo_documents(destination, projection=projection, binding=binding,
             result=result, evidence=evidence)
+        if _progress is not None:
+            _progress("publication", completed, {})
         stage("final_custody")
         model_snapshot.verify(model_tree)
         tokenizer_snapshot.verify(token_tree)

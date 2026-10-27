@@ -149,6 +149,46 @@ tokenization/model/adapter behavior. Refresh affected closures, package and exac
 source/runtime capture after independent review; any later model attempt still
 requires a fresh separately reviewed admission, never automatic replay.
 
+### Public lifecycle implementation candidate
+
+The source-only `native_lifecycle_protocol.py` component defines bounded numeric
+progress and confirmed-terminal frames, exact invocation/policy HMAC binding,
+complete-prefix verification and rollback checks against a retained snapshot.
+Its derived capability requires a separately allowed host HMAC purpose and must
+stay in trusted supervision, never the ML child or files/argv/environment/logs.
+The opt-in guardian/session join is now CPU-tested with fixed public fixture keys;
+it grants no public execution or qualification. Independently review delivery
+before using actual host authority. The host owns journal path custody and
+durable prefix retention through the effects stream; authenticated prefixes alone
+do not establish freshness or completion. R3 accepted that internal delivery
+component. The new worker/public API join is CPU-tested and awaits independent
+review and actual Mac qualification.
+
+The next functional work is public progress, cancellation and restart
+reconciliation; model-quality tuning is excluded. The internal caller-pumped
+`NativeProcessSession` candidate keeps record operations on the constructing
+thread and only live-owner pipe cancellation crosses threads. Its explicit
+`NativeLifecycleLaunchV1` candidate can authenticate cold terminal readback through
+the existing host effects stream after caller/acknowledgement loss, without
+signalling persisted PIDs or resubmission. Default public capabilities stay
+disabled. Explicit lifecycle grants additionally require ordinary hardware proof
+or an exact restricted-test admission, plus independent lifecycle authentication.
+Use child request v2 with the owned progress descriptor, validate callback budgets
+before ML imports, and keep upstream validation separate from saved-adapter reload.
+Cancellation material binds the original submit; log timestamps mean host-first
+observation. Cold reconciliation uses existing Foundation quiescence/lookup ports,
+never a new submission or positive absence guess. The current host CLI is still
+legacy-only; finish the checked-in qualification mode before actual Mac cycles.
+Keep derived capability bytes in trusted supervision, authenticate the complete
+launch and exact invocation/request/codec before worker dispatch, and pass only
+the numeric progress pipe to the worker. Preserve the default
+synchronous transport and all existing canonical material when the versioned
+lifecycle policy is absent. See `docs/plans/native-mlx-lifecycle.md` for the
+implementation/qualification contract. Use structured numeric callbacks rather
+than parsing console text; retain uncertain claims and never signal saved PIDs
+or resubmit to recover. Independent source review and exact fresh admission
+still precede any new Mac ML qualification.
+
 ### Host metadata commands
 
 Consumer integration uses the optional public
@@ -583,3 +623,32 @@ full-sequence, prompt-masked and noncontiguous labels. Run with the separate tes
 tools and a bounded process; it loads MLX but no model or training publication.
 Its three cases skip on non-Apple hosts. A skip or CPU algebra double is not
 real MLX numerical evidence and does not issue training authority.
+
+### Public lifecycle qualification candidate — 2026-10-27
+
+Use the existing `native_host.py` with exact v2 config and separately root-signed
+selection for `qualify`; see `native-host.md` for the full contract. The selected
+scenario is `complete`, `cancel`, or `caller-loss`; it is not chosen by a later
+unbound CLI flag. Numeric progress budgets use the child's pure compiled-control
+check before effects. The host owns/pumps the session and all SQLite/API calls
+on its thread. `start` rejects v2 to prevent immediate ownership loss.
+For caller loss, a private verified trigger precedes actual host exit86 without
+Python cleanup. Then `recover` in another process reads/reconciles the original
+attempt within finite bounds and original authority, including after expiry.
+Never repeat `qualify`, signal saved PIDs, adopt a live child or restart training.
+Only the signed cancel scenario can bind public cancellation; request and
+confirmed terminal are separate. Preserve completion races, uncertain claims
+and create-only reports. `logs` provides later bounded public readback.
+Source/CPU acceptance does not qualify Darwin/MLX or enable default capabilities;
+fresh final capture/admission, real lifecycle evidence and independent review
+remain required. Full desktop distribution and model-quality work are excluded.
+
+Actual Darwin CPython startup can initialize `__CF_USER_TEXT_ENCODING` even with
+`-I -S -B` and an explicit clean environment. The CPU fixture's `/bin/sh` shim
+also initializes numeric `SHLVL`; production uses the captured Mach-O directly.
+Do not confuse these observed initialized names with inherited credentials or
+broaden the production environment declaration. Tests admit them only on Darwin,
+check their bounded numeric/user identity and still reject parent sentinels.
+For a high-descriptor CPU test, an explicitly reviewed test child may raise its
+soft descriptor limit while preserving the hard limit and parent process limits;
+never lower pytest's hard resource limits to accommodate guardian tests.

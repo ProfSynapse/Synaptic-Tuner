@@ -39,6 +39,36 @@ This repository has a few cloud-training constraints that are easy to relearn th
 
 ## Native MLX candidate
 
+- Public lifecycle qualification uses the existing `native_host.py` v2 signed
+  configuration and `qualify`/cold `recover` workflow. Bind the completion,
+  cancellation or abrupt caller-exit scenario before effects; preserve the
+  original attempt on uncertainty. Host exit86 is only a deliberate caller-loss
+  trigger, not termination/recovery proof. Keep all API/SQLite calls on their
+  owner thread, reports create-only and ordinary capabilities gated until actual
+  Darwin/MLX evidence is independently accepted. Never replay `qualify`, adopt a
+  live child or signal a stored PID during cold recovery.
+
+- Native asynchronous lifecycle work is opt-in and separately qualified. Keep
+  caller-pumped record operations on the host store's owning thread, preserve
+  absent-policy legacy bytes, and retain only live-owner pipe stop authority.
+  Structured progress and authenticated cold terminal evidence are required
+  before enabling public logs/cancel/reconcile; an internal session method does
+  not qualify those capabilities. See `docs/plans/native-mlx-lifecycle.md`.
+  Independently review lifecycle framing and one-attempt capability derivation
+  before anonymous-channel delivery to trusted supervision. The ML child must
+  never receive that capability; keep it out of files, argv, environment and logs.
+  Authenticate the full lifecycle launch and exact invocation/request/codec before
+  worker dispatch. Retain recovery frames in the host effects stream, not the
+  truncatable observation partition. CPU fixture-key delivery is not Mac/public
+  qualification; review actual capability delivery before using host authority.
+  Lifecycle child v2 must pair its exact policy with the owned progress FD and
+  reject insufficient callback budgets before ML imports. Preserve v1 absent
+  behavior. Public lifecycle grants need independent authentication in addition
+  to hardware/restricted admission; no matching metadata can enable them alone.
+  Cancellation references the original authenticated submit, distinguishes a stop
+  request from confirmed termination, and must not revalidate mutable source to
+  acquire a retained live-owner stop pipe. Never replay an effect to reconcile it.
+
 - Retained native evaluation scoring admits only messages, configured correctness
   assertions and optional provenance metadata. Validate every case before shared
   evaluator dispatch; retrieval/audio/model/media/environment/judge modes and

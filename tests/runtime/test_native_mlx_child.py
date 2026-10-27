@@ -1,5 +1,6 @@
 from dataclasses import replace
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -126,7 +127,8 @@ def test_import_finder_rejects_ambient_sibling_and_compiles_only_pinned_source(p
         spec.loader.exec_module(module)
 
 
-def test_worker_recompiles_and_joins_workload_before_invoking_runtime(private_root, monkeypatch):
+@pytest.mark.parametrize("lifecycle", [False, True])
+def test_worker_recompiles_and_joins_workload_before_invoking_runtime(private_root, monkeypatch, lifecycle):
     from tuner.runtime import native_mlx_input, native_mlx_composition
     projection = compile_native_sft(*inputs())
     output = private_root / "output"
@@ -161,6 +163,12 @@ def test_worker_recompiles_and_joins_workload_before_invoking_runtime(private_ro
     def execute(**kwargs):
         assert kwargs["bound"] == "prepared-fixture"
         assert kwargs["lora"] == projection.lora and kwargs["optimizer"] == projection.optimizer
+        if lifecycle:
+            kwargs["_progress"]("training", projection.controls.iterations, {"loss": 2.5})
+            kwargs["_progress"]("reload", projection.controls.iterations, {"loss": 1.25})
+            kwargs["_progress"]("publication", projection.controls.iterations, {})
+        else:
+            assert "_progress" not in kwargs
         return b"verified-fixture-result"
 
     monkeypatch.setattr(native_mlx_input, "prepare_native_input", prepare)
@@ -168,7 +176,25 @@ def test_worker_recompiles_and_joins_workload_before_invoking_runtime(private_ro
     from tuner.runtime import native_mlx_publication, native_mlx_child
     monkeypatch.setattr(native_mlx_publication, "tokenizer_publication_bytes", lambda *a, **k: b"fixture")
     monkeypatch.setattr(native_mlx_child, "_load_published_tokenizer", lambda *a, **k: None)
-    assert run_request(request, request_root=private_root) == b"verified-fixture-result"
+    progress = None
+    read = None
+    try:
+        if lifecycle:
+            from tuner.runtime.native_lifecycle_journal import NativeLifecycleLaunchV1
+            from tuner.runtime.native_lifecycle_protocol import NativeLifecyclePolicyV1
+            from tuner.runtime.native_worker_progress import NativeWorkerProgress
+            launch = NativeLifecycleLaunchV1(NativeLifecyclePolicyV1(32, 65536), "a" * 64)
+            read, write = os.pipe()
+            progress = NativeWorkerProgress(write, launch)
+            request.update(schema="synaptic-native-child-request/v2", lifecycle=launch.to_dict())
+        callbacks = {} if progress is None else {"_progress": progress}
+        assert run_request(request, request_root=private_root, **callbacks) == b"verified-fixture-result"
+        if lifecycle:
+            events = [json.loads(raw) for raw in os.read(read, 4096).splitlines()]
+            assert [event["phase"] for event in events] == ["preparation", "training", "reload", "publication"]
+    finally:
+        if progress is not None: progress.close()
+        if read is not None: os.close(read)
     assert observed["workload_digest"] == projection.workload.fingerprint
     assert observed["runtime_digest"] == projection.profile.runtime_digest
     assert (output / "workload.json").read_bytes() == projection.workload.canonical_bytes
