@@ -116,6 +116,7 @@ def execute_native_sft(
     *, bound: BoundNativeInput, model_snapshot: NativeModelSnapshot,
     lora: NativeLoRA, optimizer: NativeAdamW, output: Path,
     runtime_material: bytes, runtime_digest: str, dependency_lock: bytes,
+    _progress=None,
 ) -> bytes:
     """Produce final saved-adapter evidence only after exact offline readback.
 
@@ -157,9 +158,14 @@ def execute_native_sft(
         initial = destination.read(initial_path.name)
         adapter_tensors(initial)
         adam = optimizers.AdamW(**optimizer.arguments())
+        callbacks = {}
+        if _progress is not None:
+            from tuner.runtime.native_worker_progress import NativeSFTProgressCallback
+            callbacks["training_callback"] = NativeSFTProgressCallback(_progress)
         run_prepared_mlx_sft(
             bound.prepared, model=model, optimizer=adam, adapter_file=str(final_path),
             runtime=expectation, dependency_lock=dependency_lock,
+            **callbacks,
         )
         mx.eval(adam.state)
         completed_updates = adam.step.item()
@@ -200,6 +206,8 @@ def execute_native_sft(
         )
         if type(final_loss) not in (int, float) or not math.isfinite(final_loss) or final_loss < 0:
             raise ValueError("native saved final adapter validation is nonfinite")
+        if _progress is not None:
+            _progress("reload", completed_updates, {"loss": final_loss})
         if destination.read(final_path.name) != final:
             raise ValueError("native final adapter changed during evaluation")
         model_snapshot.verify(source)
@@ -231,4 +239,6 @@ def execute_native_sft(
             },
         })
         destination.write_exclusive("native_result.json", result)
+        if _progress is not None:
+            _progress("publication", completed_updates, {})
         return result

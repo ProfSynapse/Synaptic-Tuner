@@ -30,6 +30,18 @@ class NativeLifecycleLaunchV1:
         return {"schema": "synaptic-native-lifecycle-launch/v1", "policy": self.policy.to_dict(),
                 "protocol_sha256": self.protocol_sha256}
 
+    @classmethod
+    def from_dict(cls, value):
+        if (type(value) is not dict or set(value) != {"schema", "policy", "protocol_sha256"}
+                or value["schema"] != "synaptic-native-lifecycle-launch/v1"):
+            raise ValueError("native lifecycle launch fields differ")
+        policy = value["policy"]
+        if (type(policy) is not dict or set(policy) != {"schema", "maximum_progress_records", "maximum_journal_bytes"}
+                or policy["schema"] != "synaptic-native-lifecycle-policy/v1"):
+            raise ValueError("native lifecycle policy fields differ")
+        return cls(NativeLifecyclePolicyV1(policy["maximum_progress_records"], policy["maximum_journal_bytes"]),
+                   value["protocol_sha256"])
+
     def validate_source(self, invocation, request):
         document = strict_json(request)
         if (type(document) is not dict or canonical(document.get("lifecycle")) != canonical(self.to_dict())

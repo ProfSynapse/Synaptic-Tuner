@@ -2,11 +2,12 @@
 
 The owner requested public progress, cancellation and recovery after successful
 native training. Model-quality tuning is outside this work. These operations
-need implementation and qualification: the current family submits synchronously
-and explicitly refuses public logs, cancellation and reconciliation.
+needed implementation and qualification: the original family submitted
+synchronously and refused public logs, cancellation and reconciliation. The
+opt-in implementation below is now CPU-tested; actual Mac qualification remains.
 
-This branch is an implementation candidate. Its internal transport/journal join
-does not enable public capabilities or qualify a new Mac operation.
+This branch is an implementation candidate. No default capability promotion or
+new Mac qualification follows from its source/CPU results.
 
 ## Preserve the current boundary
 
@@ -117,38 +118,85 @@ missing/partial/unconfirmed evidence stays uncertain, with no adoption or replay
 CPU fixtures cover progress before completion, actual owner-process death,
 cancellation, stdout/record/stream acknowledgement loss, cold reads, descriptor
 exclusion, custody changes, concurrent-reader prefix rollback and launch tampering.
-No Darwin/MLX or public capability proof is claimed. The current production ML
-child still needs its versioned request/progress-argument and SFT/GRPO callback
-joins; do not use this opt-in with it yet. Actual host authority delivery still
-requires independent source review and later exact capture/admission review.
+No Darwin/MLX capability proof is claimed. R3 independently accepted the internal
+guardian/journal source before the worker/public joins below. The complete new
+join still requires independent source review and later exact capture/admission.
 Hosts must own session lifetime explicitly: returning from a CLI and immediately
 exiting intentionally loses ownership. Forked hosts must not leak the owner pipe
 to descendants; that host behavior is not qualified by these CPU fixtures.
 
-## Remaining joins
+## Worker and public API candidate
 
-1. **Versioned lifecycle selection.** Bind the opt-in policy and its finite
-   limits in planning/material authority. Preserve absent-policy legacy bytes.
-   Public capability flags stay off until independently authenticated exact
-   lifecycle proof exists; an internal method or matching digest is insufficient.
-2. **Structured progress.** Use trusted worker callbacks with fixed phase/numeric
-   fields, per-run binding, monotonic sequences and finite record/aggregate
-   bounds. Accept only complete records; preserve committed prefixes across
-   partial tail writes. Publish authenticated pages through existing host streams
-   and cursors. No prompt, generated text, paths, argv, environment or exception
-   strings belong in diagnostic progress.
-3. **Public asynchronous submission and cancel.** Return an authenticated known
-   run after owned dispatch, before training finishes. Reads and cancellation
-   resolve original submit/material bindings. A stop receipt records a request;
-   only trusted terminal evidence establishes cancellation. Test completion
-   races and do not require mutable source files to mint new stop authority.
-4. **Public authenticated restart reconciliation.** The legacy parent-only
-   terminal write is insufficient when the owner dies. Independently review the
-   opt-in guardian journal above, then bind its exact authenticated outcome into
-   public reconciliation. The derived signing capability remains in trusted host
-   supervision, never the ML child, argv, environment, logs or files. The original
-   long-lived key is not copied. Interrupted or absent evidence remains uncertain,
-   never absence proof or permission to replay.
+The explicit child request `synaptic-native-child-request/v2` adds exactly one
+`lifecycle` selection. It must be paired with the guardian-owned `--progress-fd`;
+legacy v1 accepts neither. The child imports only admitted captured source, then
+binds the compiled workload and rejects insufficient progress budgets before ML
+imports. Its write-only pipe contains no key and uses finite nonblocking delivery.
+`NativeWorkerProgress` enforces numeric fields, monotonic update bounds and record
+limits. Pinned SFT callbacks report training/in-loop validation; GRPO reports from
+its actual update loop. Separate reload/publication events follow final saved
+adapter checks. Existing artifacts and absent-callback call shapes stay unchanged.
+
+`NativePlanningV1(lifecycle=...)` commits the exact captured codec/policy into its
+profile digest and uses version2 execution descriptors. It requires a separate
+`NativeLifecycleGrantV1` and independent authentication port. Qualified grants
+also require the ordinary hardware qualification and distinct lifecycle evidence;
+restricted grants claim no successful evidence and bind the original restricted
+selection, run, attempt and hardware. Matching hashes or constructing a grant
+object are not permission. Unsupported/missing authority closes preflight and
+capabilities; it never selects a synchronous fallback. Omitted-policy bytes and
+default behavior remain unchanged.
+
+The consumer owns `native_lifecycle_session` as a long-lived context and supplies
+that exact session/authority/record port to `native_mlx_family`. Public start
+returns a known run after owned dispatch. `runs.outcome` pumps observation and
+`runs.logs` delivers authenticated bounded pages/cursors from verified frames.
+Log timestamps are authenticated host-first-observed times, not GPU event times;
+private numeric messages retain exact event digests and stable timestamps across
+reads. The host keeps all API/store calls on their owning thread.
+
+The host binds cancellation with `NativeCancellationMaterialV1`, referencing the
+original authenticated submit and invocation. `catalog.resolve_submission` uses
+a create-only index and rechecks that original material; no source file is needed
+to mint an already-owned stop. Cancellation records request acknowledgement
+separately from terminal confirmation. It uses only the live pipe, or recognizes
+an already terminal target. A zero exit racing cancellation/owner loss requires
+the complete bound publication before resolving success. Current cancellation
+authorization after preflight expiry uses the existing host's explicit
+`allow_current_cancel_authorization=True` policy; it does not renew start authority.
+
+Cold reconciliation reuses the existing Foundation adapter and quiescence ports.
+Only authenticated terminal evidence or a signed read-only stage acknowledgement
+can close a lost dispatch. Proofs bind the exact Foundation record/request, epoch
+and witness; absence/finality proofs always refuse. Orphaned submissions/cancels
+are looked up, never re-executed. Missing acknowledgements/terminal data remain
+uncertain. The existing coordinator may advance a recovered stage into the
+distinct, separately admitted submit effect; a retained-read-only plan cannot
+dispatch it. Base host grants remain responsible for every new effect.
+
+Material-key policy must explicitly allow `native-cancellation-material/v1` in
+addition to its original purpose. Reader-key policy must explicitly allow the
+new capability, cancellation acknowledgement, stage acknowledgement, progress
+metadata and quiescence purposes. No default host policy acquires these rights.
+The existing restricted host CLI still provides the legacy synchronous workflow;
+a reusable config-first lifecycle qualification mode must be completed before
+actual Mac cycles. Do not use a throwaway launch script or fabricate admissions.
+
+## Remaining qualification and integration
+
+1. **Source/host workflow review.** Independently review the complete worker and
+   public join, complete the reusable host qualification mode, and bind its final
+   source/configuration/operations into fresh reviewed root admission.
+2. **Actual progress delivery.** Qualify real SFT/GRPO callback delivery before
+   terminal publication, matching update counts and declared finite budgets. CPU
+   doubles do not establish actual MLX callback behavior or hardware support.
+3. **Actual cancellation.** Demonstrate the public request and confirmed bounded
+   process cleanup during actual MLX work, plus completion races. Keep request,
+   confirmed cancellation, successful completion and artifact verification distinct.
+4. **Actual cold recovery.** Demonstrate caller/acknowledgement loss and fresh
+   host reconciliation through the public facade on Darwin, retaining all consumed
+   claims and original authority after start expiry. No persisted-PID signalling,
+   adoption or uncertain replay; no optimizer/checkpoint-resume claim.
 5. **Qualification.** Exercise normal completion, live progress before terminal
    publication, cancellation, caller loss, interrupted acknowledgement and cold
    reconciliation through the public facade. Start with CPU fixtures, then real

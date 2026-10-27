@@ -160,8 +160,9 @@ The opt-in guardian/session join is now CPU-tested with fixed public fixture key
 it grants no public execution or qualification. Independently review delivery
 before using actual host authority. The host owns journal path custody and
 durable prefix retention through the effects stream; authenticated prefixes alone
-do not establish freshness or completion. The ML worker request/callback joins
-and public planning/logs/cancel/reconcile remain pending.
+do not establish freshness or completion. R3 accepted that internal delivery
+component. The new worker/public API join is CPU-tested and awaits independent
+review and actual Mac qualification.
 
 The next functional work is public progress, cancellation and restart
 reconciliation; model-quality tuning is excluded. The internal caller-pumped
@@ -169,7 +170,15 @@ reconciliation; model-quality tuning is excluded. The internal caller-pumped
 thread and only live-owner pipe cancellation crosses threads. Its explicit
 `NativeLifecycleLaunchV1` candidate can authenticate cold terminal readback through
 the existing host effects stream after caller/acknowledgement loss, without
-signalling persisted PIDs or resubmission. Public capabilities stay disabled.
+signalling persisted PIDs or resubmission. Default public capabilities stay
+disabled. Explicit lifecycle grants additionally require ordinary hardware proof
+or an exact restricted-test admission, plus independent lifecycle authentication.
+Use child request v2 with the owned progress descriptor, validate callback budgets
+before ML imports, and keep upstream validation separate from saved-adapter reload.
+Cancellation material binds the original submit; log timestamps mean host-first
+observation. Cold reconciliation uses existing Foundation quiescence/lookup ports,
+never a new submission or positive absence guess. The current host CLI is still
+legacy-only; finish the checked-in qualification mode before actual Mac cycles.
 Keep derived capability bytes in trusted supervision, authenticate the complete
 launch and exact invocation/request/codec before worker dispatch, and pass only
 the numeric progress pipe to the worker. Preserve the default

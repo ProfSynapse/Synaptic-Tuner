@@ -251,7 +251,8 @@ def test_unconfigured_trainable_base_weight_is_rejected():
 
 
 @pytest.mark.parametrize("reload_mode", ["complete", "noop", "partial"])
-def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(monkeypatch, reload_mode):
+@pytest.mark.parametrize("with_progress", [False, True])
+def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(monkeypatch, reload_mode, with_progress):
     from tuner.runtime import native_mlx_composition as composition
     from tuner.runtime.native_files import NativeTree
 
@@ -266,6 +267,7 @@ def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(mo
             with NativeTree(snapshot_root) as tree:
                 snapshot = NativeModelSnapshot("configured/model", "a" * 40, str(snapshot_root), tree.inventory())
             events = []
+            progress_events = []
             names = ("layers.0.q_proj.lora_a", "layers.0.q_proj.lora_b")
             shapes = tuple((name, (1, 1)) for name in names)
             def adapter_bytes(value):
@@ -333,6 +335,13 @@ def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(mo
             monkeypatch.setattr(composition, "make_mlx_sft_hooks", lambda *a, **k: (object(), object()))
 
             def train(*args, **kwargs):
+                if with_progress:
+                    callback = kwargs["training_callback"]
+                    callback.on_val_loss_report({"iteration": 0, "val_loss": 3.0})
+                    callback.on_train_loss_report({"iteration": 3, "train_loss": 2.0,
+                                                   "learning_rate": .001, "trained_tokens": 17})
+                else:
+                    assert "training_callback" not in kwargs
                 events.append(("upstream-stale-validation",))
                 Path(kwargs["adapter_file"]).write_bytes(adapter_bytes(.5))
                 events.append(("final-update-and-save",))
@@ -348,6 +357,7 @@ def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(mo
                     lora=NativeLoRA(1, 1, 1, 0, ("q_proj",)),
                     optimizer=NativeAdamW(.001, .9, .999, 1e-8, 0, True, "constant"),
                     output=output, runtime_material=runtime, runtime_digest="f" * 64, dependency_lock=b"lock",
+                    **({"_progress": lambda *args: progress_events.append(args)} if with_progress else {}),
                 ))
             if reload_mode in {"noop", "partial"}:
                 with pytest.raises(ValueError, match="reloaded adapter tensor differs"):
@@ -361,5 +371,7 @@ def test_composition_evaluates_reloaded_saved_final_adapter_after_last_update(mo
             assert result["parameter_delta"]["delta_l2"] == pytest.approx(2 ** -.5)
             assert result["final_validation"]["loss"] == 1.25
             assert result["final_validation"]["phase"] == "reloaded_saved_final_adapter"
+            assert [value[0] for value in progress_events] == (["validation", "training", "reload", "publication"] if with_progress else [])
+            if with_progress: assert progress_events[-2] == ("reload", 3, {"loss": 1.25})
     finally:
         os.umask(old_umask)

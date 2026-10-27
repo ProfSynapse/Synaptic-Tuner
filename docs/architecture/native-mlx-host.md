@@ -13,6 +13,16 @@ UX belong to the consuming application. The current worker requires captured
 immutable executable source assets as well as the installed Python library;
 installing a wheel alone does not prepare a model or authenticate that source.
 
+The [lifecycle source candidate](../plans/native-mlx-lifecycle.md) adds an explicit
+`NativeLifecyclePolicyV1`/`NativeLifecycleLaunchV1`, independently authenticated
+`NativeLifecycleGrantV1` and host-owned `native_lifecycle_session`. Its versioned
+worker and public progress/cancel/reconcile paths are CPU-tested, including
+unknown acknowledgements and cold quiescence, but real Darwin/MLX qualification
+remains pending. Ordinary/default capability claims below remain unchanged.
+Keep all API/store work on the session's owning thread and keep its context alive
+for the run. The current restricted CLI remains the legacy synchronous example;
+complete its checked-in lifecycle qualification mode before real Mac cycles.
+
 ## Inputs and composition
 
 Use these public imports for the native provider boundary:

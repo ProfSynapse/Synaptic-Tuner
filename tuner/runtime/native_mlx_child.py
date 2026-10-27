@@ -218,7 +218,7 @@ _EVALUATION_PHASE_EXITS = {
 }
 
 
-def run_request(request, *, request_root, _stage=None):
+def run_request(request, *, request_root, _stage=None, _progress=None):
     """After isolated import admission; all workload controls are recompiled."""
     stage = _stage if _stage is not None else lambda _: None
     stage("request_compilation")
@@ -231,9 +231,25 @@ def run_request(request, *, request_root, _stage=None):
 
     fields = {"schema", "workload", "runtime_capture", "dependency_lock", "dataset",
               "model_snapshot", "tokenizer_snapshot", "tokenizer_members", "artifact_budget", "output"}
-    if type(request) is not dict or set(request) != fields or request["schema"] != "synaptic-native-child-request/v1":
+    lifecycle = type(request) is dict and request.get("schema") == "synaptic-native-child-request/v2"
+    if lifecycle:
+        fields.add("lifecycle")
+    if (type(request) is not dict or set(request) != fields
+            or request["schema"] != ("synaptic-native-child-request/v2" if lifecycle else "synaptic-native-child-request/v1")
+            or lifecycle != (_progress is not None)):
         raise ValueError("native child request fields differ")
     projection = parse_native_workload(_canonical(request["workload"]))
+    progress = {}
+    if lifecycle:
+        from tuner.runtime.native_lifecycle_journal import NativeLifecycleLaunchV1
+        from tuner.runtime.native_worker_progress import NativeWorkerProgress
+        if (type(_progress) is not NativeWorkerProgress
+                or _canonical(_progress._launch.to_dict()) != _canonical(request["lifecycle"])):
+            raise ValueError("native child progress selection differs")
+        NativeLifecycleLaunchV1.from_dict(request["lifecycle"])
+        _progress.bind(projection)
+        _progress.emit("preparation", 0, {})
+        progress["_progress"] = _progress.emit
     profile = projection.profile
     model, tokenizer = _snapshot(request["model_snapshot"]), _snapshot(request["tokenizer_snapshot"])
     members = tuple(request["tokenizer_members"])
@@ -266,7 +282,7 @@ def run_request(request, *, request_root, _stage=None):
                 expected_members=members, use_fast=projection.tokenization.use_fast)
             result = execute_native_grpo(projection=projection, dataset=dataset,
                 model_snapshot=model, tokenizer_snapshot=tokenizer, runtime_material=runtime,
-                dependency_lock=lock, output=Path(request["output"]), _stage=_stage)
+                dependency_lock=lock, output=Path(request["output"]), _stage=_stage, **progress)
             stage("final_custody")
             tree.check()
             return result
@@ -295,6 +311,7 @@ def run_request(request, *, request_root, _stage=None):
             bound=bound, model_snapshot=model, lora=projection.lora, optimizer=projection.optimizer,
             output=Path(request["output"]), runtime_material=runtime,
             runtime_digest=profile.runtime_digest, dependency_lock=lock,
+            **progress,
         )
         with NativeTree(Path(request["output"]), private=True) as output:
             output.write_exclusive("workload.json", projection.workload.canonical_bytes)
@@ -305,13 +322,17 @@ def run_request(request, *, request_root, _stage=None):
 def main():
     # Diagnostics disclose phases only, never exception/source/provider contents.
     phase = 120
+    progress = None
     try:
         if not sys.flags.isolated or not sys.flags.no_site or not sys.dont_write_bytecode:
             raise ValueError("native child must run with -I -S -B")
-        if len(sys.argv) != 3 or sys.argv[1] != "--request":
+        if (len(sys.argv) not in (3, 5) or sys.argv[1] != "--request"
+                or len(sys.argv) == 5 and sys.argv[3] != "--progress-fd"):
             raise ValueError("native child arguments differ")
         path = Path(sys.argv[2])
         request = _json(_read(path, 2 * 1024 * 1024))
+        if (request.get("schema") == "synaptic-native-child-request/v2") != (len(sys.argv) == 5):
+            raise ValueError("native child lifecycle argument differs")
         runtime_path = Path(request["runtime_capture"])
         if runtime_path.parent != path.parent:
             raise ValueError("native capture is outside the request root")
@@ -322,6 +343,14 @@ def main():
         phase = 121
         install_capture_imports(capture)
         phase = 122
+        if len(sys.argv) == 5:
+            from tuner.runtime.native_lifecycle_journal import NativeLifecycleLaunchV1
+            from tuner.runtime.native_worker_progress import NativeWorkerProgress
+            fd = int(sys.argv[4])
+            if str(fd) != sys.argv[4]:
+                raise ValueError("native progress descriptor is noncanonical")
+            progress = NativeWorkerProgress(fd, NativeLifecycleLaunchV1.from_dict(request["lifecycle"]))
+        callbacks = {} if progress is None else {"_progress": progress}
         if request.get("schema") == "synaptic-native-evaluation-child-request/v1":
             from tuner.runtime.native_mlx_evaluation import execute_request
 
@@ -335,12 +364,15 @@ def main():
                 nonlocal phase
                 phase = _GRPO_PHASE_EXITS[stage]
             phase = _GRPO_PHASE_EXITS["request_compilation"]
-            run_request(request, request_root=path.parent, _stage=mark)
+            run_request(request, request_root=path.parent, _stage=mark, **callbacks)
         else:
-            run_request(request, request_root=path.parent)
+            run_request(request, request_root=path.parent, **callbacks)
         return 0
     except BaseException:
         return phase
+    finally:
+        if progress is not None:
+            progress.close()
 
 
 if __name__ == "__main__":

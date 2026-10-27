@@ -52,6 +52,13 @@ This repository has a few cloud-training constraints that are easy to relearn th
   worker dispatch. Retain recovery frames in the host effects stream, not the
   truncatable observation partition. CPU fixture-key delivery is not Mac/public
   qualification; review actual capability delivery before using host authority.
+  Lifecycle child v2 must pair its exact policy with the owned progress FD and
+  reject insufficient callback budgets before ML imports. Preserve v1 absent
+  behavior. Public lifecycle grants need independent authentication in addition
+  to hardware/restricted admission; no matching metadata can enable them alone.
+  Cancellation references the original authenticated submit, distinguishes a stop
+  request from confirmed termination, and must not revalidate mutable source to
+  acquire a retained live-owner stop pipe. Never replay an effect to reconcile it.
 
 - Retained native evaluation scoring admits only messages, configured correctness
   assertions and optional provenance metadata. Validate every case before shared

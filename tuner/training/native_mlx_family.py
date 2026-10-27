@@ -1,9 +1,9 @@
 """Native MLX family for the existing TrainingAPI/RunsAPI coordinator.
 
 Host-owned authenticated catalogs bind exact commands to already prepared private
-inputs and invocations. A bounded synchronous submit is intentional: no background
-thread touches a host's thread-affine record store. Unknown effects never replay.
-Logs/cancel/reconcile are unavailable public capabilities in this version.
+inputs and invocations. Default submit is bounded and synchronous. An explicitly
+owned, separately authorized lifecycle session returns before training finishes;
+all store work stays on its owning thread. Unknown effects never replay.
 """
 
 from dataclasses import asdict, dataclass
@@ -11,18 +11,19 @@ import hashlib
 from pathlib import Path
 
 from synaptic_tuner.api.v1.reference.provider_family import ProviderFamilyV1, require_methods
+from synaptic_tuner.api.v1.runs_facade import RunLogEntry, RunLogLevel
 from tuner.execution.coordinator_v1.model import (
     ArtifactManifestV1, ArtifactVerificationContentV1, AuthenticatedArtifactVerificationReceiptV1,
     EffectIntentV1,
     ProviderReadPurposeV1, ProviderRunObservationContentV1, ProviderRunPhaseV1,
-    ProviderRunReadRequestV1, VerificationVerdictV1,
+    ProviderRunReadRequestV1, VerificationVerdictV1, ProviderLogQueryV1, ProviderLogPageContentV1,
 )
 from tuner.execution.coordinator_v1.state_machine import _derive_foundation
 from tuner.execution.foundation_v2.canonical import canonical_bytes, digest_text, safe_ref
 from tuner.execution.foundation_v2.commands import parse_exact_command
 from tuner.execution.foundation_v2.executors import mint_resolved_executor
 from tuner.execution.foundation_v2.observations import ObservationDisposition, ProviderObservationV1
-from tuner.execution.foundation_v2.references import ProviderStageRefV1, ScopedProviderRunRefV1
+from tuner.execution.foundation_v2.references import ProviderStageRefV1, ScopedProviderRunRefV1, CancellationRefV1, ProviderRunRefV1
 from tuner.runtime.native_files import NativeFile, NativeTree
 from tuner.runtime.native_mlx_input import NativeModelSnapshot
 from tuner.runtime.native_mlx_material import canonical, strict_json, verify_native_material
@@ -79,6 +80,10 @@ class NativeCommandMaterialV1:
         })
 
     @property
+    def command_digest(self):
+        return self.invocation.binding_digest
+
+    @property
     def canonical_bytes(self):
         return canonical({
             "content": strict_json(self.content_bytes()), "authority_ref": self.authority_ref,
@@ -115,6 +120,54 @@ class NativeCommandMaterialV1:
         return result
 
 
+@dataclass(frozen=True)
+class NativeCancellationMaterialV1:
+    command_bytes: bytes
+    submit_digest: str
+    invocation_digest: str
+    authority_ref: str
+    key_ref: str
+    tag: str
+
+    def __post_init__(self):
+        if (type(self.command_bytes) is not bytes
+                or parse_exact_command(self.command_bytes).operation.effect.kind.value != "cancel"):
+            raise ValueError("native cancellation command is invalid")
+        for name in ("submit_digest", "invocation_digest", "tag"):
+            digest_text(getattr(self, name), name)
+        for name in ("authority_ref", "key_ref"):
+            safe_ref(getattr(self, name), name)
+
+    @property
+    def command_digest(self):
+        return parse_exact_command(self.command_bytes).digest
+
+    def content_bytes(self):
+        return canonical({"schema": "synaptic-native-cancellation-material/v1",
+                          "command": strict_json(self.command_bytes), "submit_digest": self.submit_digest,
+                          "invocation_digest": self.invocation_digest})
+
+    @property
+    def canonical_bytes(self):
+        return canonical({"content": strict_json(self.content_bytes()), "authority_ref": self.authority_ref,
+                          "key_ref": self.key_ref, "tag": self.tag})
+
+    @classmethod
+    def parse(cls, raw):
+        value = strict_json(raw, maximum=4 << 20)
+        if type(value) is not dict or set(value) != {"content", "authority_ref", "key_ref", "tag"}:
+            raise ValueError("native cancellation envelope differs")
+        content = value["content"]
+        if (type(content) is not dict or set(content) != {"schema", "command", "submit_digest", "invocation_digest"}
+                or content["schema"] != "synaptic-native-cancellation-material/v1"):
+            raise ValueError("native cancellation fields differ")
+        result = cls(canonical(content["command"]), content["submit_digest"], content["invocation_digest"],
+                     value["authority_ref"], value["key_ref"], value["tag"])
+        if result.canonical_bytes != raw:
+            raise ValueError("native cancellation bytes differ")
+        return result
+
+
 class NativeCommandCatalogV1:
     """Create-only authenticated command catalog over the consumer record port."""
 
@@ -128,22 +181,55 @@ class NativeCommandCatalogV1:
         stored = self.records.read(partition="effects", key="native-material/" + command_digest)
         if stored is None:
             raise ValueError("native command material is absent")
-        material = NativeCommandMaterialV1.parse(stored.canonical)
-        if (material.invocation.binding_digest != command_digest
+        document = strict_json(stored.canonical, maximum=4 << 20)
+        parser = (NativeCancellationMaterialV1 if type(document) is dict
+                  and type(document.get("content")) is dict
+                  and document["content"].get("schema") == "synaptic-native-cancellation-material/v1"
+                  else NativeCommandMaterialV1)
+        material = parser.parse(stored.canonical)
+        if (material.command_digest != command_digest
                 or self.authority.authenticate(material) is not True):
             raise ValueError("native retained command material is unauthenticated")
         return material
 
     def publish_once(self, material):
-        if type(material) is not NativeCommandMaterialV1 or self.authority.authenticate(material) is not True:
+        if type(material) not in (NativeCommandMaterialV1, NativeCancellationMaterialV1) or self.authority.authenticate(material) is not True:
             raise ValueError("native command material is unauthenticated")
         raw = material.canonical_bytes
-        self.records.create(partition="effects", key="native-material/" + material.invocation.binding_digest,
+        self.records.create(partition="effects", key="native-material/" + material.command_digest,
                             canonical=raw)
-        retained = self.resolve(material.invocation.binding_digest)
+        retained = self.resolve(material.command_digest)
         if retained.canonical_bytes != raw:
             raise ValueError("native command material collision")
         return retained
+
+    def bind_submission_once(self, material):
+        if (type(material) is not NativeCommandMaterialV1 or self.authority.authenticate(material) is not True
+                or parse_exact_command(material.command_bytes).operation.effect.kind.value != "submit"):
+            raise ValueError("native submission index requires authenticated submit")
+        raw = canonical({"schema": "synaptic-native-submission-index/v1",
+                         "command_digest": material.command_digest, "invocation_digest": material.invocation.digest})
+        key = "native-submission/" + material.invocation.digest
+        self.records.create(partition="effects", key=key, canonical=raw)
+        stored = self.records.read(partition="effects", key=key)
+        if stored is None or stored.canonical != raw:
+            raise ValueError("native submission index readback differs")
+
+    def resolve_submission(self, invocation_digest):
+        digest_text(invocation_digest, "invocation_digest")
+        stored = self.records.read(partition="effects", key="native-submission/" + invocation_digest)
+        if stored is None:
+            raise ValueError("native submission index is absent")
+        content = strict_json(stored.canonical, maximum=1024)
+        if (type(content) is not dict or set(content) != {"schema", "command_digest", "invocation_digest"}
+                or content["schema"] != "synaptic-native-submission-index/v1"
+                or content["invocation_digest"] != invocation_digest):
+            raise ValueError("native submission index differs")
+        material = self.resolve(content["command_digest"])
+        if (type(material) is not NativeCommandMaterialV1 or material.invocation.digest != invocation_digest
+                or parse_exact_command(material.command_bytes).operation.effect.kind.value != "submit"):
+            raise ValueError("native submission index authentication differs")
+        return material
 
 
 class _NativeFamily:
@@ -151,7 +237,8 @@ class _NativeFamily:
     payload_schemas = ("stage-payload/v2", "submit-payload/v2")
 
     def __init__(self, *, planning, catalog, material_authority, records,
-                 evidence_authority, foundation_authenticator, assessment_authenticator, clock):
+                 evidence_authority, foundation_authenticator, assessment_authenticator, clock,
+                 lifecycle_session=None):
         if type(planning) is not NativePlanningV1:
             raise TypeError("exact native planning required")
         for port, methods in (
@@ -162,7 +249,24 @@ class _NativeFamily:
         ):
             require_methods(port, *methods)
         self.planning, self.catalog, self.material_authority = planning, catalog, material_authority
-        self.transport = NativeOwnedProcess(records)
+        if planning.lifecycle is None:
+            if lifecycle_session is not None:
+                raise ValueError("native lifecycle session needs selected policy")
+            self.transport = NativeOwnedProcess(records)
+        else:
+            from tuner.runtime.native_process_session import NativeProcessSession
+            require_methods(catalog, "bind_submission_once")
+            if (type(lifecycle_session) is not NativeProcessSession or lifecycle_session._lifecycle is None
+                    or lifecycle_session._records.records is not records
+                    or lifecycle_session._lifecycle.authority is not evidence_authority
+                    or lifecycle_session._lifecycle.launch != planning.lifecycle):
+                raise ValueError("native owned lifecycle session differs")
+            require_methods(evidence_authority, "cancellation_ack", "authenticate_cancellation_ack",
+                            "log_metadata", "authenticate_log_metadata", "recovery_evidence", "authenticate_recovery_evidence",
+                            "stage_ack", "authenticate_stage_ack")
+            self.transport = lifecycle_session
+            self.effect_kinds = ("stage", "submit", "cancel")
+            self.payload_schemas = ("stage-payload/v2", "submit-payload/v2", "cancel-payload/v2")
         self.records = records
         self.authority, self.foundation, self.assessments, self.clock = (
             evidence_authority, foundation_authenticator, assessment_authenticator, clock,
@@ -171,7 +275,7 @@ class _NativeFamily:
         self.provider_id, self.profile_ref = planning.provider.provider_id, planning.provider.profile_ref
         self.account_ref, self.namespace_ref = planning.scope.account_ref, planning.scope.namespace_ref
 
-    def _material(self, command_digest):
+    def _bound_material(self, command_digest):
         material = self.catalog.resolve(command_digest)
         if (type(material) is not NativeCommandMaterialV1
                 or self.material_authority.authenticate(material) is not True
@@ -189,6 +293,11 @@ class _NativeFamily:
                 or command.operation.effect.kind.value not in self.effect_kinds
                 or Path(material.output).parent != Path(invocation.private_root)):
             raise ValueError("native_command_binding_differs")
+        return material, command
+
+    def _material(self, command_digest):
+        material, command = self._bound_material(command_digest)
+        invocation = material.invocation
         with NativeTree(Path(invocation.private_root), private=True) as root:
             raw = root.read(Path(invocation.request).name, maximum=2 * 1024 * 1024)
             request = strict_json(raw)
@@ -201,6 +310,10 @@ class _NativeFamily:
                     or canonical(request["artifact_budget"]) != canonical(asdict(material.artifact_budget))
                     or request["output"] != material.output):
                 raise ValueError("native_request_material_differs")
+            if self.planning.lifecycle is not None:
+                if request.get("schema") != "synaptic-native-child-request/v2":
+                    raise ValueError("native_lifecycle_child_schema_differs")
+                self.planning.lifecycle.validate_source(invocation, raw)
             for key in ("runtime_capture", "dependency_lock", "dataset", "output"):
                 if type(request[key]) is not str or Path(request[key]).parent != root.path:
                     raise ValueError("native_private_material_root_differs")
@@ -233,6 +346,8 @@ class _NativeFamily:
         return material, command
 
     def execute_once(self, payload, request):
+        if request.effect_kind == "cancel":
+            return self._execute_cancel(payload, request)
         material, command = self._material(request.command_digest)
         self.planning.require_admitted(
             attempt=material.invocation.attempt,
@@ -254,6 +369,13 @@ class _NativeFamily:
         if request.effect_kind == "stage":
             # Staging admits already prepared immutable host inputs. It performs
             # no install, network access, model load or provider resource creation.
+            if self.planning.lifecycle is not None:
+                raw = self.authority.stage_ack(command.digest)
+                key = "native-stage/" + command.digest
+                self.records.create(partition="effects", key=key, canonical=raw)
+                retained = self.records.read(partition="effects", key=key)
+                if retained is None or retained.canonical != raw:
+                    raise ValueError("native stage acknowledgement differs")
             return ProviderObservationV1(
                 **base, disposition=ObservationDisposition.FOUND,
                 stage_ref=ProviderStageRefV1(
@@ -280,6 +402,11 @@ class _NativeFamily:
             material.tokenizer.verify(tokenizer_tree)
             tokenizer_tree.check()
         try:
+            if self.planning.lifecycle is not None:
+                self.catalog.bind_submission_once(material)
+                self.transport.start_once(material.invocation)
+                return ProviderObservationV1(**base, disposition=ObservationDisposition.FOUND,
+                                             provider_run=self._run_ref(material))
             outcome = self.transport.run_once(material.invocation)
             terminal = self.authority.process_outcome(material.invocation.digest, outcome)
             key = "native-terminal/" + material.invocation.digest
@@ -297,6 +424,52 @@ class _NativeFamily:
             **base, disposition=ObservationDisposition.FOUND,
             provider_run=self._run_ref(material),
         )
+
+    def _cancellation(self, digest):
+        self.planning.require_lifecycle()
+        binding = self.catalog.resolve(digest)
+        if type(binding) is not NativeCancellationMaterialV1 or self.material_authority.authenticate(binding) is not True:
+            raise ValueError("native_cancellation_material_unauthenticated")
+        command = parse_exact_command(binding.command_bytes)
+        material, submit = self._bound_material(binding.submit_digest)
+        if (command.digest != digest or submit.operation.effect.kind.value != "submit"
+                or binding.invocation_digest != material.invocation.digest
+                or command.preparation.canonical_bytes != submit.preparation.canonical_bytes
+                or command.executor != self.descriptor
+                or command.to_dict()["cancellation"]["provider_job_ref"] != self._run_ref(material).provider_job_ref):
+            raise ValueError("native_cancellation_original_binding_differs")
+        return binding, command, material
+
+    def _execute_cancel(self, payload, request):
+        _, command, material = self._cancellation(request.command_digest)
+        if (request.descriptor_digest != self.descriptor.digest
+                or (request.provider_id, request.profile_ref, request.account_ref, request.namespace_ref)
+                != (self.provider_id, self.profile_ref, self.account_ref, self.namespace_ref)
+                or payload != self.planning.payload(command.preparation, command.operation.effect.kind)
+                or request.payload_schema != payload.payload_kind or request.input_digest != payload.input_digest):
+            raise ValueError("native_cancellation_resolution_differs")
+        disposition = ObservationDisposition.INDETERMINATE
+        try:
+            state = self.transport.observe(material.invocation)
+            if state["state"] == "terminated" or self.transport.cancel(material.invocation):
+                raw = self.authority.cancellation_ack(command.digest, material.invocation.digest)
+                key = "native-cancellation/" + command.digest
+                self.records.create(partition="effects", key=key, canonical=raw)
+                retained = self.records.read(partition="effects", key=key)
+                if (retained is None or not self.authority.authenticate_cancellation_ack(
+                        retained.canonical, command.digest, material.invocation.digest)):
+                    raise ValueError("native cancellation acknowledgement differs")
+                disposition = ObservationDisposition.FOUND
+        except Exception:
+            pass  # Consumed cancel stays uncertain; never resend to a cold PID.
+        return ProviderObservationV1(
+            effect_id=command.operation.effect.effect_id, command_digest=command.digest,
+            executor_descriptor_digest=self.descriptor.digest, resolution_digest=request.digest, result_epoch=1,
+            disposition=disposition, cancellation=self._cancel_ref(command) if disposition is ObservationDisposition.FOUND else None)
+
+    def _cancel_ref(self, command):
+        value = command.to_dict()["cancellation"]
+        return CancellationRefV1(ProviderRunRefV1(value["provider_job_ref"]), value["reason_digest"])
 
     def _run_ref(self, material):
         return ScopedProviderRunRefV1(
@@ -333,7 +506,8 @@ class _NativeFamily:
                 or bound.authenticated_receipt_digest != request.found_receipt_digest):
             raise ValueError("native_foundation_read_derivation_differs")
         command = parse_exact_command(request.submit_command_bytes)
-        material, owned = self._material(command.digest)
+        material, owned = (self._bound_material(command.digest) if self.planning.lifecycle is not None
+                           else self._material(command.digest))
         if (owned.canonical_bytes != command.canonical_bytes
                 or command.operation.effect.kind.value != "submit"
                 or request.run != self.planning.run
@@ -346,6 +520,8 @@ class _NativeFamily:
         if state["state"] != "terminated":
             raise ValueError("native_termination_unconfirmed")
         outcome = state["outcome"]
+        if self.planning.lifecycle is not None:
+            self._retain_terminal(material, outcome)
         terminal = self.records.read(partition="effects", key="native-terminal/" + material.invocation.digest)
         if (terminal is None or self.authority.authenticate_process_outcome(
                 terminal.canonical, material.invocation.digest) != outcome):
@@ -354,11 +530,27 @@ class _NativeFamily:
             raise ValueError("native_termination_unconfirmed")
         return outcome
 
+    def _retain_terminal(self, material, outcome):
+        raw = self.authority.process_outcome(material.invocation.digest, outcome)
+        key = "native-terminal/" + material.invocation.digest
+        existing = self.records.read(partition="effects", key=key)
+        if existing is None:
+            try:
+                self.records.create(partition="effects", key=key, canonical=raw)
+            except Exception:
+                existing = self.records.read(partition="effects", key=key)
+                if existing is None: raise
+        retained = self.records.read(partition="effects", key=key)
+        if retained is None or retained.canonical != raw:
+            raise ValueError("native_terminal_evidence_differs")
+
     def observe(self, request):
         material = self._read(request, ProviderReadPurposeV1.OBSERVE)
-        outcome = self._outcome(material)
-        succeeded = outcome["reason"] == "worker_exited" and outcome["exit_code"] == 0
-        phase = ProviderRunPhaseV1.SUCCEEDED if succeeded else ProviderRunPhaseV1.FAILED
+        live = self.planning.lifecycle is not None and self.transport.observe(material.invocation)["state"] == "running"
+        outcome = None if live else self._outcome(material)
+        succeeded = outcome is not None and self._completed_exit(material, outcome)
+        phase = (ProviderRunPhaseV1.RUNNING if live else ProviderRunPhaseV1.SUCCEEDED if succeeded
+                 else ProviderRunPhaseV1.CANCELLED if outcome["reason"] == "cancel_requested" else ProviderRunPhaseV1.FAILED)
         ref = self._run_ref(material)
         content = ProviderRunObservationContentV1(
             "synaptic-provider-run-observation-content/v1", request.request_digest,
@@ -366,19 +558,38 @@ class _NativeFamily:
             request.provider_run.binding_digest, ref.provider_id, ref.profile_ref,
             ref.account_ref, ref.namespace_ref, ref.provider_job_ref, phase,
             canonical_bytes({"invocation_digest": material.invocation.digest, "outcome": outcome}),
-            None if succeeded else "native_worker_failed", "native-mlx-reader", "1.0.0", self.clock.now(),
+            None if live or succeeded or phase is ProviderRunPhaseV1.CANCELLED else "native_worker_failed",
+            "native-mlx-reader", "1.0.0", self.clock.now(),
         )
         return self.authority.observation(content)
 
-    def _artifacts(self, material):
-        outcome = self._outcome(material)
-        if outcome["reason"] != "worker_exited" or outcome["exit_code"] != 0:
-            raise ValueError("native_worker_did_not_succeed")
+    def _publication(self, material):
         return verify_native_publication(
             output=Path(material.output), workload=self.planning.workload,
             model=material.model, tokenizer=material.tokenizer,
             tokenizer_members=material.tokenizer_members, budget=material.artifact_budget,
         )
+
+    def _completed_exit(self, material, outcome):
+        if outcome["exit_code"] != 0:
+            return False
+        if outcome["reason"] == "worker_exited":
+            return True
+        if self.planning.lifecycle is not None and outcome["reason"] in {"cancel_requested", "owner_lost"}:
+            # Control delivery can race a worker that already completed. Only
+            # the complete bound publication, not exit0 alone, resolves success.
+            try:
+                self._publication(material)
+                return True
+            except Exception:
+                pass
+        return False
+
+    def _artifacts(self, material):
+        outcome = self._outcome(material)
+        if not self._completed_exit(material, outcome):
+            raise ValueError("native_worker_did_not_succeed")
+        return self._publication(material)
 
     def _manifest(self, material, artifacts):
         return ArtifactManifestV1.build(
@@ -437,7 +648,48 @@ class _NativeFamily:
         return self.authority.authenticate_verification(value)
 
     def logs(self, *args, **kwargs):
-        raise ValueError("native_logs_unavailable")
+        if self.planning.lifecycle is None:
+            raise ValueError("native_logs_unavailable")
+        return self._logs(*args, **kwargs)
+
+    def _logs(self, request, query):
+        self.planning.require_lifecycle()
+        if type(query) is not ProviderLogQueryV1:
+            raise ValueError("native_log_query_invalid")
+        material = self._read(request, ProviderReadPurposeV1.LOGS)
+        view = self.transport.progress(material.invocation)
+        entries, size, truncated = [], 0, False
+        for sequence, raw in enumerate(view.event_bytes):
+            if strict_json(raw)["kind"] != "progress" or query.after_sequence is not None and sequence <= query.after_sequence:
+                continue
+            if len(entries) >= query.limit or size + len(raw) > query.maximum_bytes:
+                truncated = True
+                break
+            event_digest = hashlib.sha256(raw).hexdigest()
+            key = f"native-progress-metadata/{material.invocation.digest}/{sequence}"
+            record = self.records.read(partition="effects", key=key)
+            if record is None:
+                proposed = self.authority.log_metadata(material.invocation.digest, sequence, event_digest, self.clock.now())
+                try:
+                    self.records.create(partition="effects", key=key, canonical=proposed)
+                except Exception:
+                    record = self.records.read(partition="effects", key=key)
+                    if record is None: raise
+                record = self.records.read(partition="effects", key=key)
+            if record is None:
+                raise ValueError("native_progress_metadata_absent")
+            seen = self.authority.authenticate_log_metadata(record.canonical, material.invocation.digest, sequence, event_digest)
+            entries.append(RunLogEntry(sequence, seen, RunLogLevel.INFO, "native.progress", raw.decode("utf-8"), len(raw)))
+            size += len(raw)
+        ref = self._run_ref(material)
+        return self.authority.log_page(ProviderLogPageContentV1(
+            "synaptic-provider-log-page-content/v1", request.request_digest, query.log_query_digest,
+            request.source_workflow_record_digest, request.source_revision, request.run,
+            request.provider_run.binding_digest, ref.provider_id, ref.profile_ref, ref.account_ref, ref.namespace_ref,
+            ref.provider_job_ref, query.after_sequence, tuple(entries), size, truncated,
+            canonical_bytes({"invocation_digest": material.invocation.digest, "prefix_digest": view.prefix_digest,
+                             "terminal": view.terminal_bytes is not None, "timestamp_basis": "host_first_observed"}),
+            "native-mlx-reader", "2.0.0", self.clock.now()))
 
 
 class _ExecutorResolver:
@@ -469,9 +721,14 @@ def native_mlx_family(**ports):
     independently authenticated ``NativeCommandMaterialV1`` for each command.
     """
     internal = _NativeFamily(**ports)
+    recovery = None
+    if internal.planning.lifecycle is not None:
+        from tuner.training.native_mlx_recovery import NativeLifecycleRecovery
+        recovery = NativeLifecycleRecovery(internal)
     return ProviderFamilyV1(
         internal.planning.descriptor, internal.planning, internal.planning, internal,
-        _ExecutorResolver(internal), _NoReconciliation(), internal.authority, internal,
+        _ExecutorResolver(internal), _NoReconciliation() if recovery is None else recovery, internal.authority, internal,
         _Authenticator(internal.authority.authenticate_observation),
         _Authenticator(internal.authority.authenticate_log_page),
+        recovery, recovery, recovery,
     )
