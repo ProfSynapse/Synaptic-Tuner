@@ -229,6 +229,24 @@ def run_request(request, *, request_root):
         lock = tree.read(Path(request["dependency_lock"]).name, maximum=1024 * 1024)
         dataset = tree.read(Path(request["dataset"]).name, maximum=64 * 1024 * 1024)
 
+        if projection.workload.method == "grpo":
+            from tuner.runtime.native_mlx_grpo import execute_native_grpo
+            from tuner.runtime.native_mlx_material import verify_native_material
+
+            verify_native_material(runtime, expected_digest=profile.runtime_digest, dependency_lock=lock)
+            with NativeTree(Path(tokenizer.root), private=True) as token_tree:
+                published_tokenizer = tokenizer_publication_bytes(
+                    tokenizer, members, projection.tokenization, budget, token_tree,
+                )
+                token_tree.check()
+            _load_published_tokenizer(published_tokenizer, request_root=request_root,
+                expected_members=members, use_fast=projection.tokenization.use_fast)
+            result = execute_native_grpo(projection=projection, dataset=dataset,
+                model_snapshot=model, tokenizer_snapshot=tokenizer, runtime_material=runtime,
+                dependency_lock=lock, output=Path(request["output"]))
+            tree.check()
+            return result
+
         class Source:
             identity = projection.source
 

@@ -2,6 +2,15 @@
 
 Group Relative Policy Optimization — optimizes model behavior using reward functions against generated completions.
 
+Native MLX now has a separate **unqualified implementation candidate** through
+the existing public native composition. Start with `native-local-training.md`
+and `docs/architecture/native-mlx-grpo.md` (repo root). Do not apply the legacy
+CLI commands below to that candidate or infer Mac qualification from Modal
+evidence. Its attributed objective, bounded regex-V0 reward engine, strict public
+control refusals and new private runtime require exact independent review and
+fresh root admission before ML imports. The qualified SFT environment is not a
+GRPO environment; no native public lifecycle capability is promoted.
+
 ## Public GRPO declarations and CPU preparation
 
 The provider-neutral `TrainingInputV1` accepts explicit method `grpo` with
@@ -603,7 +612,8 @@ env-GRPO smoke job and confirm the run does not raise a length/logprob mismatch.
 
 ## Platform Note
 
-GRPO requires **WSL/Linux only** — native Windows is not supported.
+The legacy CUDA/TRL GRPO commands require **WSL/Linux**; native Windows is not
+supported. The distinct native MLX candidate above remains hardware-unqualified.
 
 
 ## Captured ordinary candidate configuration

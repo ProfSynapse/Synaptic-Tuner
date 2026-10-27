@@ -1,0 +1,134 @@
+# Native MLX GRPO candidate
+
+Status: CPU review candidate, 2026-10-27. No Apple execution or hardware
+qualification is claimed. The existing qualified SFT environment stays intact.
+
+## Source decision
+
+Read-only source audit pins (public repositories cloned without executing code):
+
+* [mlxrl 5ee8a6bd](https://github.com/inductiveML/mlxrl/tree/5ee8a6bd7764b0585094d78c530ac87d26364034),
+  version 0.2.4, MIT, Copyright (c) 2026 mlxrl contributors. Its
+  `mlxrl/algo/grpo.py` SHA256 is
+  `e58a0b7002d3c398c0cf06cd9e5df74b65285b89c2731bba44149c113a7949bd`;
+  `policy/logprobs.py` is
+  `69503a9ea9847f10a2a17578623c2fc7cd4e760c8c770e003c4053adcb5dbca0`;
+  `rollout/naive.py` is
+  `40f582ca8a617115af6fd1dfffd1624c741ce9a46dfacb38ead8f4e0d737d7d2`.
+  The package declares Python >=3.11 and platform-marked MLX >=0.32.2,
+  MLX-LM >=0.32.0. Those lower bounds are not an admitted closure.
+* [mlx-tune 9690fe1f](https://github.com/ARahim3/mlx-tune/tree/9690fe1fed19c72f0810902b9c188d9a2625eb5b),
+  version 0.6.0, Apache-2.0. `mlx_tune/rl_trainers.py` SHA256 is
+  `4e6eb860c16083d3c0f642a264b7efc0c671cf09d63e2fc65950d3e325e3978c`;
+  `losses.py` is
+  `31762d5fb71e0b2a94eef902ea4cdf18e4f4bedb8ad815aefb43547739739779`.
+  The native `GRPOTrainer` calls `compute_log_probs_with_lengths` over full
+  generated sequences without a prompt boundary in its gradient phase. It
+  stores beta but that phase has no reference KL term. Zero-variance groups
+  skip optimizer updates. Its subprocess fallback trains SFT on supplied
+  answers and reuses training data for validation. These behaviors cannot
+  satisfy our public controls or completion-only GRPO contract. Its wider
+  dependency set also includes vision/embedding/dataset packages. No code
+  from this implementation is selected.
+
+Select a small attributed adaptation of mlxrl's group-normalization,
+token-ratio and KL objective, rather than its whole trainer/CLI. Its original
+tests include tiny hand-computed losses and masked-gradient controls; they are
+source evidence, not locally executed acceptance. Our independent CPU checks
+use scalar probability calculations and analytic gradients. Actual MLX
+autograd checks remain a separate Mac gate.
+
+The selected objective uses population variance plus 1e-8 inside the square
+root, detached old-policy/reference probabilities and detached group advantages,
+and a mean over generated tokens. It is explicitly **unclipped**, with exactly
+one update per rollout batch. It is not advertised as TRL-equivalent PPO, GSPO,
+GiGPO, Dr.GRPO or multi-turn environment RL. Unit temperature is required so
+sampling and differentiated policy agree. The upstream naive sampler supports
+filtered/temperature sampling while retaining raw model log probabilities; we
+do not admit that mismatch. Upstream model-class fast paths, cache cloning,
+reference cache forwards and implicit template fallback are not selected.
+
+## Integrated boundaries
+
+`compile_native_grpo` consumes the existing public GRPO request and prepared
+`synaptic-grpo-prompts/v1` identity, recompiles all controls, and binds a distinct
+`NativeMLXGRPOProfile`. The existing native planner, ProviderFamilyV1, command
+catalog, grant, guardian and synchronous owner-thread stores remain the effect
+boundary. No accepting qualification authority or new public verb is supplied.
+The child remains `-I -S -B` with captured-source validation before imports.
+
+The child reads exact retained publication bytes, selects only the configured
+prompt column, renders messages with explicit template arguments, and refuses
+overlength prompts rather than truncating. Other row fields, including answer
+metadata, cannot reach generation or rewards. The raw-response regex reward
+documents come from the public contract; no arbitrary Python callbacks or tools
+are imported. The profile explicitly selects the pinned `regex` package's V0
+engine and a per-search timeout, with a compiled 10-second aggregate worst-case
+search budget for each complete evidence verification. This is a declared native
+reward dialect, not a claim of all Python/TRL regex edge-case equivalence.
+The package already exists in the unchanged 54-package closure; host verification
+also needs it. Host review still owns semantic provenance and prompt leakage.
+
+Fresh sequential KV caches retain sampled token IDs through EOS. Full causal
+forwards gather only generated positions; prompts and padding have no loss.
+Old and adapter-disabled base-reference log probabilities are materialized and
+detached before differentiation. Dropout, accumulation, warmup, mixed precision,
+intermediate checkpoints and non-unit temperature reject. Public grad clipping,
+constant AdamW, seed, batch/group sizes, logging interval and finite generation,
+reward-call and evidence-byte budgets are explicit. The profile binds model
+quantization; no launcher model map or download is introduced.
+
+Verification requires the actual optimizer count, complete grouped rollout
+evidence, independently recomputed rewards/group variation and saved numeric
+parameter delta, exact configured adapter inventory, and finite loss computed
+after loading the final saved adapter into a fresh base. Constant rewards or
+unchanged parameters cannot establish successful native qualification. Five
+portable native roles retain input, reward, runtime and source bindings. Final
+replay loss on sampled rollouts is a consistency check, not held-out quality.
+
+## Qualification proposal and remaining gates
+
+Use a new private GRPO runtime and named candidate; do not modify/reuse the
+qualified SFT environment. The candidate closure keeps the reviewed 54 exact
+package pins and adds only captured engine source (the attributed objective
+needs no new installed distribution). Full wheel archive provenance, installed
+bytes/native library/OS capture, final pushed source, independent review and
+root-signed fresh one-shot admission are still required before ML imports.
+
+First run independent tiny MLX forward/autograd/detach/mask checks under bounded
+supervision, without model loading. Then propose a separately admitted small
+Qwen3-0.6B 4-bit attempt, short prompts, group size >=2, a reviewed response
+reward with no guaranteed variation, finite steps/token/reward/time/memory/file
+bounds, and fresh output/state. Fit on the M4/24 GiB is unproven. Preserve any
+constant-reward or consumed failure; no automatic retry. Root owns hardware,
+model/runtime preparation, admissions, integration review and all Mac effects.
+Public logs/cancel/reconcile remain unavailable. CPU doubles prove controls,
+not MLX execution, hardware fit, training quality or general success.
+
+## CPU review evidence
+
+The native regression lane passed 266 tests with four explicit Apple numerical
+skips. After tightening quantization inventory, index types and float32 reward
+variation and zero-beta KL overflow, the complete GRPO and restricted-host lane
+passed 63 tests. The
+independent objective check compares probability-space scalar loss and analytic
+derivatives against finite differences, including unequal generated lengths,
+constant groups, and ignored positions. A separate real-MLX autograd test is
+checked in but has not run on this Linux machine.
+
+The existing baseline compiler at merged main
+`3e357a2f0d1d85bdf06c67274946d7a9846ff742` and the candidate produce identical
+canonical raw-SFT and prompt/completion-SFT workload bytes for the retained
+CPU fixtures (2676 and 2744 bytes). Both original SFT dependency trees are
+unchanged; the new 54-package lock copy is byte-identical (SHA256
+`7c167018ee6bd61a3609971e3f834082c798e7bd2a3fa0c5c2564887da4fde4f`).
+All six existing closure/lock maintainers report CURRENT without a write or
+inventory/pin change. Ruff, diff checks and canonical skill-tree sync pass.
+
+The sdist-to-wheel build and neutral base-only installed consumer pass without
+ML/provider packages, including import of the optional native composition.
+All 17 native-MLX/public source modules match both distribution archives,
+including the complete embedded upstream MIT notice. Package equivalence is
+source/package evidence, not a captured Mac execution runtime.
+Private command records and XML/package/canonical-byte checks are retained at
+`~/.cache/synaptic-tuner-release-proof/resume-20261027/grpo-integration`.

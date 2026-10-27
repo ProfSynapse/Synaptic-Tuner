@@ -191,6 +191,7 @@ jobs:
           python -m pip install \
             'pytest>=8,<9' \
             'numpy>=1.24,<3' \
+            'regex==2026.9.29' \
             'pandas>=2,<3' \
             'setuptools>=68' \
             'requests>=2.32,<3' \

@@ -37,6 +37,7 @@ from synaptic_tuner.api.v1.native_mlx import (
     NativeEvidenceAuthority, NativeFile, NativeInvocation, NativeMLXProfile,
     NativeMaterialAuthority, NativeModelSnapshot, NativePlanningV1,
     NativeProcessLimits, NativeRestrictedAdmissionV1, compile_native_sft, native_mlx_family,
+    NativeMLXGRPOProfile, compile_native_grpo,
 )
 from tuner.dataset_prep.training_input_source import LocalPreparedTrainingInputSource
 from tuner.execution.foundation_v2.commands import parse_exact_command
@@ -181,7 +182,8 @@ def profile_candidate(config):
         raise ValueError("native candidate runtime differs")
     selected_model, training, lora, optimizer = (
         proposal["model"], proposal["training"], proposal["lora"], proposal["optimizer"])
-    value = NativeMLXProfile(
+    profile_type = NativeMLXGRPOProfile if proposal.get("method") == "grpo" else NativeMLXProfile
+    value = profile_type(
         profile_ref=proposal["profile_ref"], model_ref=selected_model["repository"],
         model_revision=selected_model["revision"],
         tokenizer_revision=selected_model["tokenizer_revision"],
@@ -195,6 +197,7 @@ def profile_candidate(config):
         steps_per_eval=training["steps_per_eval"],
         maximum_updates=training["iterations"],
         maximum_batch_tokens=training["max_batch_tokens"],
+        **(proposal["grpo_profile"] if profile_type is NativeMLXGRPOProfile else {}),
     )
     return asdict(value)
 
@@ -347,7 +350,12 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None,
     runtime = native_runtime_spec(capture)
     if config["engine_root"] + "/tuner" not in strict_json(capture)["config"]["sources"]:
         raise ValueError("native captured source is not selected checkout")
-    profile = NativeMLXProfile.from_dict(_document(config["profile_file"]))
+    training = TrainingInputV1.from_dict(_document(config["training_input_file"]))
+    grpo = training.method.value == "grpo"
+    if grpo != (proposal.get("method") == "grpo"):
+        raise ValueError("native proposal method differs from request")
+    profile_type = NativeMLXGRPOProfile if grpo else NativeMLXProfile
+    profile = profile_type.from_dict(_document(config["profile_file"]))
     selected_model = proposal["model"]
     if (profile.source_digest != source_digest or profile.runtime_digest != capture_digest
             or profile.profile_ref != proposal["profile_ref"]
@@ -356,19 +364,37 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None,
             or profile.tokenizer_revision != selected_model["tokenizer_revision"]
             or profile.use_fast_tokenizer is not config["use_fast_tokenizer"]):
         raise ValueError("native profile source/runtime differs")
-    training = TrainingInputV1.from_dict(_document(config["training_input_file"]))
     identity = PreparedTrainingInputIdentity.from_dict(_document(config["prepared_identity_file"]))
-    prepared = LocalPreparedTrainingInputSource(Path(config["prepared_publication"]), identity)
-    dataset = read_retained_native_source(prepared, identity)
+    if grpo:
+        # Existing publication format, with Darwin-compatible native custody.
+        # This is a read of host-prepared bytes, never a new normalization path.
+        from tuner.training.grpo_preparation import verify_grpo_publication_bytes, _identity
+        with NativeTree(Path(config["prepared_publication"]), private=True) as publication:
+            if publication.members() != ("dataset.jsonl", "manifest.json"):
+                raise ValueError("native GRPO publication inventory differs")
+            dataset = publication.read("dataset.jsonl", maximum=65536)
+            manifest = verify_grpo_publication_bytes(publication.path,
+                publication.read("manifest.json", maximum=4096), dataset)
+            if (_identity(manifest) != identity
+                    or manifest["prompt_column"] != training.hyperparameters.prompt_column):
+                raise ValueError("native GRPO prepared identity differs")
+            publication.check()
+    else:
+        prepared = LocalPreparedTrainingInputSource(Path(config["prepared_publication"]), identity)
+        dataset = read_retained_native_source(prepared, identity)
     rows = [strict_json(line, maximum=1 << 20) for line in dataset.splitlines()]
     counts = {name: sum(row.get("split") == name for row in rows)
               for name in ("train", "validation")}
-    if (counts != proposal["input_review"]["rows_per_attempt"]
+    if not grpo and (counts != proposal["input_review"]["rows_per_attempt"]
             or sum(counts.values()) != len(rows)):
         raise ValueError("native synthetic publication split coverage differs")
     kind = config["attempt_kind"]
     hp = training.hyperparameters
-    if kind == "raw_full_sequence":
+    if grpo:
+        if (kind != "grpo_on_policy" or len(rows) != proposal["input_review"]["prompt_rows"]
+                or identity.content_digest != proposal["input_review"]["publication_sha256"]):
+            raise ValueError("native GRPO reviewed input differs")
+    elif kind == "raw_full_sequence":
         if (identity.format != "syntunia-sft-row/v1" or hp.dataset_format != "raw_text"
                 or hp.prompt_render != "full_conversation" or hp.chat_template_kwargs is not None):
             raise ValueError("native raw attempt input differs")
@@ -387,14 +413,21 @@ def inspect(config, *, require_admission=False, trusted_root_key_sha256=None,
             or sum(item.size for item in model.files) > selected_model["download_budget_bytes"]
             or tuple(config["tokenizer_members"]) != tuple(item.path for item in tokenizer.files)):
         raise ValueError("native complete model or tokenizer snapshot differs")
-    projection = compile_native_sft(training, identity, profile)
+    projection = (compile_native_grpo if grpo else compile_native_sft)(training, identity, profile)
+    if grpo:
+        from tuner.runtime.native_mlx_grpo import prepared_prompts
+        prepared_prompts(dataset, projection)
+        if (asdict(projection.controls) != proposal["grpo_controls"]
+                or any(asdict(profile)[key] != value for key, value in proposal["grpo_profile"].items())
+                or set(proposal["grpo_profile"]) != set(NativeMLXGRPOProfile.__dataclass_fields__) - set(NativeMLXProfile.__dataclass_fields__)):
+            raise ValueError("native GRPO controls differ from reviewed candidate")
     proposed_training, proposed_lora, proposed_optimizer = (
         proposal["training"], proposal["lora"], proposal["optimizer"])
     if (projection.controls.iterations != proposed_training["iterations"]
             or projection.controls.batch_size != proposed_training["batch_size"]
             or projection.controls.max_seq_length != proposed_training["max_seq_length"]
             or projection.controls.seed != proposed_training["seed"]
-            or projection.controls.steps_per_save != proposed_training["steps_per_save"]
+            or (not grpo and projection.controls.steps_per_save != proposed_training["steps_per_save"])
             or projection.lora.layers != proposed_lora["layers"]
             or projection.lora.rank != proposed_lora["rank"]
             or projection.lora.scale != proposed_lora["scale"]

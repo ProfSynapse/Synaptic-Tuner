@@ -1,0 +1,18 @@
+{
+  "schema": "synaptic-native-grpo-runtime-candidate/v1",
+  "status": "ROOT_REVIEW_REQUIRED_NOT_EXECUTION_AUTHORITY",
+  "profile_ref": "native-mlx-grpo-on-policy-candidate-v1",
+  "method": "grpo",
+  "python_version": "3.11.14",
+  "objective": "mlxrl-token-mean-on-policy/v1",
+  "reward_engine": "regex-v0/v1",
+  "upstream_repository": "https://github.com/inductiveML/mlxrl",
+  "upstream_commit": "5ee8a6bd7764b0585094d78c530ac87d26364034",
+  "model": {
+    "repository": "mlx-community/Qwen3-0.6B-4bit",
+    "revision": "73e3e38d981303bc594367cd910ea6eb48349da8",
+    "tokenizer_revision": "73e3e38d981303bc594367cd910ea6eb48349da8",
+    "quantization_bits": 4
+  },
+  "dependency_lock": "requirements.runtime.lock"
+}
