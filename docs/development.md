@@ -90,6 +90,11 @@ hash repair. `CURRENT` means source/lock agreement, not hardware qualification.
    workflow gates remain open; do not relabel bounded evidence as universal
    support. Update `_version.py`, classifier, changelog, release notes and the
    current support docs. Refresh only affected source hashes and synced skills.
+   Update positive host/CI fixture manifests to explicitly admit a prerelease;
+   keep stable-only rejection tests intact. Diagnostic derivative fixtures can
+   also pin hashes of a version-bearing source closure: reproduce the old pins
+   first, then refresh their exact expected hashes without weakening admission
+   or relabeling historical live evidence.
 2. Run the applicable contract/installed checks and independent release review.
    Open a release PR and require all current checks on its exact head before
    merging. Preserve historical execution identities when only metadata/docs
