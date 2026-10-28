@@ -401,7 +401,7 @@ jobs:
               manifest.write_text(
                   "schema_version: synaptic-project/v1\n"
                   "project: {id: wheel-consumer, name: Wheel consumer}\n"
-                  "engine: {requires: '>=1', api: v1}\n",
+                  "engine: {requires: '>=1.1.0rc1,<2', api: v1}\n",
                   encoding="utf-8",
               )
               assert load_project_manifest(manifest).project_id == "wheel-consumer"
