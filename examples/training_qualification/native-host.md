@@ -1,4 +1,12 @@
-# Native MLX host consumer — restricted qualification candidate
+# Native MLX host consumer — restricted qualification workflow
+
+Current status — 2026-10-28: the selected OSS engine/Mac integration is merged
+through PR #279. Bounded SFT/GRPO completion, numeric progress, cancellation,
+caller-loss/cold recovery and post-expiry reads passed independent final review
+and current CI. See the [lifecycle evidence](../../docs/review/native-mlx-lifecycle-qualification.md)
+and [developer guide](../../docs/development.md). This example still requires
+exact externally signed authority; it does not issue ordinary qualification.
+The older preparation observations below retain their actual source identities.
 
 The recovered continuation now has successful bounded raw-text and assistant-only
 prompt/completion Mac runs,

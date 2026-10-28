@@ -128,7 +128,7 @@ Status vocabulary:
 The [API v1 compatibility policy](../architecture/api-v1-compatibility.md) defines
 public compatibility; this matrix records operational support and qualification.
 
-Package version `1.1.0` and its intended stable classifier do not certify every
+Package version `1.1.0rc1` and its Beta classifier do not certify every
 composition. This dated matrix records scoped evidence; [GitHub release records](https://github.com/ProfSynapse/Synaptic-Tuner/releases)
 bind published source/artifacts and final accepted operations. The distribution
 route is reviewed GitHub wheel/sdist assets, not an unverified PyPI install.
