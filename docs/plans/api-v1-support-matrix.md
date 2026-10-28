@@ -1,12 +1,30 @@
 ---
-status: release-preparation
-baseline: 06e0fcf2
-updated: 2026-10-27
+status: scoped-engine-release-candidate
+baseline: e2e8cd4f
+updated: 2026-10-28
 ---
 
 # API v1 support and qualification matrix
 
-## Integrated engine candidate — 2026-10-26
+## Current engine release candidate — 2026-10-28
+
+`1.1.0rc1` is the first scoped OSS engine release candidate. Its integration
+baseline is merged `e2e8cd4f631d6b015ea323fe038944f3d438b64e` (PR #279),
+whose tree equals independently accepted `9524bae2`; all 18 checks passed on
+that reviewed head. The release changes documentation, package version metadata
+and the corresponding source-closure hashes, preserving execution logic and
+runtime dependency pins. See the [release notes](../releases/1.1.0rc1.md) and
+[developer guide](../development.md) for installation and supported boundaries.
+
+The selected engine/Mac integration is complete: SFT and GRPO, live numeric
+progress, confirmed cancellation, abrupt caller-loss/cold reconciliation,
+saved-adapter verification and five-role artifact delivery passed on the exact
+M4 fixture below. Final independent review accepted the evidence/package/claims;
+post-expiry original-authority reads passed without retraining or renewal.
+Hosts still authenticate qualification for their exact selection. This preview
+does not close broader stable/provider gates or ship a desktop app.
+
+## Integrated engine evidence — 2026-10-26
 
 The current owner-selected work is the open-source engine API and reliable Mac
 training integration. Full desktop installation/signing, bundled-runtime UX,
@@ -15,7 +33,8 @@ Candidate `06e0fcf24ca152621044736f65f87ce6e176d0f4` integrates the release/GRPO
 Windows SFT and native MLX branches with main's host-trust corrections. Fixed
 closure inventories and non-hash runtime pins are preserved. Independent source
 review accepted it for bounded qualification, and a neutral base-only installed
-consumer passed. No stable tag, package release or Syntunia deployment follows.
+consumer passed. That increment did not publish a package or deploy Syntunia;
+the release candidate above is the subsequent publication scope.
 
 Native public composition is available explicitly through
 `synaptic_tuner.api.v1.native_mlx`, using the existing `TrainingAPI`/`RunsAPI`
@@ -33,8 +52,8 @@ for its exact selection; no default native admission is shipped. Public native
 logs/cancel/reconcile remain unavailable for legacy selections. The separately
 authenticated versioned lifecycle has bounded M4 evidence below. Ordinary
 qualification stays host-authenticated.
-Broad stable-v1 active cancellation,
-caller-loss/reconciliation and final release checks remain separate gates.
+Broader stable-v1/provider lifecycle acceptance remains separate from the
+completed bounded native lifecycle fixture.
 HF Jobs qualification remains owner-paused. Existing Windows/Modal runs are not
 retrained to repair documentation, packaging or local readback.
 
@@ -55,8 +74,9 @@ saved parameter changes and final-adapter reload checks passed; real Darwin
 186 controls and five real MLX numerical cases passed. See the
 [exact evidence and limits](../review/native-mlx-lifecycle-qualification.md).
 Only the explicit policy/session/independently authenticated lifecycle selection
-can expose these operations. Current CI and final independent evidence review
-remain integration gates; no default authority or broad stable-v1 claim follows.
+can expose these operations. Final independent review, all 18 checks and
+post-expiry readback passed before merge. No default authority or broad
+stable-v1 claim follows.
 
 ## Historical integration baseline — 2026-10-20
 

@@ -187,7 +187,7 @@ def test_installed_console_and_project_manifest():
         manifest = Path(directory) / 'synaptic.yaml'
         manifest.write_text("schema_version: synaptic-project/v1\n"
                             "project: {id: compatibility-consumer, name: Compatibility consumer}\n"
-                            "engine: {requires: '>=1', api: v1}\n", encoding='utf-8')
+                            "engine: {requires: '>=1.1.0rc1,<2', api: v1}\n", encoding='utf-8')
         assert load_project_manifest(manifest).project_id == 'compatibility-consumer'
         console = Path(sys.executable).parent / ('synaptic.exe' if os.name == 'nt' else 'synaptic')
         result = subprocess.run([str(console), '--project-root', directory,

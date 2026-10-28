@@ -11,7 +11,10 @@ CLI commands below to that candidate or infer Mac qualification from Modal
 evidence. Its attributed objective, bounded regex-V0 reward engine, strict public
 control refusals and new private runtime require exact independent review and
 fresh root admission before ML imports. The qualified SFT environment is not a
-GRPO environment; no native public lifecycle capability is promoted.
+GRPO environment. Separately authenticated versioned lifecycle selections have
+bounded M4 progress/cancellation/caller-loss evidence through merged PR #279;
+legacy synchronous selections retain those capability flags off. See
+`docs/review/native-mlx-lifecycle-qualification.md` (repo root).
 
 Native GRPO failure diagnosis uses the closed numeric phase exits documented in
 `native-local-training.md`, interpreted with the exact admitted worker source and
@@ -644,7 +647,9 @@ env-GRPO smoke job and confirm the run does not raise a length/logprob mismatch.
 ## Platform Note
 
 The legacy CUDA/TRL GRPO commands require **WSL/Linux**; native Windows is not
-supported. The distinct native MLX candidate above remains hardware-unqualified.
+supported. Native Apple-silicon MLX uses the separate host-integrated path above,
+with exact bounded M4 mechanics/lifecycle qualification. This does not qualify
+other models, rewards, runtimes or hardware combinations.
 
 
 ## Captured ordinary candidate configuration

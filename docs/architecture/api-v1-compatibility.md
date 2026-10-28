@@ -1,7 +1,9 @@
 # API v1 compatibility policy
 
 This policy defines compatibility commitments for published stable API v1 releases.
-The package compatibility version is `1.1.0`; metadata alone does not establish
+The current package release candidate is `1.1.0rc1`, targeting stable `1.1.0`;
+this preview does not declare the broader stable workflow checklist complete.
+Metadata alone does not establish
 publication or backend qualification. [GitHub release records](https://github.com/ProfSynapse/Synaptic-Tuner/releases)
 bind the published source, artifacts and accepted scope. The
 [support matrix](../plans/api-v1-support-matrix.md) identifies operational support

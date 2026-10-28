@@ -4,8 +4,10 @@ Observed 2026-10-27 on execution source
 `e29c7da8cdb0f5f6ea29ecfe6b1edba397d525b1`. Eight separately signed,
 single-use attempts exercised public progress, normal completion, cancellation
 and abrupt caller loss followed by cold reconciliation for SFT and GRPO.
-This is engine integration evidence for the exact fixture below. Final
-independent evidence review and current CI remain integration gates.
+This is engine integration evidence for the exact fixture below. Final R6
+independent evidence/package/claims review accepted `9524bae2`; all 18 checks
+passed before PR #279 merged at `e2e8cd4f` on 2026-10-27. The later retained-read
+gate also passed, as recorded below; execution remains bound to `e29c7da8`.
 
 ## Selection and custody
 
@@ -130,9 +132,14 @@ proof. Other models, rewards, OS builds and runtimes require their own admission
 These observations do not establish model quality, current Nexus tool compatibility,
 full desktop distribution, UI readiness, installer signing or a Syntunia deployment.
 Earlier SFT/GRPO/evaluation evidence retains its original source bindings.
-The eight start admissions expire at `2026-10-27T22:39:31Z`; the cold reads above
-precede that wall-clock expiry. Fresh post-expiry readback on this exact selection
-remains a separate retained-read gate, without retraining or renewed authority.
+The eight start admissions expired at `2026-10-27T22:39:31Z`; the initial cold
+reads above preceded expiry. At actual Mac time `2026-10-27T22:39:33Z`, root
+completed fresh original-authority post-expiry reads: all four normal runs passed
+public `reverify`, and all eight public outcomes/manifests/progress entries and
+timestamps exactly matched the earlier cold reads. Fresh SQLite snapshots still
+showed one process claim per attempt. No retraining, renewed admission, adoption
+or stored-PID signal occurred. These reads authenticate retained results; they
+do not extend authority to start a new attempt.
 
 ## Retained evidence
 
@@ -145,8 +152,11 @@ SQLite snapshots, delivered roles and initial adapter tensors. See
 `qualification-independent-check-r1.json`. No private signing key or host secret
 was copied into that evidence bundle.
 
-Preliminary wheel/sdist match all 27 native modules, and the isolated base-only
-installed consumer passes without ML/provider SDKs. Final documentation/package
-equivalence, current CI and independent evidence/claim review remain required
-before integration. No package publication, tag, deployment or full desktop
-release is implied.
+Final wheel/sdist and installed-byte equivalence passed independent R6 review,
+including all 27 native modules and the base-only consumer without ML/provider
+SDKs. The reviewed docs head `9524bae2` and merge `e2e8cd4f` have identical trees;
+all 18 checks passed. Post-expiry evidence includes
+`post-expiry-independent-check-r3.json`, `post-expiry-claim-counts-r3.json` and
+each attempt's retained reports/SQLite snapshot. This completed the bounded
+engine integration. Subsequent [release metadata](../releases/1.1.0rc1.md)
+does not relabel the execution source or establish a full desktop release.

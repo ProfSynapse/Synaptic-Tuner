@@ -8,8 +8,9 @@ opt-in implementation below now has CPU and
 [bounded real Mac qualification evidence](../review/native-mlx-lifecycle-qualification.md).
 
 The exact M4 fixture covers two completions, cancellation and caller-loss recovery
-per method. Source/CPU results alone promote no capability; ordinary authority,
-current CI and independent final evidence review remain separate gates.
+per method. Final independent evidence/package review, all 18 checks and
+post-expiry readback passed before PR #279 merged. Source/CPU results alone
+promote no capability; ordinary authority remains independently authenticated.
 
 ## Preserve the current boundary
 
@@ -196,7 +197,12 @@ completed actual Mac subset of the original gates below, without erasing their
 broader limits. Normal progress/completion, public cancellation and abrupt caller
 loss/cold recovery passed for SFT and GRPO. Actual-ML acknowledgement loss remains
 separate from the passing Darwin CPU controls. Final post-expiry readback,
-independent evidence/package/claims review and current CI remain integration work.
+independent evidence/package/claims review and all 18 checks passed before
+PR #279 merged at `e2e8cd4f`. All four normal runs reverified after original
+start expiry; all eight outcomes/progress streams retained their exact original
+contents with one process claim each. The bounded engine integration gates are
+complete. The original checklist below also includes broader combinations that
+this fixture does not establish.
 
 1. **Source/host workflow review.** Independently review the complete worker and
    public join, complete the reusable host qualification mode, and bind its final

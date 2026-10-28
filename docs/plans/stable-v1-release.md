@@ -1,13 +1,38 @@
 ---
-status: release-preparation
+status: broad-stable-gates-open
 scope: OSS API v1 stable workflow release
 baseline: 321a085f
-updated: 2026-10-26
+updated: 2026-10-28
 ---
 
 # Stable v1 release gate
 
-## Current engine increment — 2026-10-26
+## Current publication scope — 2026-10-28
+
+The owner requested a release after completion of the selected OSS engine/Mac
+integration. Publish `1.1.0rc1` as a scoped GitHub release candidate with a wheel,
+sdist and SHA-256 checksums, following the [developer release procedure](../development.md#cutting-a-release).
+This is a preview of the host-integrated engine, not promotion of every workflow
+in the historical broad stable checklist below. No PyPI publication, desktop
+installer or deployment is included. See the [release notes](../releases/1.1.0rc1.md).
+
+PR #279 merged at `e2e8cd4f` with an identical tree to independently accepted
+`9524bae2` and all 18 checks passing. Actual Mac execution remains bound to
+`e29c7da8`: two completions, confirmed cancellation and abrupt caller-loss/cold
+recovery for each of SFT and GRPO; 20 delivered artifact hashes, saved-adapter
+changes/reload, 186 Darwin controls and five MLX numerical tests. All four normal
+runs reverified after start expiry, and all eight retained outcomes/progress
+streams stayed identical under original authority. These scoped lifecycle,
+package, review and integration gates are complete. The [support matrix](api-v1-support-matrix.md)
+retains other providers' actual status; quality and full desktop distribution
+are outside the owner-selected deliverable.
+
+The dated sections below preserve prior decisions, failed attempts and wider
+acceptance criteria. Their pending statements describe their named checkpoints;
+they do not override the completed bounded Mac evidence above. Broader stable
+workflow promotion remains a separate decision and qualification effort.
+
+## Historical engine increment — 2026-10-26
 
 The owner selected the open-source engine API and reliable Mac training
 integration, excluding full desktop distribution/installer/signing, bundled
@@ -39,8 +64,9 @@ and five-role delivery through reviewed reader `b7d5e840`. Those exact sources
 remain distinct from the integrated candidate. Do not repeat training for a
 documentation, packaging or download correction.
 
-The broader stable checklist below is preserved. Native public
-logs/cancel/reconcile/GRPO remain disabled, and a consumer must independently
+The broader stable checklist below is preserved. At this checkpoint native public
+logs/cancel/reconcile/GRPO remained disabled; later scoped evidence is linked above.
+A consumer must independently
 authenticate exact qualification or a bounded restricted admission. Neither
 these successful fixtures nor report hashes establish broad stable lifecycle
 acceptance, arbitrary model/hardware support, writing quality, a Syntunia app or
@@ -76,7 +102,7 @@ pipeline compositions retain truthful backend status; no facade or CLI alone
 establishes a stable installed operational contract.
 The Python API is a library contract, not a deployed HTTP/MCP service.
 
-## Current priorities — Modal consumer handoff, 2026-10-20
+## Historical priorities — Modal consumer handoff, 2026-10-20
 
 The owner paused HF Jobs work and approved a supported-contract matrix plus a
 durable Modal consumer handoff so Syntunia can start building around API v1.
@@ -146,7 +172,7 @@ records the completed legacy Mac audit, reusable boundaries and remaining
 runtime/provider work. `synaptic doctor native-training --json` provides a
 read-only candidate report; it does not qualify a native training runtime.
 
-## Current release status — 2026-10-20, resumed qualification
+## Historical release status — 2026-10-20, resumed qualification
 
 [#258](https://github.com/ProfSynapse/Synaptic-Tuner/pull/258) merged after all
 18 checks passed on `864a9bccbc8bd866c56c021c131f12959f8a8649`.

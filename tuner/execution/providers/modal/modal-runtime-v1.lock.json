@@ -6,7 +6,7 @@
     },
     "bootstrap__synaptic_tuner___version_py": {
       "path": "synaptic_tuner/_version.py",
-      "sha256": "49fa86b62849d537e7e131445f272650ed77760db5f218f2113155ab60caf644"
+      "sha256": "da0532ebd507123031a82d4f7e264012c4f533a0a1f262fb88b92a46e4d0e816"
     },
     "bootstrap__synaptic_tuner__api____init___py": {
       "path": "synaptic_tuner/api/__init__.py",
@@ -318,7 +318,7 @@
     },
     "bootstrap__tuner__runtime__manifests__offline-sft-worker-v1_json": {
       "path": "tuner/runtime/manifests/offline-sft-worker-v1.json",
-      "sha256": "9ca34e37f84f6ac18ea792999a13d9f802e6a71d915d07a6c1fbe224aeac530a"
+      "sha256": "27d377edb81636fb2dcee024ceb92e14c99fe2ac1f103a73cad3ce9f3a3b3835"
     },
     "bootstrap__tuner__runtime__offline_sft_worker_py": {
       "path": "tuner/runtime/offline_sft_worker.py",
