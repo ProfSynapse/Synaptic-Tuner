@@ -6,6 +6,14 @@ Ordinary qualification and broad support remain gated. The existing qualified
 SFT environment stays intact. Historical CPU-only evidence below retains its
 original source and scope.
 
+Current integration update — 2026-10-28: the separate
+[bounded lifecycle qualification](../review/native-mlx-lifecycle-qualification.md)
+also passed actual GRPO numerical controls, two completions, public progress,
+confirmed cancellation, caller-loss/cold recovery and post-expiry retained reads.
+PR #279 merged after final independent review and all 18 checks. These results
+are selection-specific; the host must still authenticate ordinary qualification
+or restricted authority. See the [developer guide](../development.md).
+
 ## Source decision
 
 Read-only source audit pins (public repositories cloned without executing code):
@@ -39,7 +47,8 @@ token-ratio and KL objective, rather than its whole trainer/CLI. Its original
 tests include tiny hand-computed losses and masked-gradient controls; they are
 source evidence, not locally executed acceptance. Our independent CPU checks
 use scalar probability calculations and analytic gradients. Actual MLX
-autograd checks remain a separate Mac gate.
+autograd checks were a separate Mac gate, subsequently passed on the bounded
+M4 fixture linked above.
 
 The selected objective uses population variance plus 1e-8 inside the square
 root, detached old-policy/reference probabilities and detached group advantages,
@@ -89,7 +98,7 @@ unchanged parameters cannot establish successful native qualification. Five
 portable native roles retain input, reward, runtime and source bindings. Final
 replay loss on sampled rollouts is a consistency check, not held-out quality.
 
-## Qualification proposal and remaining gates
+## Historical qualification proposal — initial 2026-10-27 candidate
 
 Use a new private GRPO runtime and named candidate; do not modify/reuse the
 qualified SFT environment. The candidate closure keeps the reviewed 54 exact
@@ -105,7 +114,9 @@ reward with no guaranteed variation, finite steps/token/reward/time/memory/file
 bounds, and fresh output/state. Fit on the M4/24 GiB is unproven. Preserve any
 constant-reward or consumed failure; no automatic retry. Root owns hardware,
 model/runtime preparation, admissions, integration review and all Mac effects.
-Public logs/cancel/reconcile remain unavailable. CPU doubles prove controls,
+At that synchronous candidate, public logs/cancel/reconcile were unavailable;
+the separately authenticated lifecycle selection above subsequently qualified
+the bounded fixture. CPU doubles prove controls,
 not MLX execution, hardware fit, training quality or general success.
 
 ## CPU review evidence at initial candidate 57245717

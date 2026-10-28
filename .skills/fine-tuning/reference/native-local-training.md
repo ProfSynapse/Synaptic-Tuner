@@ -13,7 +13,21 @@ Canonical publication members remain sealed 0400. Native staging creates separat
 byte-identical 0600 members under a new 0700 content-addressed directory, then
 revalidates their identity; never chmod canonical originals to satisfy the reader.
 
-## Current evidence — 2026-10-26
+## Current evidence — 2026-10-28
+
+The selected OSS engine/Mac integration merged in PR #279 at `e2e8cd4f` after
+independent final evidence/package review and all 18 checks. Real bounded M4
+SFT/GRPO attempts demonstrate two completions per method, public numeric progress,
+confirmed cancellation, abrupt caller-loss/cold reconciliation, changed saved
+adapters/reload and verified artifact delivery. Four normal runs reverified
+after start expiry; all eight retained outcomes/progress streams matched with
+one process claim each. See `docs/review/native-mlx-lifecycle-qualification.md`.
+`1.1.0rc1` is a scoped engine preview, not broad stable/provider qualification.
+Hosts authenticate their exact selection; no accepting default authority ships.
+Actual-ML acknowledgement loss, optimizer resume, arbitrary model/OS support,
+model quality and full desktop distribution are outside this evidence.
+
+### Earlier SFT evidence — 2026-10-26
 
 The M4 now has successful bounded raw-text and assistant-only prompt/completion
 MLX SFT runs through the public `TrainingAPI` and `RunsAPI`, including native
@@ -21,8 +35,8 @@ verification and five-artifact delivery for each. See
 `docs/review/native-mlx-sft-qualification.md` (repo root) for the
 exact execution source, run, numeric adapter-change evidence and remaining
 desktop integration gates. The preparation chronology below retains historical
-blockers; it does not supersede that dated evidence or enable ordinary native
-training, GRPO, public cancellation, or product support.
+blockers; it does not supersede later GRPO/lifecycle evidence or enable ordinary
+native training or product support without independently authenticated authority.
 
 Restricted signed start admissions must satisfy
 `now < expires_at <= now + one hour` on the execution host. `admission-candidate`
@@ -97,9 +111,10 @@ worker/math/verifier bytes. No new provider verb or accepting authority exists.
 
 Linux CPU controls must not import MLX. The real tiny numerical test additionally
 requires `SYNAPTIC_TEST_NATIVE_GRPO_MLX=1` on Darwin arm64; root/source/runtime
-review and a bounded authorized command must precede it. Mac execution, GPU fit,
-real grouped reward variation, saved adapter changes and public artifact
-readback remain separate gates. Public logs/cancel/reconcile remain disabled.
+review and a bounded authorized command must precede it. The exact M4 mechanics
+and lifecycle fixtures passed those gates; other selections need their own proof.
+Legacy synchronous selections keep logs/cancel/reconcile disabled. Only the
+explicit independently authenticated lifecycle policy/session can expose them.
 
 ## Read-only host diagnosis (commands)
 
@@ -509,9 +524,10 @@ qualification or replay authority.
 and two distinct retained attempt-evidence references; its independent host
 authority must authenticate the supporting real runs, selected wheel/install
 provenance and final-adapter/public-readback evidence. Reference hashes alone
-are not qualification. Public logs, cancellation and reconciliation remain
-disabled even with this narrow qualification. The guardian's internal stop
-path does not promote public cancellation.
+are not qualification. This hardware qualification alone leaves public logs,
+cancellation and reconciliation disabled. The separately qualified versioned
+lifecycle additionally requires an exact independently authenticated lifecycle
+grant and owned session; an internal stop method cannot promote capabilities.
 
 `native_mlx_publication.py` independently checks the exact output inventory,
 workload/input binding, optimizer count, finite saved tensor delta, retained
@@ -624,7 +640,7 @@ tools and a bounded process; it loads MLX but no model or training publication.
 Its three cases skip on non-Apple hosts. A skip or CPU algebra double is not
 real MLX numerical evidence and does not issue training authority.
 
-### Public lifecycle qualification candidate — 2026-10-27
+### Public lifecycle qualification workflow — 2026-10-28
 
 Use the existing `native_host.py` with exact v2 config and separately root-signed
 selection for `qualify`; see `native-host.md` for the full contract. The selected
@@ -639,9 +655,10 @@ Never repeat `qualify`, signal saved PIDs, adopt a live child or restart trainin
 Only the signed cancel scenario can bind public cancellation; request and
 confirmed terminal are separate. Preserve completion races, uncertain claims
 and create-only reports. `logs` provides later bounded public readback.
-Source/CPU acceptance does not qualify Darwin/MLX or enable default capabilities;
-fresh final capture/admission, real lifecycle evidence and independent review
-remain required. Full desktop distribution and model-quality work are excluded.
+Source/CPU acceptance alone does not qualify Darwin/MLX or enable default
+capabilities. The dated real M4 evidence and independent review above complete
+the bounded fixture; every new attempt still needs fresh reviewed capture and
+admission. Full desktop distribution and model-quality work are excluded.
 
 Actual Darwin CPython startup can initialize `__CF_USER_TEXT_ENCODING` even with
 `-I -S -B` and an explicit clean environment. The CPU fixture's `/bin/sh` shim

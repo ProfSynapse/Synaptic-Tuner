@@ -220,7 +220,7 @@ def test_trusted_load_is_explicit_and_wraps_import_failure() -> None:
 
 
 def test_public_api_is_narrow_versioned_and_serializable(tmp_path) -> None:
-    assert canonical_version == "1.1.0"
+    assert canonical_version == "1.1.0rc1"
     assert __version__ == canonical_version
     assert PathRef.parse("project://data/train.jsonl").scheme == "project"
     assert SecretRef("env", "HF_TOKEN").to_dict() == {

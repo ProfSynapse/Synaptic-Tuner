@@ -156,7 +156,7 @@ project:
   id: ingestion-host
   name: Ingestion Host
 engine:
-  requires: ">=1.0,<2.0"
+  requires: ">=1.1.0rc1,<2"
   api: v1
 paths:
   configs: project://experiments

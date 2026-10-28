@@ -20,10 +20,10 @@ IMAGE = "sha256:" + "a" * 64
 CID = "b" * 64
 ROOT = Path(__file__).parents[2]
 DIRECT_TRAINER = "a7a8585e2a4607c7c0b49614260fda2814f29887a3b61e4b8b5df6f71f52639a"
-# Current source-fixture closure, including native RuntimeSpec support. These
+# Current source-fixture closure, including native RuntimeSpec and rc1 metadata. These
 # test pins do not relabel the historical R4/R6 live diagnostic artifacts.
-DIRECT_MANIFEST = "9d17c7306d256e04d8d713bc815b845fbefc944678c68603f054f179350aba42"
-DIRECT_CLOSURE = "04fde4819fe5adbbae28c6fc545ee798b4e6db4ce6df5f6c3fccfded8dfac4ce"
+DIRECT_MANIFEST = "14a94baaf287b4e7d23e3942d5494f29f0eabaeb957cdfafe959a670076ad8fc"
+DIRECT_CLOSURE = "dd7fcf54028d6d79a5b4dc403cbe751df346878df6762d529bad5a93042b0d52"
 R4_ENGINE_COMMIT = "4a8bb138672d60318479286797ffd75572407054"
 R6_ENGINE_COMMIT = "ba228d6c0e8859288b246c4b140774fa29c567a3"
 R6_PROJECT_COMMIT = "9f7799659565481f05d3bc1ecfa8174c87cf1508"

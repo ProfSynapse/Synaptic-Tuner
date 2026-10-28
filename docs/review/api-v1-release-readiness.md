@@ -7,9 +7,12 @@ superseded_for_current_release_planning_by: ../plans/stable-v1-release.md
 
 > Historical main-merge checkpoint. The evidence and open gates below describe
 > their named October 7 sources, not current main or a stable-release verdict.
-> Use the [stable v1 release gate](../plans/stable-v1-release.md) for the selected
-> included scenario/environment/SynthChat/evaluation/SFT/GRPO workflow,
-> provider parity, durable recovery and cancellation release scope.
+> For current development, use the [developer guide](../development.md),
+> [scoped 1.1.0rc1 release notes](../releases/1.1.0rc1.md) and
+> [support matrix](../plans/api-v1-support-matrix.md). The
+> [stable v1 release gate](../plans/stable-v1-release.md) preserves the separate
+> broader workflow/provider acceptance scope; this old checkpoint does not
+> reopen completed bounded Mac integration work.
 
 # API v1 main-merge readiness
 

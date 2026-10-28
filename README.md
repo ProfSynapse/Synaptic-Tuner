@@ -26,7 +26,7 @@
 `synaptic_tuner.api.v1` provides Data generation/improvement/validation,
 evaluation and report comparison, training, known-run observation/verification,
 and verified artifact download/publication through caller-configured ports.
-Version **1.1.0** targets the stable API v1 contract. The [support matrix](docs/plans/api-v1-support-matrix.md)
+Version **1.1.0rc1** is the first scoped engine release candidate, targeting API v1. The [support matrix](docs/plans/api-v1-support-matrix.md)
 records scoped acceptance, and [GitHub releases](https://github.com/ProfSynapse/Synaptic-Tuner/releases)
 record published artifacts and qualification evidence. The [release plan](docs/plans/stable-v1-release.md) defines promotion gates.
 The [API v1 policy](docs/architecture/api-v1-compatibility.md) defines public compatibility.
@@ -36,7 +36,7 @@ For a Modal-backed application, start with the
 It covers the existing installed training and retained-run path, the public
 Python boundary, and the storage/authority Syntunia must own. HF Jobs
 qualification remains paused. The support matrix records the exact qualified
-Modal GRPO, NVIDIA Docker/CUDA and native Apple-silicon SFT fixtures.
+Modal GRPO, NVIDIA Docker/CUDA and native Apple-silicon SFT/GRPO fixtures.
 
 For native Mac training, use the optional `synaptic_tuner.api.v1.native_mlx`
 [host integration contract](docs/architecture/native-mlx-host.md),
@@ -54,11 +54,17 @@ repeated SFT/GRPO completion, public cancellation and caller-loss recovery.
 Ordinary qualification remains independently authenticated.
 Full desktop distribution is separate.
 
+Start with the [developer guide](docs/development.md),
+[release notes](docs/releases/1.1.0rc1.md) and [changelog](CHANGELOG.md).
+This preview is distributed through GitHub Releases; it is not published on PyPI.
+The wheel provides the base library/CLI; training runtimes and host examples need
+the matching source assets and separately prepared dependencies.
+
 Download a reviewed wheel from its GitHub release, then install that exact file
 and inspect the packaged CLI:
 
 ```sh
-python -m pip install /absolute/path/synaptic_tuner-1.1.0-py3-none-any.whl
+python -m pip install /absolute/path/synaptic_tuner-1.1.0rc1-py3-none-any.whl
 synaptic --help
 ```
 

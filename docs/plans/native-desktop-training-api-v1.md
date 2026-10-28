@@ -1,6 +1,12 @@
 # Native desktop training through API v1
 
-Status: implementation preparation, 2026-10-20. Required product scope is local
+Status: bounded OSS engine/Mac integration complete, 2026-10-28. See the
+[current support matrix](api-v1-support-matrix.md) and
+[release candidate notes](../releases/1.1.0rc1.md). The implementation audit and
+gap table below describe the historical 2026-10-20 baseline, not missing work
+in the current native SFT/GRPO integration.
+
+Historical required product scope is local
 training on NVIDIA and Apple silicon, alongside Modal SFT and GRPO. HF Jobs
 remains paused. This plan complements the
 [stable release gate](stable-v1-release.md); it does not qualify a runtime.
@@ -14,10 +20,11 @@ The selected deliverable is the OSS engine and Mac training integration; full
 desktop distribution remains separate. Subsequent
 [bounded M4 lifecycle evidence](../review/native-mlx-lifecycle-qualification.md)
 covers public progress, cancellation and abrupt caller-loss/cold reconciliation
-for both methods. Ordinary authority, broader lifecycle combinations and final
-release/integration gates retain the report's explicit limits.
+for both methods. Final independent evidence/package review, CI and post-expiry
+readback passed before PR #279 merged. Ordinary authority and broader lifecycle
+combinations retain the report's explicit limits.
 
-## Existing code and evidence
+## Historical code audit and gaps — 2026-10-20
 
 | Boundary | Reuse | Gap |
 | --- | --- | --- |

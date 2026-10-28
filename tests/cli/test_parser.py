@@ -821,7 +821,7 @@ project:
   id: parser-host
   name: Parser Host
 engine:
-  requires: \">=1.0,<2.0\"
+  requires: \">=1.1.0rc1,<2\"
   api: v1
 paths:
   configs: project://experiments
@@ -1075,7 +1075,7 @@ def test_real_main_and_smoke_handler_reject_ambient_token_before_submit(
     engine_root = tmp_path / "engine-checkout"
     engine_root.mkdir()
     monkeypatch.setenv("SYNAPTIC_ENGINE_ROOT", str(engine_root))
-    _write_requirement_manifest(project, ">=1.1,<2")
+    _write_requirement_manifest(project, ">=1.1.0rc1,<2")
     env_file = project / "smoke.env"
     env_file.write_text("HF_TOKEN=hf_file_authority\n", encoding="utf-8")
     monkeypatch.setenv("HF_TOKEN", "hf_ambient_rejected")
@@ -1135,7 +1135,7 @@ paths:
 def test_compatible_engine_requirement_routes_handler(tmp_path, monkeypatch):
     project_root = tmp_path / "compatible-host"
     project_root.mkdir()
-    _write_requirement_manifest(project_root, ">=1.1,<2")
+    _write_requirement_manifest(project_root, ">=1.1.0rc1,<2")
     routed = []
 
     def record_route(args, *, context):
@@ -1178,12 +1178,12 @@ def test_incompatible_engine_requirement_fails_before_routing(
     assert payload["error"]["details"] == {
         "reason": "engine_version_incompatible",
         "requires": "<1.1",
-        "engine_version": "1.1.0",
+        "engine_version": "1.1.0rc1",
     }
 
 
-def test_legacy_and_public_runtime_versions_share_canonical_1_1_0():
-    assert synaptic_tuner.__version__ == "1.1.0"
+def test_legacy_and_public_runtime_versions_share_canonical_release_candidate():
+    assert synaptic_tuner.__version__ == "1.1.0rc1"
     assert tuner.__version__ == synaptic_tuner.__version__
 
 

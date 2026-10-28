@@ -1,6 +1,24 @@
 # API v1 integration handoff
 
-## Recovered continuation — 2026-10-26
+## Current handoff — 2026-10-28
+
+The selected OSS engine and reliable Mac integration is merged through PR #279
+at `e2e8cd4f`. Its exact reviewed head passed all 18 checks. SFT and GRPO
+completion, public progress/cancellation, abrupt caller-loss/cold recovery,
+verified adapters and artifact delivery have real bounded M4 evidence, including
+post-expiry retained reads. Read the [current support matrix](api-v1-support-matrix.md),
+[native host contract](../architecture/native-mlx-host.md),
+[lifecycle evidence](../review/native-mlx-lifecycle-qualification.md) and
+[developer guide](../development.md). The first publication is the scoped
+`1.1.0rc1` engine preview; broader stable workflows and Syntunia app integration
+remain separate. Hosts supply authority, configuration, credentials and stores;
+no accepting default native authority or HTTP service is installed.
+
+The older branch names, worktree recovery and pending gates below are historical
+checkpoints. Use the release tag/current `main` for a new integration; do not
+resume old consumed training attempts or treat old branch names as current work.
+
+## Historical recovered continuation — 2026-10-26
 
 The previous `api-v1-coordination-20261020` worktree is absent; its Git branch
 and MLX branches survived. Work resumes on `resume/api-v1-mlx-20261026` from
@@ -18,7 +36,7 @@ merged into the integration branch. Read the actual branch and worktree state
 before continuing. This note records the handoff scope, not a production
 readiness certification.
 
-## Current priority
+## Historical priority — 2026-10-12
 
 Prepare the provider-neutral API v1 for production use by consuming
 applications, including Syntunia. First complete and qualify live training
