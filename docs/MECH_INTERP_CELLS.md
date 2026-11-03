@@ -271,6 +271,10 @@ PAYLOAD NONFINITE BUDGET OUTPUT_EXISTS APPLY`).
 
 ### `weight_patch` in `steer` / `dose-calibrate` / `extract`
 
+Steer and dose generation records retain `generated_token_ids` (through the first
+EOS, inclusive). Use these for exact token parity; decoded-text equality alone
+does not establish token equality. Pool metadata cannot override this field.
+
 ```yaml
 surface:                       # extract: top-level `weight_patch:`
   weight_patch: {path: patches/edit.yaml, sha256: <sha256 of the spec file>}

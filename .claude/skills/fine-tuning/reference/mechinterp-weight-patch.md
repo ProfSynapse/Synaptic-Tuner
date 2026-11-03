@@ -34,6 +34,9 @@ forwards `--model-revision`.
   export per candidate). The run must pass `--model-revision` equal to
   `base.revision`; use a fresh output path when the patch changes (stale lineage
   exits 6; a refused patch exits 7 before any row).
+- Compare retained `generated_token_ids` for zero-patch, batch and export parity;
+  matching decoded text alone is insufficient. Old outputs without IDs need a
+  fresh parity run.
 - `extract` `capture_sites` use decoder BLOCK indices (`law.layer` convention), not
   `hidden_states` indices. Set `use_cache: true` for hybrid/KV-sharing models, and
   `forward_only: true` with `families: [anchor]` for anchor-only reads.

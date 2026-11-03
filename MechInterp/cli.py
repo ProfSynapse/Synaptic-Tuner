@@ -333,6 +333,7 @@ _COMPUTED_RECORD_KEYS = frozenset(
         "answer_text",
         "prompt_len",
         "n_new_tokens",
+        "generated_token_ids",
         "terminated_naturally",
     }
 )
@@ -432,6 +433,7 @@ def _continuation_record(tokenizer, continuation, generation) -> dict:
     text = tokenizer.decode(effective_ids, skip_special_tokens=True)
     return {
         "answer_text": text,
+        "generated_token_ids": effective_ids,
         "n_new_tokens": int(stop_len),
         "terminated_naturally": bool(stop_len < generation.max_new_tokens),
     }
