@@ -4,6 +4,7 @@ in-memory apply/revert and create-only export. Tiny local checkpoints only."""
 from __future__ import annotations
 
 import json
+import errno
 import os
 import struct
 from pathlib import Path
@@ -891,3 +892,82 @@ def test_export_racing_empty_destination_is_never_replaced(tmp_path):
         _rename_create_only(source, destination)
     assert not list(destination.iterdir())
     assert (source / "payload").read_text() == "preserve"
+
+
+def test_export_without_exclusive_rename_verifies_files_and_publishes_manifest_last(tmp_path, ckpt_dir, monkeypatch):
+    from MechInterp.weights import export as module
+    def unsupported(*args):
+        raise OSError(errno.EINVAL, "filesystem does not support rename flags")
+    monkeypatch.setattr(module, "_rename_create_only", unsupported)
+    out = tmp_path / "exported"
+    result = export_patch_config(_std_spec(tmp_path, ckpt_dir, export_dir=out))
+    manifest = json.loads((out / module.MANIFEST_NAME).read_text())
+    assert result["written"] and manifest == result["manifest"]
+    assert manifest["publication"] == {"method": "exclusive_directory_manifest_last", "atomic_directory_rename": False}
+    for name, info in {**manifest["output"]["weight_files"], **manifest["output"]["copied_files"]}.items():
+        assert file_sha(out / name) == info["sha256"]
+    assert not [p for p in tmp_path.iterdir() if ".partial-" in p.name]
+
+
+def test_export_fallback_refuses_a_racing_destination(tmp_path, ckpt_dir, monkeypatch):
+    from MechInterp.weights import export as module
+    out = tmp_path / "exported"
+    def racing(source, destination):
+        destination.mkdir()
+        (destination / "keep.txt").write_text("precious")
+        raise OSError(errno.EINVAL, "unsupported rename flags")
+    monkeypatch.setattr(module, "_rename_create_only", racing)
+    with refusal("output_exists"):
+        export_patch_config(_std_spec(tmp_path, ckpt_dir, export_dir=out))
+    assert (out / "keep.txt").read_text() == "precious"
+    assert len(list(out.iterdir())) == 1
+
+
+def test_failed_fallback_never_publishes_manifest_or_deletes_foreign_files(tmp_path, ckpt_dir, monkeypatch):
+    from MechInterp.weights import export as module
+    out = tmp_path / "exported"
+    original_copy = module.shutil.copyfileobj
+    def unsupported(*args):
+        raise OSError(errno.EINVAL, "unsupported rename flags")
+    def fail_during_publication(source, sink, *args, **kwargs):
+        if ".partial-" in Path(source.name).parent.name:
+            (out / "keep.txt").write_text("precious")
+            sink.write(b"partial")
+            raise OSError(errno.EIO, "planted publication failure")
+        return original_copy(source, sink, *args, **kwargs)
+    monkeypatch.setattr(module, "_rename_create_only", unsupported)
+    monkeypatch.setattr(module.shutil, "copyfileobj", fail_during_publication)
+    with pytest.raises(OSError, match="planted publication failure"):
+        export_patch_config(_std_spec(tmp_path, ckpt_dir, export_dir=out))
+    assert not (out / module.MANIFEST_NAME).exists()
+    assert (out / "keep.txt").read_text() == "precious"
+    assert len(list(out.iterdir())) == 1
+
+
+def test_fallback_rejects_corrupted_copies(tmp_path, ckpt_dir, monkeypatch):
+    from MechInterp.weights import export as module
+    out = tmp_path / "exported"
+    original_copy = module.shutil.copyfileobj
+    def unsupported(*args):
+        raise OSError(errno.EOPNOTSUPP, "unsupported rename flags")
+    def corrupt(source, sink, *args, **kwargs):
+        if ".partial-" in Path(source.name).parent.name:
+            sink.write(b"corrupt")
+            return None
+        return original_copy(source, sink, *args, **kwargs)
+    monkeypatch.setattr(module, "_rename_create_only", unsupported)
+    monkeypatch.setattr(module.shutil, "copyfileobj", corrupt)
+    with refusal("apply"):
+        export_patch_config(_std_spec(tmp_path, ckpt_dir, export_dir=out))
+    assert not out.exists()
+
+
+def test_export_does_not_fallback_on_permission_failure(tmp_path, ckpt_dir, monkeypatch):
+    from MechInterp.weights import export as module
+    out = tmp_path / "exported"
+    def denied(*args):
+        raise OSError(errno.EACCES, "permission denied")
+    monkeypatch.setattr(module, "_rename_create_only", denied)
+    with pytest.raises(OSError) as exc:
+        export_patch_config(_std_spec(tmp_path, ckpt_dir, export_dir=out))
+    assert exc.value.errno == errno.EACCES and not out.exists()

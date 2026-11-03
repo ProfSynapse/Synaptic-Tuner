@@ -30,6 +30,11 @@ forwards `--model-revision`.
 - Always `--validate` before `--export`. Export is create-only into a new directory
   and verifies untouched bytes by re-hashing; it never overwrites. Large outputs
   (including to external drives) are chosen by `export.output_dir`, never by code.
+- External filesystems may reject exclusive directory rename. Export then uses
+  exclusive directory creation, verified file copies and a completion manifest
+  written last. Require that manifest before consuming an export. A kill can
+  leave an incomplete directory; retain it and retry into a fresh destination.
+  This fallback preserves create-only behavior, not atomic directory publication.
 - Evaluate candidates with `surface.weight_patch: {path, sha256}` (in-memory, no
   export per candidate). The run must pass `--model-revision` equal to
   `base.revision`; use a fresh output path when the patch changes (stale lineage

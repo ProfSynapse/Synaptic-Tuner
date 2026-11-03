@@ -5,8 +5,11 @@ shard's header and layout byte-for-byte: each shard is copied and ONLY the byte
 ranges of modified tensors are overwritten. Untouched tensors (and untouched
 shards entirely) are therefore preserved exactly, and this is verified by
 re-hashing the output against the base. The checkpoint is staged in a sibling
-directory and renamed into place only after verification; an existing destination
-is refused, never overwritten.
+directory and published only after verification; an existing destination is
+refused, never overwritten. Filesystems without exclusive directory rename use
+an exclusively created directory, verified file copies and a completion manifest
+written last. A killed fallback export can leave an incomplete directory without
+that manifest; consumers must require the manifest before using an export.
 """
 
 from __future__ import annotations
@@ -108,6 +111,56 @@ def _rename_create_only(source: Path, destination: Path) -> None:
         raise OSError(code, os.strerror(code))
 
 
+def _publish_manifest_last(source: Path, destination: Path, manifest: dict) -> None:
+    """Create-only publication for filesystems without RENAME_NOREPLACE.
+
+    Directory creation arbitrates concurrent exporters. No existing file is
+    opened for writing. The manifest appears only after all copied bytes have
+    been fsynced and checked against the staged export's recorded hashes.
+    """
+    try:
+        destination.mkdir(mode=0o700)
+    except FileExistsError as exc:
+        raise WeightPatchError("output_exists", "export destination appeared during publication") from exc
+    created: list[Path] = []
+    try:
+        expected = {**manifest["output"]["weight_files"], **manifest["output"]["copied_files"]}
+        for name, info in sorted(expected.items()):
+            src, dst = source / name, destination / name
+            with dst.open("xb") as sink:
+                created.append(dst)
+                with src.open("rb") as stream:
+                    shutil.copyfileobj(stream, sink, length=_COPY_CHUNK)
+                sink.flush()
+                os.fsync(sink.fileno())
+            if _sha_of(dst) != info["sha256"]:
+                raise WeightPatchError("apply", f"{name}: published bytes differ from the verified export")
+        manifest["publication"] = {"method": "exclusive_directory_manifest_last", "atomic_directory_rename": False}
+        with (destination / MANIFEST_NAME).open("x", encoding="utf-8") as sink:
+            created.append(destination / MANIFEST_NAME)
+            json.dump(manifest, sink, indent=2, sort_keys=True)
+            sink.write("\n")
+            sink.flush()
+            os.fsync(sink.fileno())
+        try:
+            fsync_path(destination)
+        except OSError:
+            pass  # Some supported filesystems cannot fsync a directory.
+    except BaseException:
+        # Never remove a competing writer's unrecognized files or directory.
+        for path in reversed(created):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        try:
+            destination.rmdir()
+        except OSError:
+            pass
+        raise
+    shutil.rmtree(source)
+
+
 def export_checkpoint(
     spec: WeightPatchSpec,
     spec_sha256: str,
@@ -129,7 +182,13 @@ def export_checkpoint(
         if os.path.lexists(final):  # re-check immediately before the rename
             raise WeightPatchError("output_exists", "export destination appeared during export")
         fsync_path(staging)
-        _rename_create_only(staging, final)
+        try:
+            _rename_create_only(staging, final)
+        except OSError as exc:
+            unsupported = {errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP, errno.ENOTSUP}
+            if exc.errno not in unsupported:
+                raise
+            _publish_manifest_last(staging, final, manifest)
         try:
             fsync_path(parent)
         except OSError:  # some filesystems (e.g. drvfs/exFAT) cannot fsync a directory

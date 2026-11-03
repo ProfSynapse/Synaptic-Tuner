@@ -266,6 +266,13 @@ verified by re-hashing), copies the index and `sidecar_files`, writes
 `mechinterp-weight-export.manifest.json` (spec/payload/base-file digests, per-tensor
 before/after hashes, realized deltas, output file hashes, `patch_digest`), then
 renames into place. An existing destination is refused, never overwritten.
+On filesystems that reject exclusive directory rename (including some external
+drive mounts), export exclusively creates the destination, copies and re-hashes
+the verified files, then writes the completion manifest last. The manifest
+records `publication.method: exclusive_directory_manifest_last`. This fallback
+does not publish the directory atomically. Require a valid completion manifest
+before loading it. A killed export may leave an incomplete directory; preserve
+it as failed evidence and choose a fresh destination for a retry.
 Refusals exit 1 with `WEIGHTS_<CODE>` (`SCHEMA PATH INDEX BINDING BASE_HASH_MISMATCH
 PAYLOAD NONFINITE BUDGET OUTPUT_EXISTS APPLY`).
 
