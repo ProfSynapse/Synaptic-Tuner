@@ -228,6 +228,7 @@ Load the specific reference you need:
 | **Image LoRA** | Qwen-Image LoRAs via ai-toolkit on Modal: dataset recipes, captions/tokens, sizing, cost cap, fetch/verify/cleanup | `reference/image-lora.md` |
 | **Troubleshooting** | OOM errors, instability, platform issues | `reference/troubleshooting.md` |
 | **Tokenizer Profiling** | Offline token-length distributions and sequence-budget sizing | `reference/tokenizer-profiling.md` |
+| **Batch Generation** | Pinned vLLM, HF schema-decoding fallback, repeatability and resume qualification | `reference/batch-generation.md` |
 | **Derived Training Images** | Immutable package-overlay planning, capture, diagnostic reporting, and live launch verification | `reference/derived-training-images.md` |
 | **Nexus Note Snapshot** | Read-only, explicit private-note snapshots for config-driven analysis | `reference/nexus-note-snapshot.md` |
 | **Env Alignment Protocol** | Canonical SynthChat → SFT → merge/publish → KTO → env-GRPO flow | `protocols/environment-backed-alignment-pipeline.md` |

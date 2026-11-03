@@ -57,7 +57,8 @@ def _load_model_and_tokenizer(
     """
     import torch
     import transformers
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoTokenizer
+    from shared.utilities.text_model import load_text_generation_model
 
     major = int(transformers.__version__.split(".")[0])
     dtype_kwarg = {"dtype": torch.bfloat16} if major >= 5 else {"torch_dtype": torch.bfloat16}
@@ -65,7 +66,7 @@ def _load_model_and_tokenizer(
     tokenizer = AutoTokenizer.from_pretrained(model_name, revision=revision, token=token)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(
+    model = load_text_generation_model(
         model_name, revision=revision, token=token, device_map="auto", **dtype_kwarg
     )
     if post_base_load is not None:

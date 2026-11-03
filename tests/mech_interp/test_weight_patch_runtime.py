@@ -199,12 +199,16 @@ def test_post_base_load_runs_after_base_load_and_before_adapter(monkeypatch):
 
     events = []
 
+    class FakeConfig:
+        pass
+
     class FakeModel(torch.nn.Module):
         def eval(self):
             events.append("eval")
             return self
 
     class FakeAuto:
+        _model_mapping = {FakeConfig: FakeModel}
         @staticmethod
         def from_pretrained(name, **kw):
             events.append(("model", kw.get("revision")))
@@ -219,6 +223,7 @@ def test_post_base_load_runs_after_base_load_and_before_adapter(monkeypatch):
             return FakeTok()
 
     monkeypatch.setattr(transformers, "AutoModelForCausalLM", FakeAuto)
+    monkeypatch.setattr(transformers.AutoConfig, "from_pretrained", lambda *a, **k: FakeConfig())
     monkeypatch.setattr(transformers, "AutoTokenizer", FakeTok)
     model, _ = mi_cli._load_model_and_tokenizer(
         "m", None, REVISION, post_base_load=lambda m: events.append(("hook", type(m).__name__))

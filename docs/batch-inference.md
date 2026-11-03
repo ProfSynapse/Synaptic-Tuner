@@ -260,3 +260,17 @@ python tuner.py batch-capture \
 > Local lane on a slow disk (e.g. a 9P-mounted drive): point `--out-dir` at fast
 > local scratch (ext4 `~/` or `/tmp`) and use `--sync-cmd` to move artifacts to
 > the slow drive once, rather than writing tensors there per row.
+# HF structured-decoding fallback
+
+`batch-generate --engine hf-batched --json-schema schema.json
+--structured-output-backend xgrammar` uses the optional XGrammar Transformers
+logits processor. A fresh matcher is created per independent generation batch;
+the runtime records its XGrammar/Transformers/Torch versions. Unconstrained HF
+generation requires no grammar package. Conditional generation models registered
+with Transformers can serve text-only prompts through their registered auto
+class. Weight-loading errors are not caught and retried through another loader.
+
+HF batch size one removes batch-composition changes but still requires actual
+model repeat/permutation and hard-kill/resume checks on the consuming study's
+hardware. It does not inherit vLLM's batch-invariance guarantee. A change of
+backend is prospective and must be registered before scientific generation.

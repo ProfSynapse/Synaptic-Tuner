@@ -1066,13 +1066,13 @@ Examples:
             "may be repeated. Each value must encode to exactly one token."
         ),
     )
-    parser.add_argument("--json-schema", dest="json_schema", help="Path to a JSON Schema enforced by vLLM structured outputs (batch-generate).")
+    parser.add_argument("--json-schema", dest="json_schema", help="Path to a JSON Schema enforced by vLLM or HF + XGrammar (batch-generate).")
     parser.add_argument(
         "--structured-output-backend",
         choices=["auto", "xgrammar"],
         default="auto",
         dest="structured_output_backend",
-        help="Pinned vLLM structured-output backend (default: auto).",
+        help="Structured-output backend; HF schema decoding uses XGrammar (default: auto).",
     )
     parser.add_argument(
         "--structured-output-disable-any-whitespace",
