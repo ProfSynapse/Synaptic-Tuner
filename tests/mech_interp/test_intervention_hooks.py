@@ -334,3 +334,17 @@ def test_hook_readback_offtarget_catches_real_inactive_movement():
     rb = hook._readback(moved, d, True, torch.tensor([2, 2]), None,
                         torch.tensor([2.0, 0.0]), pre)
     assert rb["offtarget_abs_max"] == pytest.approx(2.0)
+
+
+def test_bf16_noop_readback_uses_same_direction_before_and_after():
+    generator = torch.Generator().manual_seed(20261103)
+    direction = torch.randn(2560, generator=generator)
+    direction /= direction.norm()
+    hidden = (torch.randn(3, 4, 2560, generator=generator) * 10).to(torch.bfloat16)
+    hook = InterventionHook('erase_write', direction, strength=0.0,
+                            position='final', measure_readback=True)
+    output = hook(None, None, hidden)
+    assert torch.equal(output, hidden)  # No actual movement occurred.
+    # This used to report >1e-3 because pre used float32 direction while
+    # post used its bf16-rounded copy. A tolerance change cannot fix a metric.
+    assert hook.last_readback['offtarget_abs_max'] == 0.0

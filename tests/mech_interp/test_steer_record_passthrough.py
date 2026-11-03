@@ -128,6 +128,7 @@ def test_computed_keys_are_never_shadowed_by_a_same_named_pool_field():
     row = _fresh_row()
     row["answer_text"] = "SHOULD NOT SURVIVE"
     row["n_new_tokens"] = -1
+    row["generated_token_ids"] = [-1]
     row["terminated_naturally"] = "spoofed"
 
     model = _build_tiny_model()
@@ -139,6 +140,8 @@ def test_computed_keys_are_never_shadowed_by_a_same_named_pool_field():
 
     assert rec["answer_text"] != "SHOULD NOT SURVIVE"
     assert rec["n_new_tokens"] != -1
+    assert rec["generated_token_ids"] != [-1]
+    assert len(rec["generated_token_ids"]) == rec["n_new_tokens"]
     assert rec["terminated_naturally"] != "spoofed"
     assert isinstance(rec["n_new_tokens"], int)
     assert isinstance(rec["terminated_naturally"], bool)

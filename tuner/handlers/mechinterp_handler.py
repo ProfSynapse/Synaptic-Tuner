@@ -17,9 +17,12 @@ Sub-commands:
   steer        run the six-block steer cell (smoke-gated)
   dose-calibrate resumable dose ladder over one or more frozen readouts
   score-gates  evaluate a gates.yaml against a per-row output JSONL
+  weights-inspect  inspect a LOCAL safetensors checkpoint (experimental)
+  weights-patch    validate (--validate) or export (--export) a weight patch (experimental)
   list-configs show bundled example recipes
 """
 
+import json
 import logging
 import os
 import subprocess
@@ -70,10 +73,14 @@ class MechInterpHandler(BaseHandler):
             return self._handle_dose_calibrate()
         if sub == "score-gates":
             return self._handle_score_gates()
+        if sub == "weights-inspect":
+            return self._handle_weights_inspect()
+        if sub == "weights-patch":
+            return self._handle_weights_patch()
 
         msg = (
             "mechinterp requires a sub-command: run, extract, probe-fit, steer, "
-            "dose-calibrate, score-gates, list-configs"
+            "dose-calibrate, score-gates, weights-inspect, weights-patch, list-configs"
         )
         if self.json_mode:
             self.output_error(msg, code="SUBCOMMAND_REQUIRED")
@@ -277,6 +284,7 @@ class MechInterpHandler(BaseHandler):
             revision=self._arg("model_revision"),
             adapter=self._arg("adapter"),
             gpu_ack=bool(self._arg("i_know_this_runs_on_gpu", False)),
+            project_context=self.context,
         )
 
     def _handle_probe_fit(self) -> int:
@@ -345,7 +353,55 @@ class MechInterpHandler(BaseHandler):
             render_fn_spec=render_fn,
             gpu_ack=bool(self._arg("i_know_this_runs_on_gpu", False)),
             project_context=self.context,
+            revision=self._arg("model_revision"),
         )
+
+    def _weights_refusal(self, exc) -> int:
+        self.output_error(
+            exc.message, code=f"WEIGHTS_{exc.code.upper()}", details={"refusal": exc.code}
+        )
+        return 1
+
+    def _handle_weights_inspect(self) -> int:
+        from MechInterp.weights.errors import WeightPatchError
+        from MechInterp.weights.workflow import inspect_from_config
+
+        config_path = self._require("weights_config", "--weights-config")
+        if not config_path:
+            return 1
+        try:
+            report = inspect_from_config(self._input_path(config_path), context=self.context)
+        except WeightPatchError as exc:
+            return self._weights_refusal(exc)
+        self.output(report, json.dumps(report, indent=2))
+        return 0
+
+    def _handle_weights_patch(self) -> int:
+        from MechInterp.weights.errors import WeightPatchError
+        from MechInterp.weights.workflow import export_patch_config, validate_patch_config
+
+        config_path = self._require("weights_config", "--weights-config")
+        if not config_path:
+            return 1
+        validate = bool(self._arg("weights_validate", False))
+        export = bool(self._arg("weights_export", False))
+        if validate == export:
+            self.output_error(
+                "weights-patch requires exactly one of --validate or --export",
+                code="ARG_REQUIRED",
+            )
+            return 1
+        try:
+            path = self._input_path(config_path)
+            result = (
+                validate_patch_config(path, context=self.context)
+                if validate
+                else export_patch_config(path, context=self.context)
+            )
+        except WeightPatchError as exc:
+            return self._weights_refusal(exc)
+        self.output(result, json.dumps(result, indent=2))
+        return 0
 
     def _handle_score_gates(self) -> int:
         from MechInterp.cli import run_score_gates
