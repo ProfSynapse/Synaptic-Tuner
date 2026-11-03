@@ -872,7 +872,10 @@ def write_anchor(run_dir: Path, output: Path) -> dict:
     lock_fd, journal, raw, _ = _writer_session(run_dir)
     try:
         doc = freeze_anchor(run_dir)
-        create_only(output, canonical_bytes(doc) + b"\n")
+        try:
+            create_only(output, canonical_bytes(doc) + b"\n")
+        except FileExistsError as exc:
+            raise EditorError("freeze anchor already exists; it is never overwritten", code="anchor_exists") from exc
         return {"ok": True, "anchor_sha256": sha256_file(output), "anchor": doc}
     finally:
         journal.close()

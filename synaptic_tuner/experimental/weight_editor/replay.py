@@ -23,6 +23,14 @@ def load_verified(run_dir: Path) -> tuple[dict, list[dict], list[dict]]:
     if not (run_dir / "manifest.json").is_file():
         raise EditorError(f"{run_dir} is not a retained editor run", code="run_not_found")
     manifest = read_manifest(run_dir)
+    for relpath, key in (("config.json", "config_sha256"),
+                         ("capsule/manifest.json", "capsule_manifest_sha256")):
+        try:
+            matches = sha256_file(run_dir / relpath) == manifest["binding"][key]
+        except OSError:
+            matches = False
+        if not matches:
+            raise EditorError(f"retained input differs from binding: {relpath}", code="retained_input_mismatch")
     bd, rid = manifest["binding_digest"], manifest["run_id"]
     journal = verify_file(run_dir / "journal" / "events.jsonl", rid, genesis_prev(bd, "journal"))
     raw = verify_file(run_dir / "provider" / "events.jsonl", rid, genesis_prev(bd, "provider"))

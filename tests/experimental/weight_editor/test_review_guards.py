@@ -182,3 +182,13 @@ def test_advance_verifies_patch_artifacts(make):
     code, out, _ = fx.cli("advance", "--run-dir", fx.run_dir(), "--to", "independent_evaluation",
                           "--reference", "evaluation", "--anchor-file", anchor)
     assert code == 1 and out["error"]["code"] == "run_unqualified"
+
+
+@pytest.mark.parametrize("relative", ["config.json", "capsule/manifest.json"])
+def test_retained_inputs_are_checked_against_binding(make, relative):
+    fx = make(script=script([final()]))
+    assert fx.run()[0] == 0
+    path = fx.run_dir() / relative
+    path.write_bytes(path.read_bytes() + b" ")
+    code, out, _ = fx.cli("verify", "--run-dir", fx.run_dir())
+    assert code == 5 and out["problems"][0]["code"] == "retained_input_mismatch"
