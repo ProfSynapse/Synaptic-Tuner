@@ -376,6 +376,8 @@ Examples:
   python tuner.py cloud-run --job-config Trainers/recipes/job.yaml --yes
   python tuner.py local-run --job-config Trainers/recipes/job.yaml --yes
   python tuner.py mechinterp run --config MechInterp/configs/my_pipeline.yaml --provider local --yes
+  python tuner.py mechinterp weights-inspect --weights-config my_project/inspect.yaml --json
+  python tuner.py mechinterp weights-patch --weights-config my_project/patch.yaml --validate --json
   python tuner.py cloud-jobs list
   python tuner.py bucket analyze --path runs/hf_jobs/sft/<run-prefix>/
   python tuner.py bucket read --path runs/hf_jobs/sft/<run-prefix>/logs/training_latest.jsonl --jsonl-latest --pretty
@@ -882,6 +884,26 @@ Examples:
         dest="skip_step",
         action="append",
         help="Skip a named stage from a mechinterp pipeline. May be repeated.",
+    )
+    parser.add_argument(
+        "--weights-config",
+        dest="weights_config",
+        help=(
+            "Path to a mechinterp-weights-inspect/v1 request (mechinterp weights-inspect) "
+            "or a mechinterp-weight-patch/v1 spec (mechinterp weights-patch). Experimental."
+        ),
+    )
+    parser.add_argument(
+        "--validate",
+        dest="weights_validate",
+        action="store_true",
+        help="mechinterp weights-patch: verify binding, payload and budget against the local checkpoint; write nothing.",
+    )
+    parser.add_argument(
+        "--export",
+        dest="weights_export",
+        action="store_true",
+        help="mechinterp weights-patch: validate, then create-only export the modified checkpoint to the spec's export.output_dir.",
     )
 
     # Experiment loop flags

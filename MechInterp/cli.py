@@ -43,7 +43,18 @@ from MechInterp.config import (
 # --------------------------------------------------------------------------
 
 
-def _load_model_and_tokenizer(model_name: str, adapter: Optional[str] = None, revision: Optional[str] = None):
+def _load_model_and_tokenizer(
+    model_name: str,
+    adapter: Optional[str] = None,
+    revision: Optional[str] = None,
+    post_base_load: Optional[Callable] = None,
+):
+    """Load the base model (+ optional adapter).
+
+    ``post_base_load(model)`` runs on the freshly loaded BASE model, before an
+    adapter is attached and before the model is returned for any generation or
+    capture. It is how an in-memory weight patch is applied.
+    """
     import torch
     import transformers
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -57,6 +68,8 @@ def _load_model_and_tokenizer(model_name: str, adapter: Optional[str] = None, re
     model = AutoModelForCausalLM.from_pretrained(
         model_name, revision=revision, token=token, device_map="auto", **dtype_kwarg
     )
+    if post_base_load is not None:
+        post_base_load(model)
     if adapter:
         from peft import PeftModel
 
@@ -83,23 +96,96 @@ def _load_callable(spec: str) -> Callable:
 
 
 # --------------------------------------------------------------------------
+# weight patch (optional surface.weight_patch / extract weight_patch)
+# --------------------------------------------------------------------------
+
+# Exit codes added by this capability: 6 = stale weight-patch lineage on resume,
+# 7 = weight patch refused (nothing applied).
+EXIT_PATCH_LINEAGE = 6
+EXIT_PATCH_REFUSED = 7
+
+
+class _PatchSession:
+    """Verifies a pinned patch before the model loads and applies it after.
+
+    ``hook`` is passed as ``post_base_load``. ``receipt`` is the applied patch's
+    receipt dict (None when no patch is configured).
+    """
+
+    def __init__(self, ref, revision: Optional[str], context: ProjectContext | None):
+        self.receipt: Optional[dict] = None
+        self._applied = None
+        self._prepared = None
+        if ref is None:
+            return
+        from MechInterp.weights.runtime import check_declared_revision, prepare_patch
+
+        self._prepared = prepare_patch(ref.path, ref.sha256, context=context)
+        check_declared_revision(self._prepared, revision)
+
+    @property
+    def active(self) -> bool:
+        return self._prepared is not None
+
+    @property
+    def hook(self) -> Optional[Callable]:
+        return self._apply if self._prepared is not None else None
+
+    @property
+    def digest(self) -> Optional[str]:
+        return self.receipt["patch_digest"] if self.receipt else None
+
+    def _apply(self, model) -> None:
+        from MechInterp.weights.runtime import apply_patch, check_loaded_commit
+
+        commit = check_loaded_commit(self._prepared, model)
+        self._applied = apply_patch(model, self._prepared)
+        self.receipt = self._applied.receipt
+        self.receipt["loaded_commit_hash"] = commit
+
+
+def _patch_refusal(exc: Exception) -> int:
+    print(f"Weight patch refused: {exc}")
+    return EXIT_PATCH_REFUSED
+
+
+# --------------------------------------------------------------------------
 # extract
 # --------------------------------------------------------------------------
 
 
-def run_extract(config: ExtractConfig, model_name: str, revision: Optional[str], adapter: Optional[str], gpu_ack: bool) -> int:
+def run_extract(
+    config: ExtractConfig,
+    model_name: str,
+    revision: Optional[str],
+    adapter: Optional[str],
+    gpu_ack: bool,
+    project_context: ProjectContext | None = None,
+) -> int:
     guard = _require_gpu_ack(gpu_ack)
     if guard is not None:
         return guard
     from MechInterp.extraction import PositionSpec, extract_rows
+    from MechInterp.weights.errors import WeightPatchError
 
     rows = cell_mod.load_jsonl(config.rows_path)
     render_fn = _load_callable(config.render_fn)
-    content_end_fn = _load_callable(config.content_end_fn)
-    model, tokenizer = _load_model_and_tokenizer(model_name, adapter, revision)
+    content_end_fn = (
+        _load_callable(config.content_end_fn) if config.content_end_fn else None
+    )
+    try:
+        patch = _PatchSession(config.weight_patch, revision, project_context)
+        model, tokenizer = _load_model_and_tokenizer(
+            model_name, adapter, revision, post_base_load=patch.hook
+        )
+    except WeightPatchError as exc:
+        return _patch_refusal(exc)
     spec = PositionSpec(
         families=config.families, every_k=config.every_k, layers=config.layers
     )
+    from MechInterp.extraction.persistence import capture_run_identity
+
+    identity = capture_run_identity(model_name, revision, adapter, render_fn, content_end_fn) if config.resume else None
     manifest = extract_rows(
         model,
         tokenizer,
@@ -109,6 +195,12 @@ def run_extract(config: ExtractConfig, model_name: str, revision: Optional[str],
         spec=spec,
         out_dir=config.output_dir,
         max_new_tokens=config.max_new_tokens,
+        capture_sites=config.capture_sites,
+        use_cache=config.use_cache,
+        forward_only=config.forward_only,
+        resume=config.resume,
+        run_identity=identity,
+        manifest_extra={"weight_patch": patch.receipt} if patch.receipt else None,
     )
     print(
         f"Extracted {manifest['n_answered']}/{manifest['n_rows']} answered rows "
@@ -132,15 +224,44 @@ def _load_activation_matrix(activations_dir: str, family: str, labels: list[dict
     from safetensors.torch import load_file
 
     act_dir = Path(activations_dir)
+    from MechInterp.extraction.persistence import verified_file
+
+    manifest = json.loads((act_dir / "manifest.json").read_text(encoding="utf-8"))
+    modern = manifest.get("schema_version") == "mechinterp-capture/v2"
+    if modern and manifest.get("complete") is not True:
+        raise ValueError("probe-fit requires a completed extraction manifest")
+    if not modern and (manifest.get("weight_patch") or (act_dir / "capture.runlog.jsonl.meta.json").exists()):
+        raise ValueError("patched or resumable captures require a v2 manifest")
+    capture_rows = {rec["row_key"]: rec for rec in manifest["rows"]}
+    if len(capture_rows) != len(manifest["rows"]):
+        raise ValueError("duplicate row keys in extraction manifest")
     per_layer: dict[int, list] = {}
     y = []
+    seen = set()
     for rec in labels:
         rk = str(rec.get("row_key", rec.get("id")))
-        safe_key = rk.replace("::", "__").replace("|", "_").replace("/", "_")
-        f = act_dir / f"{safe_key}__{family}.safetensors"
-        if not f.exists():
+        if rk in seen:
+            raise ValueError("duplicate row keys in probe labels")
+        seen.add(rk)
+        captured = capture_rows.get(rk)
+        if not captured or not captured.get("answered"):
             continue
+        if modern:
+            info = captured.get("capture_files", {}).get(family)
+            if info is None:
+                continue
+            f = verified_file(act_dir, info)
+        else:
+            # Read historical manifests, never stray files absent from their row set.
+            if family not in captured.get("captured_families", []):
+                continue
+            safe_key = rk.replace("::", "__").replace("|", "_").replace("/", "_")
+            f = act_dir / f"{safe_key}__{family}.safetensors"
+            if f.parent.resolve() != act_dir.resolve() or not f.is_file():
+                raise ValueError("historical capture file is missing or unsafe")
         tensors = load_file(str(f))
+        if per_layer and set(tensors) != {f"L{li}" for li in per_layer}:
+            raise ValueError("capture layer sets differ between probe rows")
         for key, t in tensors.items():
             li = int(key[1:])  # "L23" -> 23
             per_layer.setdefault(li, []).append(t[0].numpy())  # first captured pos
@@ -486,7 +607,20 @@ def run_steer(
     active_readout = readout_by_name[config.law.readout]
     layer = config.law.layer if config.law.layer is not None else active_readout["layer"]
 
-    model, tokenizer = _load_model_and_tokenizer(model_name, adapter, revision)
+    from MechInterp.weights.errors import WeightPatchError
+
+    try:
+        patch = _PatchSession(config.surface.weight_patch, revision, project_context)
+        model, tokenizer = _load_model_and_tokenizer(
+            model_name, adapter, revision, post_base_load=patch.hook
+        )
+    except WeightPatchError as exc:
+        return _patch_refusal(exc)
+    try:
+        cell_mod.enforce_weight_patch_lineage(config.execution.output_path, patch.receipt)
+    except cell_mod.WeightPatchLineageError as exc:
+        print(f"Refusing to resume: {exc}")
+        return EXIT_PATCH_LINEAGE
     direction = _direction_tensor(active_readout)
     sigma = float(active_readout.get("sigma", 1.0))
     hook = InterventionHook(
@@ -506,7 +640,9 @@ def run_steer(
     )
 
     # Smoke gate: run n_rows through the intervention with readback and record.
-    if not force and not cell_mod.smoke_passed(config.execution.output_path, config_sha):
+    if not force and not cell_mod.smoke_passed(
+        config.execution.output_path, config_sha, patch.digest
+    ):
         readback = _run_smoke(
             model, tokenizer, config, rows, render_fn, direction, sigma, layer
         )
@@ -535,7 +671,12 @@ def run_steer(
         verdict["gen_stream_fired"] = gen_stream_fired
 
         readback["passed"] = verdict["passed"]
-        cell_mod.record_smoke(config.execution.output_path, config_sha, {**readback, **verdict})
+        cell_mod.record_smoke(
+            config.execution.output_path,
+            config_sha,
+            {**readback, **verdict},
+            patch_digest=patch.digest,
+        )
         if not verdict["passed"]:
             handle.remove()
             if gen_stream_fired is False:
@@ -578,6 +719,8 @@ def run_steer(
                         config.law.generation_mode, render_fn,
                     )
                     rec["arm"] = arm.name
+                    if patch.digest:
+                        rec["weight_patch_digest"] = patch.digest
                     if grader is not None:
                         rec.update(grader(rec))
                     _write_checkpoint_record(out, rec, redact_fields)
@@ -590,12 +733,16 @@ def run_steer(
                     )
                     for rec in recs:
                         rec["arm"] = arm.name
+                        if patch.digest:
+                            rec["weight_patch_digest"] = patch.digest
                         if grader is not None:
                             rec.update(grader(rec))
                         _write_checkpoint_record(out, rec, redact_fields)
 
     handle.remove()
-    cell_mod.write_manifest(out_path, config, config_sha, arm_summaries)
+    cell_mod.write_manifest(
+        out_path, config, config_sha, arm_summaries, weight_patch=patch.receipt
+    )
     print(f"Steer cell complete. Output {out_path}, config_sha {config_sha}")
     return 0
 
@@ -646,6 +793,7 @@ def run_dose_calibration(
     render_fn_spec: str,
     gpu_ack: bool,
     project_context: ProjectContext | None = None,
+    revision: Optional[str] = None,
 ) -> int:
     guard = _require_gpu_ack(gpu_ack)
     if guard is not None:
@@ -682,7 +830,20 @@ def run_dose_calibration(
         for readout in config.readouts
     }
 
-    model, tokenizer = _load_model_and_tokenizer(model_name, adapter)
+    from MechInterp.weights.errors import WeightPatchError
+
+    try:
+        patch = _PatchSession(config.surface.weight_patch, revision, project_context)
+        model, tokenizer = _load_model_and_tokenizer(
+            model_name, adapter, revision, post_base_load=patch.hook
+        )
+    except WeightPatchError as exc:
+        return _patch_refusal(exc)
+    try:
+        cell_mod.enforce_weight_patch_lineage(config.execution.output_path, patch.receipt)
+    except cell_mod.WeightPatchLineageError as exc:
+        print(f"Refusing to resume: {exc}")
+        return EXIT_PATCH_LINEAGE
     out_path = Path(config.execution.output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path = Path(config.execution.summary_path)
@@ -766,6 +927,8 @@ def run_dose_calibration(
                                 }
                             )
                             rec.update(_readback_for_record(readback, idx))
+                            if patch.digest:
+                                rec["weight_patch_digest"] = patch.digest
                             if grader is not None:
                                 rec.update(grader(rec))
                             _write_checkpoint_record(out, rec, redact_fields)
@@ -776,7 +939,9 @@ def run_dose_calibration(
     summary["config_sha"] = config_sha
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
-    cell_mod.write_dose_manifest(out_path, config, config_sha, run_summaries)
+    cell_mod.write_dose_manifest(
+        out_path, config, config_sha, run_summaries, weight_patch=patch.receipt
+    )
     print(
         f"Dose calibration complete. Output {out_path}, summary {summary_path}, "
         f"config_sha {config_sha}"

@@ -25,7 +25,7 @@ from typing import Literal, Optional
 import yaml
 
 from tuner.project import ProjectContext, resolve_path
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # --------------------------------------------------------------------------
@@ -52,6 +52,39 @@ class ReadoutRef(BaseModel):
     path: str = Field(..., min_length=1, description="Path to a frozen direction JSON")
 
 
+class WeightPatchRef(BaseModel):
+    """Pins an optional ``mechinterp-weight-patch/v1`` spec applied to the base
+    weights in memory, after the model loads and before any generation/capture.
+
+    ``sha256`` is the sha256 of the spec file's bytes (required: the patch is
+    bound by content, not by path). The spec itself pins the exact base revision
+    and base tensor bytes. Experimental MechInterp CLI surface.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(..., min_length=1, description="Path to the weight-patch spec")
+    sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+
+
+class CaptureSite(BaseModel):
+    """An explicit module-site activation capture (extract only).
+
+    ``layer`` is the decoder BLOCK index, resolved with ``get_decoder_layer`` --
+    the same convention as ``law.layer`` in steer cells, and NOT the
+    ``hidden_states`` index used by residual ``layers`` (where index ``k`` is the
+    output of block ``k-1`` and index 0 is the embeddings). ``module`` is a dotted
+    path relative to that block; ``tensor`` is the module's ``input`` (first
+    positional argument) or ``output``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    layer: int = Field(..., ge=0)
+    module: str = Field(..., pattern=r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$")
+    tensor: Literal["input", "output"]
+
+
 # --------------------------------------------------------------------------
 # Steer cell
 # --------------------------------------------------------------------------
@@ -66,6 +99,13 @@ class SurfaceConfig(BaseModel):
     expected_config_sha: Optional[str] = Field(
         default=None,
         description="If set, the run aborts unless the computed config sha matches.",
+    )
+    weight_patch: Optional[WeightPatchRef] = Field(
+        default=None,
+        description=(
+            "Optional in-memory base-weight patch (see WeightPatchRef). Absent "
+            "leaves behavior and the config sha unchanged."
+        ),
     )
 
 
@@ -348,12 +388,58 @@ class ExtractConfig(BaseModel):
     every_k: int = 4
     layers: Optional[list[int]] = None
     max_new_tokens: int = 48
+    resume: bool = Field(default=False, description="Resume a matching per-row capture journal; otherwise output must be empty.")
     render_fn: str = Field(
         ..., description="Callable spec 'module.path:callable' returning a prompt"
     )
-    content_end_fn: str = Field(
-        ..., description="Callable spec resolving the last content-token index"
+    content_end_fn: Optional[str] = Field(
+        default=None,
+        description=(
+            "Callable spec resolving the last content-token index. Required "
+            "unless forward_only is true."
+        ),
     )
+    use_cache: bool = Field(
+        default=False,
+        description=(
+            "use_cache for the teacher-forced capture forward pass. False keeps "
+            "historical behavior; true is needed by models whose cache-less "
+            "forward differs from their normal one (hybrid / KV-sharing)."
+        ),
+    )
+    forward_only: bool = Field(
+        default=False,
+        description=(
+            "Skip generation; capture the 'anchor' family (last prompt token) "
+            "from one forward pass over the prompt. max_new_tokens is ignored."
+        ),
+    )
+    weight_patch: Optional[WeightPatchRef] = Field(
+        default=None,
+        description="Optional in-memory base-weight patch applied before capture.",
+    )
+    capture_sites: Optional[list[CaptureSite]] = Field(
+        default=None,
+        description=(
+            "Optional explicit module-site captures at the selected position "
+            "families. Absent leaves residual extraction unchanged."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _unique_sites(self) -> "ExtractConfig":
+        if self.forward_only:
+            if list(self.families) != ["anchor"]:
+                raise ValueError("forward_only requires families: [anchor]")
+        elif self.content_end_fn is None:
+            raise ValueError("content_end_fn is required unless forward_only is true")
+        if self.capture_sites is not None:
+            keys = [(c.layer, c.module, c.tensor) for c in self.capture_sites]
+            if not keys:
+                raise ValueError("capture_sites must be omitted or non-empty")
+            if len(keys) != len(set(keys)):
+                raise ValueError("capture_sites entries must be unique")
+        return self
 
 
 class ProbeFitConfig(BaseModel):
@@ -414,7 +500,20 @@ def _resolve_steer_paths(
                 update={
                     "rows_path": _resolved(
                         config.surface.rows_path, context, declaring_file
-                    )
+                    ),
+                    "weight_patch": (
+                        config.surface.weight_patch.model_copy(
+                            update={
+                                "path": _resolved(
+                                    config.surface.weight_patch.path,
+                                    context,
+                                    declaring_file,
+                                )
+                            }
+                        )
+                        if config.surface.weight_patch is not None
+                        else None
+                    ),
                 }
             ),
             "readouts": [
@@ -461,6 +560,17 @@ def load_extract_config(
             "rows_path": _resolved(config.rows_path, context, declaring_file),
             "output_dir": _resolved(
                 config.output_dir, context, declaring_file, access="write"
+            ),
+            "weight_patch": (
+                config.weight_patch.model_copy(
+                    update={
+                        "path": _resolved(
+                            config.weight_patch.path, context, declaring_file
+                        )
+                    }
+                )
+                if config.weight_patch is not None
+                else None
             ),
         }
     )

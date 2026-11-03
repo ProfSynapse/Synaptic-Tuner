@@ -16,6 +16,8 @@ recipe. There are four verbs:
 | `mechinterp probe-fit` | fit a linear readout from extracted activations and freeze a direction JSON |
 | `mechinterp steer` | run the six-block declarative intervention cell (smoke-gated) |
 | `mechinterp score-gates` | evaluate a declarative `gates.yaml` against a per-row output JSONL |
+| `mechinterp weights-inspect` | (experimental) read-only report on a LOCAL safetensors checkpoint, with bounded numeric projections |
+| `mechinterp weights-patch` | (experimental) validate or create-only export a declarative base-weight patch |
 
 Example recipes ship under `MechInterp/configs/templates/`. List them with
 `python tuner.py mechinterp list-configs`.
@@ -108,7 +110,16 @@ python tuner.py mechinterp score-gates \
 ```
 
 `extract` and `steer` load a model and use a GPU, so they refuse to run without
-`--i-know-this-runs-on-gpu`. `probe-fit` and `score-gates` are CPU-only.
+`--i-know-this-runs-on-gpu`. `probe-fit`, `score-gates`, `weights-inspect` and
+`weights-patch` are CPU-only (`weights-*` need torch only to validate/apply a patch
+or to compute projections, never a GPU).
+
+`mechinterp run` stage commands are compiled as `python -m tuner mechinterp ...`
+(the installed-wheel form; there is no `tuner.py` in a wheel). Stages run in the
+project workdir, and a source checkout's engine root is put on `PYTHONPATH` so the
+module resolves; a host project must not contain its own top-level `tuner/`
+package. `dose-calibrate` honors `--model-revision` (stage or pipeline
+`model_revision`) exactly like `steer` and `extract`.
 
 ## Gates
 
@@ -180,3 +191,180 @@ both before launching a cell, especially on a fresh or retried remote container.
 The steer cell's own smoke-first gate and `expected_config_sha` guard cover a
 third failure mode (running an edited or unverified cell), so a full launch is
 gated on a recorded smoke pass for the exact config.
+
+## Experimental: weight patches, module-site capture, weight inspection
+
+These are explicitly experimental MechInterp CLI capabilities, not part of the
+stable public API. They are generic: every tensor name, shape, value, index and
+restriction comes from a spec/recipe, never from engine code.
+
+### `mechinterp-weight-patch/v1`
+
+```yaml
+schema_version: mechinterp-weight-patch/v1
+base:
+  model_id: org/name                 # informational
+  revision: <40-hex commit id>       # required; the run's --model-revision must equal it
+  checkpoint: path/to/local_dir_or_file.safetensors   # needed by weights-patch only
+  index_sha256: <sha256>             # of model.safetensors.index.json (or the single file)
+  files_sha256: {shard.safetensors: <sha256>}         # optional, whole-file pins
+  allow_symlinked_files: false       # true for HF cache snapshot dirs (links to regular files only)
+  runtime_prefix_rules: []           # [{checkpoint_prefix, runtime_prefix}] if loaded names differ
+  tensors:                           # EVERY targeted tensor, pinned to exact stored bytes
+    <name>: {dtype: bfloat16, shape: [out, in], sha256: <sha256 of raw dtype bytes>}
+budget:                              # all required except the last two
+  allowed_tensors: ["<fnmatch pattern>"]
+  max_modified_tensors: 4
+  max_modified_entries: 100000       # entries whose STORED value actually changes
+  max_relative_frobenius: 0.05       # per tensor, ||W'-W||_F / ||W||_F on the realized delta
+  max_payload_bytes: 268435456
+  max_index_count: 1000000
+payload: {path: patch.safetensors, sha256: <sha256>}   # all numeric arrays live here
+operations:
+  - {id: a, tensor: <name>, op: add_rank_one, scale: 1.0, cols: [3, 9],
+     arrays: {u: a.u, v: a.v}}                # W[R][:, C] += scale * outer(u, v)
+  - {id: b, tensor: <name>, op: project, axis: output, normalize: false,
+     arrays: {direction: b.d}}                # W[:, C] -= scale * d (d^T W[:, C])  (axis: input -> rows)
+  - {id: c, tensor: <name>, op: replace_rows, rows: [2, 5], arrays: {values: c.v}}
+  - {id: d, tensor: <name>, op: replace_cols, arrays: {values: d.v, cols: d.idx}}
+export: {output_dir: path/new_checkpoint_dir, sidecar_files: ["*.json"]}   # weights-patch --export
+```
+
+Rules enforced before anything is applied or written: schema (unknown fields,
+NaN/Inf, bool-as-number, duplicate YAML keys all refuse); every operation tensor
+pinned and matched by `allowed_tensors`; indices distinct and in range (inline, or
+integer payload arrays via `arrays.rows`/`arrays.cols`, never both); payload sha256
+and exact array inventory (extra arrays refuse); finite payloads; base tensor
+dtype/shape/byte hash; finite budgets on the realized result. `project` needs a
+unit direction unless `normalize: true`. A zero-valued (or sub-ulp) patch changes no
+byte: only entries whose value differs numerically are rewritten, so it is a true
+no-op (`noop: true` in the receipt) and unchanged entries (even `-0.0`) keep their
+exact bytes. bfloat16 is hashed and written as bf16 bytes; arithmetic is float32
+(float64 for float64 tensors) then cast.
+
+**Source binding.** Checkpoint files must be local regular files (no symlinks
+unless `allow_symlinked_files`), index shard names plain, every shard header
+strictly valid, and the index and headers must agree exactly. A bare revision
+string cannot be authenticated from file bytes, so binding has two legs: exact
+content pins (`index_sha256`/`files_sha256`, plus the per-tensor byte hashes),
+and local revision evidence when present (an HF `snapshots/<sha>` directory name or
+`.cache/huggingface/download/*.metadata`). Contradicting evidence refuses; with no
+evidence the content pins are required. `model.config` names are never used.
+
+**CLI**
+
+```bash
+python tuner.py mechinterp weights-inspect --weights-config inspect.yaml [--json]
+python tuner.py mechinterp weights-patch   --weights-config patch.yaml --validate [--json]
+python tuner.py mechinterp weights-patch   --weights-config patch.yaml --export   [--json]
+```
+
+Exactly one of `--validate` / `--export`. `--validate` writes nothing. `--export`
+stages a sibling directory, copies every shard and overwrites only the modified
+tensors' byte ranges (headers, metadata and untouched tensors stay byte-identical,
+verified by re-hashing), copies the index and `sidecar_files`, writes
+`mechinterp-weight-export.manifest.json` (spec/payload/base-file digests, per-tensor
+before/after hashes, realized deltas, output file hashes, `patch_digest`), then
+renames into place. An existing destination is refused, never overwritten.
+Refusals exit 1 with `WEIGHTS_<CODE>` (`SCHEMA PATH INDEX BINDING BASE_HASH_MISMATCH
+PAYLOAD NONFINITE BUDGET OUTPUT_EXISTS APPLY`).
+
+### `weight_patch` in `steer` / `dose-calibrate` / `extract`
+
+```yaml
+surface:                       # extract: top-level `weight_patch:`
+  weight_patch: {path: patches/edit.yaml, sha256: <sha256 of the spec file>}
+```
+
+Applied in memory to the freshly loaded BASE model (before any adapter, generation
+or capture); no checkpoint is exported per candidate. Before the model loads the
+spec bytes and payload are verified and `--model-revision` must equal
+`base.revision`. After load, the targeted tensors of the loaded module are checked
+against the pinned byte hashes (a wrong base refuses whatever its config says),
+a resolved `config._commit_hash` must agree, and the patch is committed
+all-or-nothing (rolled back and re-verified on any failure). Internal implementation
+(not a public API): `MechInterp.weights.runtime.prepare_patch`, `apply_patch(...)`
+(returns an `AppliedPatch`; `.revert()` or `with patched(model, prepared)`).
+
+Steer/dose lineage: an absent patch leaves behavior and `compute_config_sha` unchanged. With a
+patch, the pinned sha is part of the config sha; per-row records carry
+`weight_patch_digest`; the smoke state records it (a smoke taken without or under
+another patch is not reusable); manifests carry the receipt; and
+`<output>.weight_patch.json` binds the output rows to the patch (the digest covers
+spec, payload, revision and exact before/after tensor bytes). A resume over rows from
+another or no patch is refused. Exit codes: `6` stale lineage, `7` patch refused
+(before any row is written).
+
+Limits: a Hub-id load is bound by the revision it was loaded at plus the targeted
+tensor hashes (only targeted tensors are verified, not the whole model); the
+default loader is bfloat16 so patches over non-bf16 checkpoints refuse by hash;
+quantized params are refused; an adapter is attached after the patch.
+
+### `capture_sites`, `use_cache`, `forward_only` (extract)
+
+```yaml
+capture_sites:
+  - {layer: 20, module: mlp.down_proj, tensor: input}    # or output
+use_cache: false      # teacher-forced capture forward; true for hybrid/KV-sharing models
+forward_only: false   # true: no generation; families must be [anchor]; content_end_fn unused
+resume: true          # append/fsync per completed row; verify identity and files before skipping
+```
+
+`layer` is the decoder BLOCK index from `get_decoder_layer` (the `law.layer`
+convention), not the `hidden_states` index used by residual `layers` (index k there
+is block k-1's output). `module` is a dotted path inside the block; `input` is the
+first positional argument. Only the selected family positions are indexed inside the
+hook (no sequence cache); each is written float32 to
+`<row>__<family>.sites.safetensors` (a separate file, so probe-fit never sees it)
+as `L<layer>.<module>.<tensor>` with file metadata, and per-row/manifest metadata
+records site, layer, convention, shape, source dtype and positions. Hooks exist only
+for the capture forward and are removed on any error. Residual tensor values are
+unchanged when these options are absent (`use_cache` defaults to false). For an
+anchor-only read use `forward_only: true` (or `max_new_tokens: 1` with a
+`content_end_fn`).
+
+Extraction output directories must be empty unless `resume: true` opens their
+matching `capture.runlog.jsonl`. The resume fingerprint binds rendered prompts,
+row keys, capture settings, the patch receipt, file-backed render/content-end
+callables, and model sources (pinned Hub revision or complete local file hashes).
+Hub adapters cannot resume without a local, hashable snapshot. Every row's tensor
+files are fsynced and hashed before its journal append is fsynced. Resume verifies
+all committed files and skips those rows; interrupted uncommitted rows are retried.
+Use one writer per directory. `manifest.json` is published atomically on completion.
+Probe fitting reads only that manifest's captured rows and verifies their hashes;
+it refuses incomplete captures and ignores stray files. New manifests are
+`mechinterp-capture/v2`; unpatched historical manifests can still be read.
+
+Simple portable row keys keep their filenames. Other keys use `row-<sha256>`.
+Missing keys, duplicates, case-insensitive filename collisions, and encoded-name
+collisions are refused before generation. Per-row `capture_files` and
+`site_captures` map original keys to the actual filenames and hashes.
+
+### `weights-inspect` projections (bounded numeric reads)
+
+```yaml
+schema_version: mechinterp-weights-inspect/v1
+checkpoint: path/to/local_checkpoint
+tensors: ["<pattern>"]              # list matching tensors (capped by max_listed_tensors)
+hash_tensors: true                  # adds sha256 + a paste-ready base.tensors snippet
+max_output_values: 16384            # total numbers all projections may emit (<= 1_000_000)
+max_tensor_bytes: 2147483648        # largest tensor a projection may read
+projections:
+  - id: col_dots
+    tensor: <2-D float tensor>
+    axis: cols                      # cols -> W[:, j]; rows -> W[i, :]
+    indices: [12, 40]               # omit for every line (still capped)
+    other_indices: [0, 1, 2]        # optional: restrict positions along each line
+    kind: dot                       # dot | cosine | slice
+    include_norms: true             # dot/cosine: also |line|
+    vector:                         # exactly one source
+      safetensors: {path: v.safetensors, key: axis, sha256: <sha256>}
+      # direction_json: {path: direction.json, sha256: <sha256>}   # mechinterp-direction/v1
+      # inline: [0.1, 0.2]                                         # <= 65536 numbers
+```
+
+Reads one tensor at a time, converts only the selected lines to float64, and
+refuses (`BUDGET`) before reading when the emitted value count would exceed
+`max_output_values`. `dot`/`cosine` emit one number per selected line (`cosine` is
+`null` for a zero line); `slice` emits raw `[lines, positions]` values. Each result
+carries the tensor sha256, shape/dtype and vector provenance. No model is loaded.

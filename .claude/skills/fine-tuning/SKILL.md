@@ -83,6 +83,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | **GRPO** | Optimize against rewards | 5e-6 | 1 | Prompts + ground truth | Final online stage |
 | **Embedding** | Train a retrieval bi-encoder | 2e-5 | 1 | Triplets / pairs | Retrieval / RAG embedders |
 | **Decision** | Calibrated typed decisions (yes/no, choice, score) | 1e-4 (+1e-3 head) | 1 | State + typed question + gold | Routing / triage / policy checks (Jev-style) |
+| **MechInterp Weight Patch** | Experimental base-weight patch/export, in-memory patch evaluation, module-site capture, bounded weight inspection | `reference/mechinterp-weight-patch.md` |
 | **Image LoRA** | Teach a diffusion model named characters, objects, places and a style | 1e-4 | steps, not epochs (~3-5k) | Images + caption .txt (trigger + entity tokens) | Illustration consistency (ai-toolkit on Modal) |
 
 **Recommended pipeline:** SFT → KTO → GRPO
