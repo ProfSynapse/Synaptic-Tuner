@@ -57,6 +57,8 @@ def verify_run(run_dir: Path, *, anchor_file: Path | None = None) -> dict:
     anchor_checked = False
     if anchor_file is not None:
         try:
+            if Path(anchor_file).resolve().is_relative_to(run_dir.resolve().parent):
+                raise EditorError("freeze anchor is inside the run output tree", code="anchor_location")
             anchor, _ = load_strict_file(Path(anchor_file), what="external freeze anchor")
             expected = {"schema": "weight_editor_freeze_anchor/v1", "run_id": manifest["run_id"],
                         "binding_digest": manifest["binding_digest"],
@@ -69,8 +71,9 @@ def verify_run(run_dir: Path, *, anchor_file: Path | None = None) -> dict:
                 problems.append({"code": "external_anchor_mismatch"})
             else:
                 anchor_checked = True
-        except (EditorError, OSError, ValueError):
-            problems.append({"code": "external_anchor_unreadable"})
+        except (EditorError, OSError, ValueError) as exc:
+            problems.append({"code": "anchor_location" if isinstance(exc, EditorError) and
+                             exc.code == "anchor_location" else "external_anchor_unreadable"})
     for rec in journal:
         if rec["type"] != "dispatch_result":
             continue
@@ -107,10 +110,14 @@ def verify_run(run_dir: Path, *, anchor_file: Path | None = None) -> dict:
     recorded = {a["relpath"] for a in state.artifacts}
     unrecorded = []
     adir = run_dir / "artifacts"
-    for f in sorted(adir.glob("dsp-*/*")) if adir.is_dir() else []:
+    for f in sorted(adir.rglob("*")) if adir.is_dir() else []:
+        if not f.is_file() and not f.is_symlink():
+            continue
         rel = str(f.relative_to(run_dir))
-        if rel not in recorded:
+        if rel not in recorded and rel != "artifacts/manifest.json":
             unrecorded.append(rel)
+    if state.status == "complete" and unrecorded:
+        problems.append({"code": "unrecorded_artifacts", "files": unrecorded})
     return {
         "ok": not problems,
         "problems": problems,

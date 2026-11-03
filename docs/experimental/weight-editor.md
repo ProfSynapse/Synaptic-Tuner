@@ -4,7 +4,9 @@
 broker and append-only recorder for agent-led weight-editing research. It is
 **experimental and not a Tuner API v1 promise**: nothing here is listed in the
 v1 support matrix, and the stable API is unchanged. The core has no dataset
-fields, no model names and no provider code. A study (for example the EHR
+fields, no model names and no provider code. Optional adapters live separately
+under `adapters/`; the Codex account adapter is implemented but unqualified (see
+`weight-editor-codex-account-adapter.md`). A study (for example the EHR
 research) owns its scientific policy and composes the real model adapter and
 executor outside this package.
 
@@ -48,6 +50,9 @@ Enforced by the host broker, independent of model compliance:
   resources must be pinned by the port identity or caller binding. A resume under any change
   is refused, without calling the adapter or executor, and the refusal is
   journaled.
+  Plain-module and uninspectable/dynamic ports are refused. Package import
+  initializers and the top-level version module are included; the source scope
+  is recorded rather than silently accepting an empty or one-file binding.
 - A single writer holds an `flock` on the run for the process lifetime; the
   kernel releases it on SIGKILL.
 - `provider/events.jsonl` keeps every raw provider event byte-for-byte
@@ -65,7 +70,8 @@ Enforced by the host broker, independent of model compliance:
   requests and choices denied before dispatch. An explicit resume may continue
   the conversation, but capture remains unqualified for the lifetime of that run.
   Patch selection requires its validated receipt to have been delivered in an
-  earlier model turn. No-session retries and handoffs resend the instructions
+  earlier clean model turn. Receipt delivery in a failed turn is retried with
+  its recorded bootstrap and tool replies. No-session retries and handoffs resend the instructions
   and catalog in the journaled model input.
 
 Not guaranteed:

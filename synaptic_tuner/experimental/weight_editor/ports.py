@@ -200,30 +200,34 @@ class PortContext:
 # ----------------------------------------------------------------- identity
 
 
+def source_package(path: str | None) -> dict:
+    if path is None or not Path(path).is_file():
+        raise PortError("port source must be an inspectable Python package", code="unbound_port_source")
+    root = Path(path).resolve().parent
+    if not (root / "__init__.py").is_file():
+        raise PortError("plain-module ports require packaging before use", code="unbound_port_source")
+    while (root.parent / "__init__.py").is_file():
+        root = root.parent
+    sources = {}
+    for file in sorted(root.rglob("*.py")):
+        if file.is_symlink():
+            raise PortError("port source tree contains a symlink")
+        sources[str(file.relative_to(root))] = sha256_hex(file.read_bytes())
+    return sources
+
+
 def describe_port(obj: Any) -> dict:
     cls = type(obj)
-    src = None
-    path = None
     try:
         path = inspect.getsourcefile(cls)
-        if path:
-            src = sha256_hex(Path(path).read_bytes())
-    except (OSError, TypeError):
-        src = None
-    package_sources = {}
-    if path:
-        root = Path(path).resolve().parent
-        while (root.parent / "__init__.py").is_file():
-            root = root.parent
-        files = sorted(root.rglob("*.py")) if (root / "__init__.py").is_file() else [Path(path)]
-        for file in files:
-            if file.is_symlink():
-                raise PortError("port source tree contains a symlink")
-            package_sources[str(file.relative_to(root))] = sha256_hex(file.read_bytes())
+    except (OSError, TypeError) as exc:
+        raise PortError("port source cannot be inspected", code="unbound_port_source") from exc
+    package_sources = source_package(path)
     return {
         "class": f"{cls.__module__}.{cls.__qualname__}",
-        "source_sha256": src,
+        "source_sha256": sha256_hex(Path(path).read_bytes()),
         "package_sources": package_sources,
+        "source_scope": "Python package tree; external binaries, dependencies and resources need explicit pins",
         "declared": obj.identity(),
     }
 

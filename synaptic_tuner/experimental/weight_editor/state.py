@@ -43,6 +43,8 @@ class RunState:
         self.completed_turns: set[str] = set()
         self.delivered_receipts: set[str] = set()
         self.needs_bootstrap = False
+        self.turn_messages: list[dict] = []
+        self.turn_receipts: set[str] = set()
         self.raw_referenced = 0
         self.frozen: dict | None = None
         self.frozen_record_digest: str | None = None
@@ -93,9 +95,11 @@ class RunState:
         self.evaluation_reference = d.get("reference")
 
     def _on_turn_start(self, rec, d):
+        self.turn_messages = list(d["messages"])
+        self.turn_receipts = set()
         for rid, req in self.requests.items():
             if req.get("message") in d["messages"]:
-                self.delivered_receipts.add(rid)
+                self.turn_receipts.add(rid)
         self.turn_count += 1
         self.open_turn = d["turn_id"]
         self.outbox = []
@@ -109,8 +113,11 @@ class RunState:
         self.last_turn_clean = d["status"] == "complete"
         if self.last_turn_clean:
             self.completed_turns.add(d["turn_id"])
+            self.delivered_receipts.update(self.turn_receipts)
         else:
             self.capture_incomplete = True
+            self.needs_bootstrap = True
+            self.outbox = [m for m in self.turn_messages if m["role"] == "tool"] + self.outbox
 
     def _on_model_identity_verified(self, rec, d):
         self.model_verified_turns.add(d["turn_id"])

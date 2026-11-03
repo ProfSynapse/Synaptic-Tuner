@@ -1,6 +1,6 @@
 """Deterministic fake ports and a synthetic fixture generator (CPU, stdlib).
 
-These are the only ports shipped. ``FakeEffectExecutor`` keeps its own durable
+These ports never contact a hosted model. ``FakeEffectExecutor`` keeps its own durable
 effect ledger so tests can prove, from outside the broker, that an effect
 happened once and only once. All content is synthetic.
 """

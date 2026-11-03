@@ -20,6 +20,11 @@ REQUEST_KEYS = frozenset({"operation", "arguments", "rationale", "label"})
 _PATHLIKE = re.compile(r"(^[~$%])|(\.\.)|[/\\\x00]|(^[A-Za-z][A-Za-z0-9+.-]*:)")
 
 PUBLIC = {
+    "failed_turn": "provider turn did not complete; submit a new request",
+    "interrupted_turn": "provider turn was interrupted; submit a new request",
+    "capture_incomplete": "provider capture is incomplete; this turn cannot authorize an operation",
+    "model_drift": "returned model identity did not match; this turn cannot authorize an operation",
+    "model_identity_unverified": "returned model identity was not observed; this turn cannot authorize an operation",
     "phase_closed": "no further operations are accepted in the current phase",
     "malformed_request": "request is malformed",
     "forbidden_field": "request carries fields that grant no authority",

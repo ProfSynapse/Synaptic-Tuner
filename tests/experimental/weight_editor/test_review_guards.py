@@ -5,11 +5,14 @@ import os
 import shutil
 import subprocess
 import sys
+import importlib.util
 
 import pytest
 
 from synaptic_tuner.experimental.weight_editor.canon import canonical_bytes, sha256_hex
 from synaptic_tuner.experimental.weight_editor.journal import _digest
+from synaptic_tuner.experimental.weight_editor.errors import PortError
+from synaptic_tuner.experimental.weight_editor.ports import describe_port, source_package
 
 from .conftest import PKG, REPO, final, of_type, patch, req, script
 
@@ -192,3 +195,72 @@ def test_retained_inputs_are_checked_against_binding(make, relative):
     path.write_bytes(path.read_bytes() + b" ")
     code, out, _ = fx.cli("verify", "--run-dir", fx.run_dir())
     assert code == 5 and out["problems"][0]["code"] == "retained_input_mismatch"
+
+
+def test_plain_or_dynamic_ports_are_refused(tmp_path, monkeypatch):
+    path = tmp_path / "plain_port.py"
+    path.write_text("class Plain:\n def identity(self): return {}\n")
+    spec = importlib.util.spec_from_file_location("plain_test_port", path)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "plain_test_port", module)
+    spec.loader.exec_module(module)
+    for obj in (module.Plain(), type("Dynamic", (), {"__module__": "nonexistent_port"})()):
+        with pytest.raises(PortError) as exc:
+            describe_port(obj)
+        assert exc.value.code == "unbound_port_source"
+
+
+def test_source_binding_covers_package_import_initializers():
+    from synaptic_tuner.experimental.weight_editor import broker
+
+    sources = source_package(broker.__file__)
+    assert {"__init__.py", "_version.py", "experimental/__init__.py"} <= sources.keys()
+
+
+@pytest.mark.parametrize("returned", ["wrong-model", ["wrong-model"], {"name": "wrong-model"}])
+def test_recovered_model_mismatch_belongs_to_interrupted_turn(make, returned):
+    import base64
+    from synaptic_tuner.experimental.weight_editor.journal import HashChainLog, genesis_prev
+
+    fx = make(script=script([{"self_sigkill": True}], [final()]))
+    assert fx.run()[0] == -9
+    manifest = json.loads((fx.run_dir() / "manifest.json").read_text())
+    raw = HashChainLog(fx.run_dir() / "provider/events.jsonl", "r1",
+                       genesis_prev(manifest["binding_digest"], "provider"))
+    event = json.dumps({"type": "session_started", "model": returned}).encode()
+    raw.append("provider_raw", {"turn_id": "turn-0001", "raw_b64": base64.b64encode(event).decode(),
+                                "raw_sha256": sha256_hex(event), "size": len(event)})
+    raw.close()
+    code, out, _ = fx.resume()
+    assert code == 6 and out["status"] == "complete"
+    ends = of_type(fx.journal(), "turn_end")
+    assert ends[0]["data"]["model_drift"]["returned"] == returned
+    assert ends[1]["data"]["status"] == "complete"
+
+
+def test_stray_artifact_blocks_evaluation_and_internal_anchor_is_not_external(make):
+    fx = make(script=script([final()]))
+    assert fx.run()[0] == 0
+    anchor = fx.paths["root"] / "anchor.json"
+    assert fx.cli("anchor", "--run-dir", fx.run_dir(), "--output", anchor)[0] == 0
+    internal = fx.run_dir() / "anchor.json"
+    internal.write_bytes(anchor.read_bytes())
+    code, out, _ = fx.cli("verify", "--run-dir", fx.run_dir(), "--anchor-file", internal)
+    assert code == 5 and not out["external_anchor_checked"]
+    (fx.run_dir() / "artifacts/late.patch.json").write_text("unrecorded")
+    assert fx.cli("verify", "--run-dir", fx.run_dir())[0] == 5
+    code, out, _ = fx.cli("advance", "--run-dir", fx.run_dir(), "--to", "independent_evaluation",
+                          "--reference", "evaluation", "--anchor-file", anchor)
+    assert code == 1 and out["error"]["code"] == "run_unqualified"
+
+
+def test_failed_receipt_delivery_is_bootstrapped_and_resent(make):
+    fx = make(script=script([patch("valid")], {"events": [], "fail": "timeout"},
+                            [final("patch", "req-0001")]))
+    assert fx.run()[0] == 4
+    assert fx.resume()[0] == 6
+    starts = of_type(fx.journal(), "turn_start")
+    receipt = of_type(fx.journal(), "dispatch_result")[0]["data"]["message"]
+    assert receipt in starts[1]["data"]["messages"]
+    assert receipt in starts[2]["data"]["messages"]
+    assert starts[2]["data"]["messages"][-2]["content"].startswith("BROKER CATALOG")

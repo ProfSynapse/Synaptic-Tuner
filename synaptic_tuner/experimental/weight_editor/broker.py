@@ -29,7 +29,7 @@ from .journal import HashChainLog, genesis_prev, quarantine_partial_tail
 from .ledger import clean_amount
 from .ports import (
     EVENT_KINDS, BoundedWriter, Dispatch, PortSet, Receipt, ReconcileResult, TransportEvent,
-    TurnInput, describe_port,
+    TurnInput, describe_port, source_package,
 )
 from .state import PHASES, RunState, chain_context
 
@@ -87,8 +87,7 @@ def validate_ports(config: EditorConfig, ports: PortSet) -> dict:
 def compute_binding(config: EditorConfig, ports: PortSet, supplied: Mapping[str, Any]) -> dict:
     check_json(dict(supplied))
     return {
-        "broker_sources": {str(p.relative_to(Path(__file__).parent)): sha256_file(p)
-                           for p in sorted(Path(__file__).parent.rglob("*.py"))},
+        "broker_sources": source_package(__file__),
         "config_sha256": config.sha256,
         "capsule_manifest_sha256": config.capsule.manifest_sha256,
         "capsule_objects": {oid: o.sha256 for oid, o in sorted(config.capsule.objects.items())},
@@ -309,6 +308,7 @@ class EditorRun:
 
     def _run_turn(self) -> None:
         st = self.state
+        self._drift = None  # mismatches belong to the turn that produced their evidence
         req_limit = st.ledger.limits.get("requests")
         if st.ledger.exhausted("model_turns") or (req_limit is not None and st.ledger.charged("requests") >= req_limit):
             raise _Halt("budget_exhausted", "model_turns/requests limit reached; configured limits are not raised on resume")
@@ -425,17 +425,17 @@ class EditorRun:
         if returned is None:
             return
         ok = {self.config.model.model, *self.config.model.allowed_returned}
-        if returned not in ok and self._drift is None:
+        if (not isinstance(returned, str) or returned not in ok) and self._drift is None:
             # Keep consuming and retaining the turn's traffic; discard its requests afterwards.
             self._drift = {"requested": self.config.model.model, "returned": returned}
-        elif returned in ok:
+        elif isinstance(returned, str) and returned in ok:
             self._emit("model_identity_verified", {"turn_id": turn_id, "model": returned}, {"turn_id": turn_id})
 
     def _discard_turn_items(self, turn_id: str, reason: str) -> None:
         for kind, iid in list(self.state.order):
             if kind == "request" and self.state.requests[iid]["turn_id"] == turn_id and \
                     self.state.requests[iid]["status"] == "received":
-                self._deny(iid, Denied("phase_closed", reason), override_reason=reason)
+                self._deny(iid, Denied(reason, reason), override_reason=reason)
             elif kind == "final" and self.state.finals[iid]["turn_id"] == turn_id and \
                     self.state.finals[iid]["status"] == "received":
                 self._deny_final(iid, reason, "turn discarded")
@@ -450,8 +450,10 @@ class EditorRun:
                     self._normalize(rawrec["data"]["turn_id"], rawrec, recovered=True)
         finally:
             self._discard_turn_items(turn_id, "interrupted_turn")
-            self._emit("turn_end", {"turn_id": turn_id, "status": "interrupted", "reason": "process_crash_or_kill"},
+            self._emit("turn_end", {"turn_id": turn_id, "status": "interrupted", "reason": "process_crash_or_kill",
+                                    **({"model_drift": self._drift} if self._drift else {})},
                        {"turn_id": turn_id})
+            self._drift = None
 
     # ------------------------------------------------------- requests
     def _process_pending(self) -> None:
