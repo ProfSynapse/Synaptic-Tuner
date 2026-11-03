@@ -456,7 +456,10 @@ class InterventionHook:
         on ~1-sigma natural projections while an ungated arm made the check
         vacuous (empty inactive set).
         """
-        c64 = c.detach().to(torch.float64)
+        # Read both snapshots in the same canonical measurement basis. The
+        # write uses model dtype, but quantizing only the post-read direction
+        # fabricates movement for bit-identical inactive bf16 rows.
+        c64 = self.direction.detach().to(device=hidden.device, dtype=torch.float64)
         active = _resolve_active(gain_row, active_override)
         rows = torch.nonzero(active, as_tuple=False).squeeze(1)
         inactive = torch.nonzero(~active, as_tuple=False).squeeze(1)

@@ -372,3 +372,9 @@ refuses (`BUDGET`) before reading when the emitted value count would exceed
 `max_output_values`. `dot`/`cosine` emit one number per selected line (`cosine` is
 `null` for a zero line); `slice` emits raw `[lines, positions]` values. Each result
 carries the tensor sha256, shape/dtype and vector provenance. No model is loaded.
+
+Readback measures before and after projections in the same float32 direction
+with float64 accumulation, including when the model writes bf16 tensors. Using
+a bf16-rounded direction for only the after projection fabricates off-target
+movement on unchanged rows. The inactive-row no-op regression requires exact
+zero movement; the smoke tolerance and intervention arithmetic are unchanged.
