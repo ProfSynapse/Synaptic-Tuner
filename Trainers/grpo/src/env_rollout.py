@@ -43,6 +43,12 @@ class EpisodeRolloutResult:
     # result / user feedback) that the model conditioned on but did not emit.
     # Empty when the legacy flattened representation is used.
     env_mask: List[int] = field(default_factory=list)
+    # Number of turn transitions whose recorded prompt did not extend the
+    # previous turn's prompt + sampled completion (see _assemble_faithful_sequence).
+    # Non-zero means the faithful sequence was truncated at the last consistent
+    # turn. Always 0 on the legacy flattened path, which does not use later
+    # turns' prompts.
+    prefix_mismatch_count: int = 0
     executed_tool_names: List[str] = field(default_factory=list)
     executed_tool_statuses: List[str] = field(default_factory=list)
     environment_issue_levels: List[str] = field(default_factory=list)
@@ -50,10 +56,15 @@ class EpisodeRolloutResult:
 
 
 # A single generated turn: (prompt_ids, completion_ids, logprobs). prompt_ids is
-# the re-tokenized conversation prefix rendered for that turn's generation;
-# completion_ids / logprobs are the actual sampled tokens and their sampling
-# log-probabilities.
+# the exact id sequence sent to the generator for that turn (built prefix-stably,
+# see _context_suffix_ids); completion_ids / logprobs are the actual sampled
+# tokens and their sampling log-probabilities.
 TurnSegment = Tuple[List[int], List[int], List[float]]
+
+# Stand-in assistant content used to locate the end of an assistant turn inside
+# a rendered dummy conversation (see _context_suffix_ids). Plain ASCII with no
+# whitespace or markup so no chat template trims, splits or escapes it.
+_ASSISTANT_BOUNDARY_SENTINEL = "EnvRolloutAssistantBoundary7f3a9c51"
 
 
 def _assemble_flat_sequence(turn_segments: Sequence[TurnSegment]) -> Tuple[List[int], List[int], List[float]]:
@@ -75,56 +86,133 @@ def _assemble_flat_sequence(turn_segments: Sequence[TurnSegment]) -> Tuple[List[
     return base_prompt, completion, logprobs
 
 
-def _assemble_faithful_sequence(
-    turn_segments: Sequence[TurnSegment],
-) -> Tuple[List[int], List[int], List[int], List[float]]:
+@dataclass(frozen=True)
+class PrefixMismatch:
+    """A turn transition whose rendered prompt does not extend the prior turn.
+
+    ``turn_index`` is the 0-based index of the turn whose prompt diverged.
+    ``expected_prefix_len`` is ``len(prompt(t-1)) + len(completion(t-1))``;
+    ``prompt_len`` is ``len(prompt(t))``. ``diverge_at`` is the first position
+    where the ids differ, or ``None`` when the prompt is simply too short to
+    contain the expected prefix.
+    """
+
+    turn_index: int
+    expected_prefix_len: int
+    prompt_len: int
+    diverge_at: Optional[int]
+
+
+@dataclass
+class FaithfulSequence:
+    """Output of :func:`_assemble_faithful_sequence`.
+
+    ``completion_ids``, ``env_mask`` and ``logprobs`` are always the same length.
+    ``kept_turns`` is how many leading turns made it into the sequence; it is
+    smaller than the number of input turns only when ``mismatches`` is non-empty.
+    """
+
+    prompt_ids: List[int]
+    completion_ids: List[int]
+    env_mask: List[int]
+    logprobs: List[float]
+    kept_turns: int
+    mismatches: List[PrefixMismatch] = field(default_factory=list)
+
+
+def _find_prefix_mismatches(turn_segments: Sequence[TurnSegment]) -> List[PrefixMismatch]:
+    """Check every transition: does ``prompt(t)`` start with ``prompt(t-1) + completion(t-1)``?
+
+    The rollout loop builds each prompt as ``prompt(t-1) + completion(t-1) +
+    suffix`` (see :func:`_context_suffix_ids`), so in normal operation this
+    finds nothing. It is kept as a safety net: if a generator ever hands back
+    prompt ids that were re-rendered or re-tokenized (end-of-turn markers
+    re-added differently, boundary re-tokenization, templates that strip
+    reasoning blocks from earlier assistant turns), the length delta between
+    consecutive prompts would no longer identify the new context ids. A
+    transition where the
+    prompt is not longer than the expected prefix but still matches it exactly
+    (no context ids in between) is consistent and is not reported.
+    """
+    mismatches: List[PrefixMismatch] = []
+    for idx in range(1, len(turn_segments)):
+        prev_prompt, prev_completion, _prev_logprobs = turn_segments[idx - 1]
+        cur_prompt = turn_segments[idx][0]
+        expected = list(prev_prompt) + list(prev_completion)
+        if len(cur_prompt) >= len(expected) and list(cur_prompt[: len(expected)]) == expected:
+            continue
+        diverge_at: Optional[int] = None
+        for pos, (got, want) in enumerate(zip(cur_prompt, expected)):
+            if got != want:
+                diverge_at = pos
+                break
+        mismatches.append(
+            PrefixMismatch(
+                turn_index=idx,
+                expected_prefix_len=len(expected),
+                prompt_len=len(cur_prompt),
+                diverge_at=diverge_at,
+            )
+        )
+    return mismatches
+
+
+def _assemble_faithful_sequence(turn_segments: Sequence[TurnSegment]) -> FaithfulSequence:
     """Token-faithful representation: full interleaved sequence + per-token mask.
 
-    Returns ``(base_prompt_ids, completion_ids, env_mask, logprobs)`` where
     ``completion_ids`` is everything after the initial prompt — assistant turns
-    interleaved with the exact tool-result / user-feedback context tokens the
-    model saw between turns. ``env_mask`` is 1 on assistant-sampled tokens and 0
-    on external context tokens; ``logprobs`` carries the sampling log-prob on
-    assistant tokens and 0.0 on context tokens. All three lists are the same
-    length, matching TRL's ``env_mask`` contract (mask is multiplied into the
-    completion loss mask, so context tokens contribute nothing to the loss while
-    still being attended to).
+    interleaved with the exact tool-result / user-feedback context ids the model
+    saw between turns. ``env_mask`` is 1 on assistant-sampled ids and 0 on
+    external context ids; ``logprobs`` carries the sampling log-prob on
+    assistant ids and 0.0 on context ids. All three lists are the same length,
+    matching TRL's ``env_mask`` contract (mask is multiplied into the completion
+    loss mask, so context ids contribute nothing to the loss while still being
+    attended to).
 
-    Context tokens for the transition into turn ``t`` are recovered as the tail of
-    turn ``t``'s rendered prompt that extends past ``prompt(t-1) + completion(t-1)``
-    — the same length-delta slicing TRL's own internal tool loop uses. Assistant
-    spans use the raw sampled token ids (not re-templated text) so the trained
-    tokens stay byte-faithful to what was sampled.
+    Context ids for the transition into turn ``t`` are the tail of turn ``t``'s
+    prompt past ``prompt(t-1) + completion(t-1)``. The rollout loop builds
+    prompts that way by construction; every transition is still verified first
+    as a safety net (idea borrowed from agent-lightning's ``ids_startswith``
+    check). On the first transition that fails, the sequence
+    is truncated after the last consistent turn: every id kept is then exactly
+    what the model conditioned on or sampled, with correct logprob alignment.
+    A single TRL rollout row per episode cannot hold a second segment, so the
+    later turns are dropped rather than spliced in with a wrong context.
+    Assistant spans use the raw sampled ids (not re-templated text).
     """
     if not turn_segments:
-        return [], [], [], []
+        return FaithfulSequence([], [], [], [], kept_turns=0)
+
+    mismatches = _find_prefix_mismatches(turn_segments)
+    kept_turns = mismatches[0].turn_index if mismatches else len(turn_segments)
 
     base_prompt = list(turn_segments[0][0])
     completion: List[int] = []
     env_mask: List[int] = []
     logprobs: List[float] = []
 
-    _first_prompt, first_completion, first_logprobs = turn_segments[0]
-    completion.extend(first_completion)
-    env_mask.extend([1] * len(first_completion))
-    logprobs.extend(first_logprobs)
-
-    for idx in range(1, len(turn_segments)):
-        prev_prompt, prev_completion, _prev_logprobs = turn_segments[idx - 1]
+    for idx in range(kept_turns):
         cur_prompt, cur_completion, cur_logprobs = turn_segments[idx]
-
-        ext_len = len(cur_prompt) - len(prev_prompt) - len(prev_completion)
-        if ext_len > 0:
-            ext_ids = list(cur_prompt[-ext_len:])
+        if idx > 0:
+            prev_prompt, prev_completion, _prev_logprobs = turn_segments[idx - 1]
+            prefix_len = len(prev_prompt) + len(prev_completion)
+            ext_ids = list(cur_prompt[prefix_len:])
             completion.extend(ext_ids)
-            env_mask.extend([0] * ext_len)
-            logprobs.extend([0.0] * ext_len)
+            env_mask.extend([0] * len(ext_ids))
+            logprobs.extend([0.0] * len(ext_ids))
 
         completion.extend(cur_completion)
         env_mask.extend([1] * len(cur_completion))
-        logprobs.extend(cur_logprobs)
+        logprobs.extend(_align_logprobs(list(cur_logprobs), len(cur_completion)))
 
-    return base_prompt, completion, env_mask, logprobs
+    return FaithfulSequence(
+        prompt_ids=base_prompt,
+        completion_ids=completion,
+        env_mask=env_mask,
+        logprobs=logprobs,
+        kept_turns=kept_turns,
+        mismatches=mismatches,
+    )
 
 
 def build_prompt_registry(dataset) -> Dict[str, EpisodeSpec]:
@@ -179,11 +267,24 @@ def build_rollout_func(
     *,
     registry: Dict[str, EpisodeSpec],
     env_training_cfg: Dict[str, Any],
+    use_vllm: bool,
     runtime_support: Optional[Mapping[str, Any]] = None,
+    chat_template_kwargs: Optional[Mapping[str, Any]] = None,
 ) -> Any:
-    openenv_module = _import_openenv_helpers()
-    generate_rollout_completions = getattr(openenv_module, "generate_rollout_completions")
+    """Build the TRL ``rollout_func`` for multi-turn env episodes.
+
+    ``use_vllm`` must match ``GRPOConfig.use_vllm``. TRL's
+    ``generate_rollout_completions`` helper is imported only on the vLLM path:
+    TRL 1.9 removed it, and the transformers path never needs it.
+    ``chat_template_kwargs`` (e.g. ``{"enable_thinking": False}``) is passed to
+    every chat-template render the rollout performs.
+    """
+    generate_rollout_completions = None
+    if use_vllm:
+        openenv_module = _import_openenv_helpers()
+        generate_rollout_completions = getattr(openenv_module, "generate_rollout_completions")
     faithful = _resolve_faithful_mode(env_training_cfg, runtime_support)
+    template_kwargs = dict(chat_template_kwargs or {})
 
     def rollout_func(prompts: List[str], trainer) -> Dict[str, List[Any]]:
         results: List[EpisodeRolloutResult] = []
@@ -198,6 +299,7 @@ def build_rollout_func(
                     spec=spec,
                     env_training_cfg=env_training_cfg,
                     faithful=faithful,
+                    chat_template_kwargs=template_kwargs,
                 )
             )
 
@@ -216,7 +318,16 @@ def build_rollout_func(
             "environment_issue_levels": [item.environment_issue_levels for item in results],
             "expected_tool_names": [item.expected_tool_names for item in results],
             "completion_text": [item.completion_text for item in results],
+            "prefix_mismatch_count": [item.prefix_mismatch_count for item in results],
         }
+        mismatched = sum(1 for item in results if item.prefix_mismatch_count)
+        if mismatched:
+            logger.warning(
+                "env-GRPO rollout batch: %d/%d episodes had a prompt prefix "
+                "mismatch and were truncated to their last consistent turn.",
+                mismatched,
+                len(results),
+            )
         if faithful:
             # TRL pops env_mask from the rollout output and multiplies it into the
             # completion loss mask (model tokens=1, external context tokens=0).
@@ -233,8 +344,11 @@ def _run_single_episode(
     spec: EpisodeSpec,
     env_training_cfg: Dict[str, Any],
     faithful: bool = False,
+    chat_template_kwargs: Optional[Mapping[str, Any]] = None,
 ) -> EpisodeRolloutResult:
     tokenizer = trainer.processing_class
+    template_kwargs = dict(chat_template_kwargs or {})
+    stop_token_ids = _stop_token_ids(trainer, tokenizer)
     env_backend = str(env_training_cfg.get("env_backend") or "local")
     validator = EnvironmentValidator(backend=env_backend)
     messages = [dict(msg) for msg in spec.prompt_messages]
@@ -270,19 +384,47 @@ def _run_single_episode(
     awaiting_final_text = False
     final_text_satisfied = False
 
+    # Index in ``messages`` of the latest assistant turn; everything after it is
+    # new context (tool results, feedback, nudges) for the next generation.
+    last_assistant_index = -1
+
     try:
         for turn_index in range(1, max_turns + 1):
-            prompt_text = tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
+            if turn_segments:
+                # Prefix-stable: earlier turns are never re-rendered. The next
+                # prompt is exactly what the model already saw and sampled, plus
+                # only the new context ids.
+                prev_prompt_ids, prev_completion_ids, _prev_logprobs = turn_segments[-1]
+                suffix_ids = _context_suffix_ids(
+                    tokenizer,
+                    messages[last_assistant_index + 1:],
+                    completion_ids=prev_completion_ids,
+                    stop_token_ids=stop_token_ids,
+                    chat_template_kwargs=template_kwargs,
+                    leading_messages=_leading_system_messages(messages),
+                )
+                prompt_ids = list(prev_prompt_ids) + list(prev_completion_ids) + suffix_ids
+            else:
+                prompt_ids = _encode_text(
+                    tokenizer,
+                    tokenizer.apply_chat_template(
+                        messages,
+                        tokenize=False,
+                        add_generation_prompt=True,
+                        **template_kwargs,
+                    ),
+                )
             outputs = _generate_one_completion(
                 trainer=trainer,
                 generate_rollout_completions=generate_rollout_completions,
-                prompt_text=prompt_text,
+                prompt_ids=prompt_ids,
+                stop_token_ids=stop_token_ids,
             )
-            prompt_ids = list(outputs.get("prompt_ids") or [])
+            # Record the ids the generator reports it conditioned on (normally
+            # identical to what was sent). If a backend ever altered them (e.g.
+            # added a BOS), the prefix check below catches it instead of the
+            # episode silently training on ids the model never saw.
+            prompt_ids = list(outputs.get("prompt_ids") or prompt_ids)
             completion_ids = list(outputs.get("completion_ids") or [])
             logprobs = [float(value) for value in (outputs.get("logprobs") or [])]
             completion_text = tokenizer.decode(completion_ids, skip_special_tokens=True)
@@ -299,7 +441,11 @@ def _run_single_episode(
             has_tool_calls = parsed.has_tool_calls
             text_content = parsed.text_content.strip()
 
+            # The decoded text drives parsing and the environment. The ids the
+            # model sees next come from turn_segments, not from re-rendering
+            # this message.
             messages.append({"role": "assistant", "content": completion_text})
+            last_assistant_index = len(messages) - 1
 
             if awaiting_final_text:
                 if has_tool_calls:
@@ -384,6 +530,34 @@ def _run_single_episode(
         if str(item).strip()
     ]
 
+    prefix_mismatch_count = 0
+    if faithful:
+        assembled = _assemble_faithful_sequence(turn_segments)
+        prompt_ids = assembled.prompt_ids
+        completion_ids = assembled.completion_ids
+        env_mask = assembled.env_mask
+        logprobs = assembled.logprobs
+        prefix_mismatch_count = len(assembled.mismatches)
+        if assembled.mismatches:
+            first = assembled.mismatches[0]
+            logger.warning(
+                "env-GRPO faithful rollout: turn %d prompt does not extend the previous "
+                "turn (expected prefix len %d, prompt len %d, first divergence at %s); "
+                "%d transition(s) inconsistent. Truncating episode sequence to the first "
+                "%d of %d turns. scenario=%s",
+                first.turn_index,
+                first.expected_prefix_len,
+                first.prompt_len,
+                "n/a (prompt shorter than prefix)" if first.diverge_at is None else first.diverge_at,
+                prefix_mismatch_count,
+                assembled.kept_turns,
+                len(turn_segments),
+                spec.scenario,
+            )
+    else:
+        prompt_ids, completion_ids, logprobs = _assemble_flat_sequence(turn_segments)
+        env_mask = []
+
     _write_debug_rollout(
         env_training_cfg=env_training_cfg,
         spec=spec,
@@ -396,13 +570,8 @@ def _run_single_episode(
         expected_tool_names=expected_tool_names,
         environment_result=environment_result,
         executed_tools=session.executed_tools,
+        prefix_mismatch_count=prefix_mismatch_count,
     )
-
-    if faithful:
-        prompt_ids, completion_ids, env_mask, logprobs = _assemble_faithful_sequence(turn_segments)
-    else:
-        prompt_ids, completion_ids, logprobs = _assemble_flat_sequence(turn_segments)
-        env_mask = []
 
     return EpisodeRolloutResult(
         prompt_ids=prompt_ids,
@@ -416,6 +585,7 @@ def _run_single_episode(
         total_tool_calls=len(session.executed_tools),
         final_text_satisfied=final_text_satisfied,
         env_mask=env_mask,
+        prefix_mismatch_count=prefix_mismatch_count,
         executed_tool_names=executed_tool_names,
         executed_tool_statuses=executed_tool_statuses,
         environment_issue_levels=environment_issue_levels,
@@ -445,6 +615,7 @@ def _write_debug_rollout(
     expected_tool_names: List[str],
     environment_result: Any,
     executed_tools: Any,
+    prefix_mismatch_count: int,
 ) -> None:
     debug_path = env_training_cfg.get("debug_rollouts_path")
     if not debug_path:
@@ -458,6 +629,7 @@ def _write_debug_rollout(
         "total_turns": total_turns,
         "total_tool_calls": total_tool_calls,
         "final_text_satisfied": final_text_satisfied,
+        "prefix_mismatch_count": prefix_mismatch_count,
         "expected_tool_names": expected_tool_names,
         "environment_issues": getattr(environment_result, "issues", []),
         "executed_tools": [
@@ -477,20 +649,35 @@ def _write_debug_rollout(
         return
 
 
-def _generate_one_completion(*, trainer, generate_rollout_completions, prompt_text: str) -> Dict[str, Any]:
+def _generate_one_completion(
+    *,
+    trainer,
+    generate_rollout_completions,
+    prompt_ids: Sequence[int],
+    stop_token_ids: frozenset = frozenset(),
+) -> Dict[str, Any]:
+    """Sample one completion conditioned on exactly ``prompt_ids`` (no re-tokenization)."""
     if not bool(getattr(trainer, "use_vllm", False)):
-        return _generate_one_completion_transformers(trainer=trainer, prompt_text=prompt_text)
-
-    signature = inspect.signature(generate_rollout_completions)
-    if len(signature.parameters) == 2:
-        outputs = generate_rollout_completions(trainer, [prompt_text])
-    else:
-        outputs = generate_rollout_completions(
-            prompts=[prompt_text],
-            args=trainer.args,
-            processing_class=trainer.processing_class,
-            model=trainer.model,
+        return _generate_one_completion_transformers(
+            trainer=trainer,
+            prompt_ids=prompt_ids,
+            stop_token_ids=stop_token_ids,
         )
+
+    if generate_rollout_completions is None:
+        raise RuntimeError(
+            "trainer.use_vllm is true but the rollout was built with use_vllm=False; "
+            "build_rollout_func(use_vllm=...) must match GRPOConfig.use_vllm"
+        )
+    # Token-id prompts so vLLM conditions on exactly these ids. Colocate mode
+    # hands prompts straight to LLM.generate (a vLLM TokensPrompt). Server mode
+    # sends a token-id list, which needs a TRL VLLMClient.generate that accepts
+    # list[list[int]] (TRL 1.x; 0.28's client takes text only).
+    if str(getattr(trainer, "vllm_mode", "colocate")) == "server":
+        prompt: Any = list(prompt_ids)
+    else:
+        prompt = {"prompt_token_ids": list(prompt_ids)}
+    outputs = generate_rollout_completions(trainer, [prompt], as_chat=False)
 
     if not outputs:
         raise RuntimeError("generate_rollout_completions returned no outputs")
@@ -500,15 +687,18 @@ def _generate_one_completion(*, trainer, generate_rollout_completions, prompt_te
     return dict(first)
 
 
-def _generate_one_completion_transformers(*, trainer, prompt_text: str) -> Dict[str, Any]:
+def _generate_one_completion_transformers(
+    *,
+    trainer,
+    prompt_ids: Sequence[int],
+    stop_token_ids: frozenset = frozenset(),
+) -> Dict[str, Any]:
     import torch
 
-    tokenizer = trainer.processing_class
-    inputs = tokenizer(prompt_text, return_tensors="pt")
     device = trainer.accelerator.device
-    inputs = {key: value.to(device) for key, value in inputs.items()}
-    prompt_ids_tensor = inputs["input_ids"]
-    prompt_length = prompt_ids_tensor.shape[1]
+    input_ids = torch.tensor([list(prompt_ids)], dtype=torch.long, device=device)
+    attention_mask = torch.ones_like(input_ids)
+    prompt_length = input_ids.shape[1]
 
     generation_kwargs = {
         "generation_config": trainer.generation_config,
@@ -520,25 +710,121 @@ def _generate_one_completion_transformers(*, trainer, prompt_text: str) -> Dict[
     trainer.model.eval()
     try:
         with torch.no_grad():
-            generated = trainer.model.generate(**inputs, **generation_kwargs)
+            generated = trainer.model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                **generation_kwargs,
+            )
     finally:
         if was_training:
             trainer.model.train()
 
-    completion_tensor = generated[0, prompt_length:]
-    eos_token_id = getattr(trainer, "eos_token_id", None)
+    completion_ids = generated[0, prompt_length:].tolist()
+    # generate() pads finished sequences: cut after the first stop (or pad) id
+    # and keep that id, as TRL does for its own completions.
+    cut_ids = set(stop_token_ids)
     pad_token_id = getattr(trainer, "pad_token_id", None)
-    completion_ids = completion_tensor.tolist()
+    if pad_token_id is not None:
+        cut_ids.add(pad_token_id)
     for index, token_id in enumerate(completion_ids):
-        if token_id in {eos_token_id, pad_token_id}:
+        if token_id in cut_ids:
             completion_ids = completion_ids[: index + 1]
             break
 
     return {
-        "prompt_ids": prompt_ids_tensor[0].tolist(),
+        "prompt_ids": list(prompt_ids),
         "completion_ids": completion_ids,
         "logprobs": None,
     }
+
+
+def _encode_text(tokenizer, text: str) -> List[int]:
+    """Tokenize already-templated text without adding BOS/EOS a second time."""
+    return list(tokenizer.encode(text, add_special_tokens=False))
+
+
+def _stop_token_ids(trainer, tokenizer) -> frozenset:
+    """Ids that end an assistant turn when sampled (tokenizer / generation-config EOS)."""
+    ids = set()
+    candidates: List[Any] = [
+        getattr(tokenizer, "eos_token_id", None),
+        getattr(trainer, "eos_token_id", None),
+        getattr(getattr(trainer, "generation_config", None), "eos_token_id", None),
+    ]
+    for value in candidates:
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple, set, frozenset)):
+            ids.update(int(item) for item in value if item is not None)
+        else:
+            ids.add(int(value))
+    return frozenset(ids)
+
+
+def _leading_system_messages(messages: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    leading: List[Dict[str, Any]] = []
+    for message in messages:
+        if str(message.get("role", "")).strip() != "system":
+            break
+        leading.append(dict(message))
+    return leading
+
+
+def _context_suffix_ids(
+    tokenizer,
+    new_messages: Sequence[Mapping[str, Any]],
+    *,
+    completion_ids: Sequence[int],
+    stop_token_ids: frozenset,
+    chat_template_kwargs: Optional[Mapping[str, Any]] = None,
+    leading_messages: Sequence[Mapping[str, Any]] = (),
+) -> List[int]:
+    """Ids the model sees between its last sampled completion and its next turn.
+
+    Adapted from TRL's ``GRPOTrainer._get_tool_suffix_ids`` (its multi-turn tool
+    loop): render a fixed minimal conversation that ends in an assistant turn,
+    append ``new_messages`` and the generation prompt, and keep only the ids
+    after that assistant turn, aligned at the end-of-turn (EOS) id. The caller
+    builds ``prompt + completion + suffix``, so earlier turns are never
+    re-rendered.
+
+    TRL finds the boundary by rendering the dummy conversation a second time
+    without the new messages. That needs a prefix-preserving template, and TRL
+    swaps in its own training template when the model's is not. Templates such
+    as Qwen3.5 render the dummy assistant turn differently depending on what
+    follows it, so here the boundary is located inside the one full render: the
+    dummy assistant content is a sentinel, and the suffix is the tokenized text
+    after it. That text starts with the template's assistant end-of-turn
+    marker. If the sampled completion already ended with a stop id, the marker
+    up to and including the first stop id is dropped (the model emitted its
+    own). If it did not (truncated at max length, or no EOS sampled), the
+    template's whole end-of-turn marker is kept as context so the next turn
+    still opens cleanly. Nothing here is specific to one chat template.
+    """
+    dummy = [dict(message) for message in leading_messages]
+    dummy.append({"role": "user", "content": "dummy"})
+    dummy.append({"role": "assistant", "content": _ASSISTANT_BOUNDARY_SENTINEL})
+    rendered = tokenizer.apply_chat_template(
+        dummy + [dict(message) for message in new_messages],
+        tokenize=False,
+        add_generation_prompt=True,
+        **dict(chat_template_kwargs or {}),
+    )
+    if rendered.count(_ASSISTANT_BOUNDARY_SENTINEL) != 1:
+        raise ValueError(
+            "chat template did not render the assistant boundary sentinel exactly once; "
+            "cannot compute prefix-stable context ids"
+        )
+    tail_ids = _encode_text(tokenizer, rendered.split(_ASSISTANT_BOUNDARY_SENTINEL, 1)[1])
+
+    end_of_turn = next(
+        (index + 1 for index, token_id in enumerate(tail_ids) if token_id in stop_token_ids),
+        0,
+    )
+    completion_closed = bool(completion_ids) and completion_ids[-1] in stop_token_ids
+    if end_of_turn and completion_closed:
+        return tail_ids[end_of_turn:]
+    return tail_ids
 
 
 def _first_system_prompt(messages: Sequence[Mapping[str, Any]]) -> str:
