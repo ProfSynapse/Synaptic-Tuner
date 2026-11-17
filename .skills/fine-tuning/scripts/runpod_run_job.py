@@ -6,13 +6,13 @@ repo at a pinned commit, execute a wrapper script inside a pinned container
 image, then terminate the pod. Generic by design -- the repo, commit, wrapper,
 and image are all arguments; nothing here is project-specific.
 
-Uses the RunPod REST API (https://rest.runpod.io/v1) rather than the GraphQL
+Uses the RunPod REST API (https://api.runpod.io/v2) rather than the GraphQL
 SDK, for two hard-won reasons (2026-07-05 lane debugging, 4 dead pods):
-  1. dockerEntrypoint override. Images that ship an ENTRYPOINT (e.g.
+  1. entrypoint override. Images that ship an ENTRYPOINT (e.g.
      unsloth/unsloth's /usr/local/bin/entrypoint.sh) receive GraphQL
      dockerArgs as *arguments to the entrypoint*, which can crash-loop the
      container forever with uptime pinned at 0 while the pod bills as
-     RUNNING. The REST field dockerEntrypoint replaces the ENTRYPOINT so the
+     RUNNING. The REST field entrypoint replaces the ENTRYPOINT so the
      job command actually runs.
   2. The SDK embeds docker_args into its GraphQL mutation with zero escaping
      (dockerArgs: "{docker_args}"), so any double quote corrupts the API
@@ -30,7 +30,7 @@ Usage:
       --repo-url https://github.com/org/repo.git --commit <full-40-char-sha> \
       --wrapper path/inside/repo/job.sh --wrapper-args "--stage extract" \
       [--gpu "NVIDIA GeForce RTX 3090"] [--image <img@sha256:...>] \
-      [--min-download 700] [--allowed-cuda "12.8,12.9,13.0"] \
+      [--allowed-cuda "12.8,12.9,13.0"] \
       [--timeout-min 180] [--probe-only] [--dry-run]
 """
 
@@ -43,7 +43,7 @@ import time
 import urllib.error
 import urllib.request
 
-API_BASE = "https://rest.runpod.io/v1"
+API_BASE = "https://api.runpod.io/v2"
 
 # Default image matches the tuner's runpod training backend pin.
 DEFAULT_IMAGE = (
@@ -51,9 +51,8 @@ DEFAULT_IMAGE = (
     "@sha256:5266c57be21059bfb407d80dc2f448868a5c2e2dbe7b2aa27780f48b48cbec39"
 )
 POLL_INTERVAL_S = 30
-# Covers image pull + container start on a host passing --min-download;
-# a ~20GB image at 700 Mbps pulls in ~4-5 min, so 15 min is generous and
-# anything slower means we picked a bad host and should recycle.
+# Covers image pull + container start. REST v2 has no download-speed filter;
+# stalled pulls remain bounded by this timeout.
 BOOT_TIMEOUT_S = 900
 # How long a failed job holds the container alive before exiting nonzero, so
 # the uptime poller can distinguish "ran and failed" (uptime climbs to this
@@ -72,9 +71,9 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--image", default=DEFAULT_IMAGE, help="container image (pin by digest)")
     ap.add_argument("--gpu", default="NVIDIA GeForce RTX 4090", help="RunPod gpu_type_id")
     ap.add_argument("--cloud-type", default="COMMUNITY", choices=["COMMUNITY", "SECURE"])
-    ap.add_argument("--min-download", type=int, default=700,
-                    help="minimum host download speed in Mbps; community hosts "
-                         "below this stall for tens of minutes pulling large images")
+    ap.add_argument("--min-download", type=int, default=None,
+                    help="deprecated: REST v2 removed the download-speed filter; "
+                         "accepted with a warning for existing callers")
     ap.add_argument("--allowed-cuda", default="",
                     help="comma-separated CUDA versions the host must offer "
                          "(e.g. '12.8,12.9,13.0'); a host whose driver is older "
@@ -90,7 +89,7 @@ def parse_args() -> argparse.Namespace:
                     help="skip clone+wrapper; just print GPU info and exit "
                          "(boot-reliability isolation test)")
     ap.add_argument("--no-entrypoint-override", action="store_true",
-                    help="do not set dockerEntrypoint; let the image's own "
+                    help="do not set entrypoint; let the image's own "
                          "ENTRYPOINT/CMD run (isolates whether the override "
                          "itself prevents container start)")
     ap.add_argument("--max-hosts", type=int, default=3,
@@ -104,7 +103,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_job_command(args: argparse.Namespace) -> str:
-    """The shell command the container runs (via dockerEntrypoint bash -lc).
+    """The shell command the container runs (via entrypoint bash -lc).
 
     The command runs as the image's default container user, which is NOT
     necessarily root: the unsloth image runs as unsloth:runtimeusers with
@@ -201,12 +200,10 @@ def api(method: str, path: str, api_key: str, body: dict | None = None) -> dict:
 def poll_pod(api_key: str, pod_id: str) -> dict:
     """Return {status, uptime} for a pod.
 
-    Create/terminate go through REST, but boot polling CANNOT: the REST pod
-    object carries no uptime field at all (only desiredStatus/lastStartedAt),
-    so an uptime check against REST reads every pod as never-booted forever
-    (2026-07-05: six healthy-or-not pods were killed at the boot timeout by
-    exactly that bug). Actual container runtime lives only in the GraphQL
-    pod.runtime.uptimeInSeconds.
+    Create/terminate use REST v2. Retain the established GraphQL uptime
+    polling: v1 REST exposed desiredStatus/lastStartedAt, not container
+    uptime (2026-07-05: checking it killed six pods at the boot timeout).
+    This migration does not change the runtime observation contract.
     """
     query = ('query{pod(input:{podId:"%s"}){desiredStatus '
              "runtime{uptimeInSeconds}}}" % pod_id)
@@ -232,20 +229,21 @@ def poll_pod(api_key: str, pod_id: str) -> dict:
 def build_pod_spec(args: argparse.Namespace) -> dict:
     spec = {
         "name": args.run_tag,
-        "imageName": args.image,
-        "gpuTypeIds": [args.gpu],
-        "gpuCount": 1,
-        "cloudType": args.cloud_type,
-        "containerDiskInGb": args.disk_gb,
-        "minDownloadMbps": args.min_download,
+        "image": args.image,
+        "gpu": {"id": args.gpu, "count": 1},
+        "cloud": args.cloud_type,
+        "disk": args.disk_gb,
+        # Preserve v1's default writable /workspace volume explicitly.
+        "mounts": {"persistent": {"size": 20, "path": "/workspace"}},
         "env": build_pod_env(args),
     }
     if not args.no_entrypoint_override:
         # Full ENTRYPOINT replacement: the image's own entrypoint never runs.
-        spec["dockerEntrypoint"] = ["bash", "-lc", build_job_command(args)]
+        spec["entrypoint"] = ["bash", "-lc"]
+        spec["cmd"] = [build_job_command(args)]
     cuda = [v.strip() for v in args.allowed_cuda.split(",") if v.strip()]
     if cuda:
-        spec["allowedCudaVersions"] = cuda
+        spec["gpu"]["allowedCudaVersions"] = cuda
     return spec
 
 
@@ -259,14 +257,18 @@ def terminate(api_key: str, pod_id: str) -> None:
         except Exception as e:  # noqa: BLE001
             print(f"[runpod] terminate attempt {attempt + 1} failed: {e}")
             time.sleep(10)
-    print(
-        f"[runpod] WARNING: could not terminate pod {pod_id}; "
-        "kill it manually at https://www.runpod.io/console/pods"
+    raise RuntimeError(
+        f"Could not terminate pod {pod_id}; stop here to avoid more billing. "
+        f"Manually DELETE {API_BASE}/pods/{pod_id} or use "
+        "https://www.runpod.io/console/pods"
     )
 
 
 def main() -> int:
     args = parse_args()
+    if args.min_download is not None:
+        print("WARNING: --min-download is ignored: REST v2 removed host bandwidth filters",
+              file=sys.stderr)
 
     if len(args.commit) != 40:
         print(f"ERROR: --commit must be a full 40-char sha (got {len(args.commit)} chars)")
@@ -307,7 +309,7 @@ def run_once(args: argparse.Namespace, api_key: str, attempt: int) -> int | str:
         if not pod_id:
             print(f"ERROR: create pod returned no id: {pod}")
             return 1
-        print(f"[runpod] pod {pod_id} created (${pod.get('costPerHr', '?')}/hr, attempt {attempt})")
+        print(f"[runpod] pod {pod_id} created (${pod.get('cost', '?')}/hr, attempt {attempt})")
         print(f"[runpod] console: https://www.runpod.io/console/pods/{pod_id}")
 
         # Boot wait, then completion poll. EXITED == the job command finished
