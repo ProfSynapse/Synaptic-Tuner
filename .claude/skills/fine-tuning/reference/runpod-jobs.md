@@ -12,11 +12,45 @@ This lane is for arbitrary wrapper jobs. Cloud TRAINING stays on the
 `reference/cloud-training.md`.
 
 The launcher (`scripts/runpod_run_job.py`) talks to the RunPod REST API
-(`https://rest.runpod.io/v1`) for pod create/terminate and to the GraphQL API
+(`https://api.runpod.io/v2`) for pod create/terminate and to the GraphQL API
 for runtime polling. It does NOT use the `runpod` Python SDK. This split was
-forced by hard debugging (2026-07-05, 4 dead pods); see the gotchas below.
+established by debugging (2026-07-05); the historical gotchas below describe
+the v1 behavior. GraphQL uptime polling is retained in this migration.
 
 ---
+
+
+## REST v2 migration (issue #282)
+
+[RunPod's overview](https://docs.runpod.io/api-reference-v2/overview) states that
+v1 is no longer available. This is a payload migration, not only a URL change:
+
+- [Create](https://docs.runpod.io/api-reference-v2/pods/create-a-pod):
+  `POST https://api.runpod.io/v2/pods`, Bearer auth, JSON body with `name`,
+  `image`, `gpu: {id, count, allowedCudaVersions?}`, `cloud`, `disk`, `env`,
+  `entrypoint` and `cmd`. The command is one element of `cmd`, preserving shell
+  quoting. `mounts.persistent: {size: 20, path: "/workspace"}` preserves v1's
+  default workspace volume (no network volume). A successful immediate create
+  returns HTTP 201 and a pod object with top-level `id`, `status`, and `cost`.
+  This launcher does not request queued deployment.
+- [Terminate](https://docs.runpod.io/api-reference-v2/pods/terminate-a-pod):
+  `DELETE https://api.runpod.io/v2/pods/{id}`, no request body, HTTP 204 with no
+  response body. Cleanup uses this same endpoint on every exit path.
+- [Migration guide](https://docs.runpod.io/api-reference-v2/migrate-from-v1):
+  no `minDownloadMbps` replacement; CUDA constraints move inside `gpu`.
+  Without `--no-entrypoint-override`, both `entrypoint` and `cmd` are explicit;
+  with that flag, both are omitted so image defaults apply.
+
+The training backend's dependency is `runpod>=1.7.0`, not an exact pin.
+The 1.7.0 SDK pod create/get/terminate methods use GraphQL, as does the installed
+1.12.0 SDK. No dependency change is required for the REST v1 shutdown.
+
+Live create → terminate validation remains an owner-run paid test: review a
+`--dry-run` spec with a pinned commit and image, then run a single
+`--probe-only --max-hosts 1` attempt with a short `--timeout-min`. Record the
+created ID, confirm cleanup returns successfully, and verify that exact pod is
+removed in the console/API. If interrupted or cleanup fails, use the sweep
+command above immediately. Offline tests do not establish live GPU boot proof.
 
 ## Requirements
 
@@ -47,7 +81,7 @@ python3 scripts/runpod_run_job.py \
 ```
 
 Always validate with `--dry-run` first: it prints the resolved pod spec as JSON
-(image digest, GPU, disk, env keys redacted, the full `dockerEntrypoint` chain)
+(image digest, GPU, disk, env keys redacted, the full `entrypoint` chain)
 without any API call or cost.
 
 Key flags:
@@ -59,9 +93,8 @@ Key flags:
 - `--cloud-type` -- `COMMUNITY` (default, cheaper) or `SECURE`.
 - `--env KEY=VALUE` -- extra pod env vars, repeatable.
 - `--timeout-min` -- hard wall-clock cap; the pod is terminated at timeout.
-- `--min-download` -- minimum host download speed (Mbps, default 700). Community
-  hosts below this stall for tens of minutes pulling a large image; the boot
-  timeout then recycles onto a better host (see `--max-hosts`).
+- `--min-download` -- deprecated compatibility flag; warns and is ignored. V2
+  removed host bandwidth placement filters. The boot timeout still bounds pulls.
 - `--allowed-cuda "12.8,12.9,13.0"` -- CUDA versions the host driver must offer;
   a host whose driver is older than the image's CUDA fails container start
   silently.
@@ -72,7 +105,7 @@ Key flags:
 - `--probe-only` -- skip clone+wrapper; boot the image, print `nvidia-smi`, and
   exit as soon as real container uptime is observed. Use this to isolate
   boot/image reliability from wrapper logic before spending on a real run.
-- `--no-entrypoint-override` -- do not set `dockerEntrypoint`; let the image's
+- `--no-entrypoint-override` -- do not set `entrypoint`; let the image's
   own ENTRYPOINT/CMD run (diagnostic: isolates whether the override itself
   prevents container start).
 
@@ -82,10 +115,10 @@ Key flags:
 
 The script owns the full pod lifecycle: REST `POST /pods` -> wait for REAL
 container uptime -> poll every 30s -> exit on pod EXITED -> and ALWAYS
-`DELETE /pods/{id}` in a `finally` block, with 3 retries. A wedged or timed-out
-run cannot silently keep billing. If termination fails after retries, the
-script prints the console URL (https://www.runpod.io/console/pods) for a manual
-kill -- verify.
+`DELETE /pods/{id}` in a `finally` block, with up to 3 attempts. If all termination attempts fail, the launcher raises
+an error with the pod ID and manual cleanup URL, preventing further host
+retries or a successful exit while a pod may still be billing. Process death
+can still bypass cleanup; sweep manually and verify.
 
 Exit codes: 0 = wrapper finished (pod EXITED), 1 = pod failed / boot timeout /
 wall-clock timeout / all `--max-hosts` boot attempts exhausted, 2 = bad
@@ -112,19 +145,19 @@ workdir instead:
 The braces matter: a bare `cd A || cd B && clone` parses as
 `cd A || (cd B && clone)` and SKIPS the clone whenever `cd A` succeeds.
 
-### 2. dockerEntrypoint override (why REST, not the SDK)
+### 2. entrypoint override (why REST, not the SDK)
 
 Images that ship an ENTRYPOINT (unsloth's `/usr/local/bin/entrypoint.sh`)
 receive GraphQL `dockerArgs` as *arguments to the entrypoint*, which can
 crash-loop the container forever with uptime pinned at 0 while it bills as
-RUNNING. The REST `dockerEntrypoint` field REPLACES the ENTRYPOINT so the job
+RUNNING. The REST `entrypoint` field REPLACES the ENTRYPOINT so the job
 command actually runs. The SDK also embeds `docker_args` into its GraphQL
 mutation with zero escaping, so any double quote corrupts the API call. REST
 takes a JSON body: no quoting restrictions.
 
-### 3. REST has no uptime; poll GraphQL
+### 3. Historical v1 uptime limitation; retained GraphQL polling
 
-The REST pod object carries no uptime field (only `desiredStatus`,
+The v1 REST pod object carried no uptime field (only `desiredStatus`,
 `lastStartedAt`), so an uptime check against REST reads every pod as
 never-booted forever (six healthy-or-not pods were killed at the boot timeout by
 exactly that bug). Actual container runtime lives only in the GraphQL
@@ -134,11 +167,11 @@ User-Agent (Cloudflare), so the poller sends an explicit UA.
 
 ### 4. Fail-hold: "ran and failed" vs "never booted"
 
-RunPod has no logs API (`runpod-python#400`). On nonzero exit the job command
+The v1 launcher had no logs API (`runpod-python#400`). On nonzero exit the job command
 prints the code and holds the container alive for `FAIL_HOLD_S` (300s) before
 exiting nonzero, so the uptime poller can tell "ran and failed" (uptime climbs
 to ~300s then EXITED) apart from a boot crash-loop (uptime stuck at 1-2s).
-Because there is no log API, a wrapper that wants diagnostics from a failed run
+Although v2 provides log streaming, this launcher retains GraphQL polling; a wrapper that wants diagnostics from a failed run
 must upload them itself before it exits -- see "Failure telemetry" below.
 
 ### 5. hf_xet download hang (cross-provider, not RunPod-specific)
@@ -168,8 +201,17 @@ container and re-runs the whole job from the top. The launcher's
 `DELETE /pods/{id}` in the `finally` block is the only thing that breaks this
 loop. So if the launcher PROCESS dies before that `finally` runs (session end,
 `TaskStop`, killed babysitter), the pod keeps re-running the job indefinitely
-and billing the whole time. Sweep it manually: `DELETE /v1/pods/<id>`, confirm
-HTTP 204, then re-query until the pod reads null. Hardening option worth
+and billing the whole time. Sweep only the pod ID owned by your attempt:
+
+```bash
+curl --fail-with-body --request DELETE \
+  --url "https://api.runpod.io/v2/pods/<id>" \
+  --header "Authorization: Bearer $RUNPOD_API_KEY"
+```
+
+Expect HTTP 204 with no body. Verify using `GET /v2/pods/<id>` (404 after
+removal) and the console; list responses are now `{"pods": [...]}` with
+pagination, so a missing ID on the first page alone is not confirmation. Hardening option worth
 considering for long unattended jobs: have the wrapper self-terminate at job
 end by calling the REST delete with its own `RUNPOD_POD_ID` (injected into
 every pod) and the API key, so pod teardown does not depend on the launcher
@@ -257,7 +299,7 @@ runs/modal/<tag>/      # Modal training runs
 
 ### Failure telemetry
 
-Because RunPod has no log API, a failed wrapper leaves zero diagnostics unless
+This launcher does not fetch v2 logs, so a failed wrapper leaves no retained diagnostics unless
 it uploads them itself. The recommended pattern (see the Epistemic-Humility AL
 wrapper for a worked example): capture the wrapper's own stdout+stderr to a file
 from the first line (`exec > >(tee logfile) 2>&1`), and on ANY nonzero exit
