@@ -253,8 +253,9 @@ def compile_stage_command(
     force: bool = False,
 ) -> list[str] | str:
     python = cfg.runtime.python or sys.executable
-    engine_root = context.engine_root if context is not None else repo_root
-    tuner = str(engine_root / "tuner.py")
+    # Module form: an installed wheel has no tuner.py script. _env_for_stage puts a
+    # source checkout's engine root on PYTHONPATH so `-m tuner` resolves there too.
+    launcher = [python, "-m", "tuner"]
     if stage.kind == "command":
         if isinstance(stage.command, list):
             return [str(item) for item in stage.command]
@@ -262,8 +263,7 @@ def compile_stage_command(
 
     if stage.kind == "mechinterp.extract":
         cmd = [
-            python,
-            tuner,
+            *launcher,
             "mechinterp",
             "extract",
             "--mi-config",
@@ -283,8 +283,7 @@ def compile_stage_command(
 
     if stage.kind == "mechinterp.probe-fit":
         cmd = [
-            python,
-            tuner,
+            *launcher,
             "mechinterp",
             "probe-fit",
             "--mi-config",
@@ -294,8 +293,7 @@ def compile_stage_command(
 
     if stage.kind == "mechinterp.steer":
         cmd = [
-            python,
-            tuner,
+            *launcher,
             "mechinterp",
             "steer",
             "--mi-config",
@@ -320,8 +318,7 @@ def compile_stage_command(
 
     if stage.kind == "mechinterp.dose-calibrate":
         cmd = [
-            python,
-            tuner,
+            *launcher,
             "mechinterp",
             "dose-calibrate",
             "--mi-config",
@@ -329,6 +326,9 @@ def compile_stage_command(
             "--model",
             _stage_model(cfg, stage),
         ]
+        revision = _stage_model_revision(cfg, stage)
+        if revision:
+            cmd.extend(["--model-revision", revision])
         adapter = _stage_adapter(cfg, stage)
         render_fn = _execution_render_fn(stage, repo_root, context)
         if adapter:
@@ -341,8 +341,7 @@ def compile_stage_command(
 
     if stage.kind == "mechinterp.score-gates":
         cmd = [
-            python,
-            tuner,
+            *launcher,
             "mechinterp",
             "score-gates",
             "--gates-config",
@@ -410,6 +409,10 @@ def _env_for_stage(
 ) -> dict[str, str]:
     env = {**os.environ, **cfg.runtime.env, **stage.env}
     paths = [str(repo_root / p) if not Path(p).is_absolute() else p for p in cfg.runtime.pythonpath]
+    engine_root = context.engine_root if context is not None else repo_root
+    if (stage.kind != "command" and (Path(engine_root) / "tuner.py").is_file()
+            and (Path(engine_root) / "pyproject.toml").is_file()):
+        paths = [str(engine_root)] + [p for p in paths if p != str(engine_root)]
     if paths:
         env["PYTHONPATH"] = os.pathsep.join(paths + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     if context is not None:

@@ -384,3 +384,22 @@ def test_batch_size_default_is_one():
 
     cfg = ExecutionConfig(output_path="out.jsonl")
     assert cfg.batch_size == 1
+
+
+def test_continuation_retains_exact_ids_including_first_eos():
+    from types import SimpleNamespace
+    from MechInterp.cli import _continuation_record
+    import torch
+
+    class Tokenizer:
+        eos_token_id = 7
+        def decode(self, ids, skip_special_tokens=True):
+            return "same decoded text"
+
+    generation = SimpleNamespace(max_new_tokens=8, eos_include_im_end=False)
+    first = _continuation_record(Tokenizer(), torch.tensor([3, 7, 0, 0]), generation)
+    second = _continuation_record(Tokenizer(), torch.tensor([4, 7, 0, 0]), generation)
+    assert first["answer_text"] == second["answer_text"]
+    assert first["generated_token_ids"] == [3, 7]
+    assert second["generated_token_ids"] == [4, 7]
+    assert first["n_new_tokens"] == len(first["generated_token_ids"])

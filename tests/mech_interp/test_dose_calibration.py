@@ -298,7 +298,7 @@ def test_pipeline_compiles_dose_calibrate_with_gpu_ack(tmp_path):
     plan = build_pipeline_plan(cfg, repo_root=tmp_path, provider="local", gpu_ack=True)
     cmd = plan["stages"][0]["command"]
 
-    assert cmd[:4] == ["python", str(tmp_path / "tuner.py"), "mechinterp", "dose-calibrate"]
+    assert cmd[:5] == ["python", "-m", "tuner", "mechinterp", "dose-calibrate"]
     assert "--mi-config" in cmd
     assert str(cfg_path) in cmd
     assert cmd[cmd.index("--model") + 1] == "Tiny/Model"

@@ -83,6 +83,7 @@ Train language models with SFT, KTO, and GRPO locally or on supported cloud prov
 | **GRPO** | Optimize against rewards | 5e-6 | 1 | Prompts + ground truth | Final online stage |
 | **Embedding** | Train a retrieval bi-encoder | 2e-5 | 1 | Triplets / pairs | Retrieval / RAG embedders |
 | **Decision** | Calibrated typed decisions (yes/no, choice, score) | 1e-4 (+1e-3 head) | 1 | State + typed question + gold | Routing / triage / policy checks (Jev-style) |
+| **MechInterp Weight Patch** | Experimental base-weight patch/export, in-memory patch evaluation, module-site capture, bounded weight inspection | `reference/mechinterp-weight-patch.md` |
 | **Image LoRA** | Teach a diffusion model named characters, objects, places and a style | 1e-4 | steps, not epochs (~3-5k) | Images + caption .txt (trigger + entity tokens) | Illustration consistency (ai-toolkit on Modal) |
 
 **Recommended pipeline:** SFT → KTO → GRPO
@@ -227,6 +228,7 @@ Load the specific reference you need:
 | **Image LoRA** | Qwen-Image LoRAs via ai-toolkit on Modal: dataset recipes, captions/tokens, sizing, cost cap, fetch/verify/cleanup | `reference/image-lora.md` |
 | **Troubleshooting** | OOM errors, instability, platform issues | `reference/troubleshooting.md` |
 | **Tokenizer Profiling** | Offline token-length distributions and sequence-budget sizing | `reference/tokenizer-profiling.md` |
+| **Batch Generation** | Pinned vLLM, HF schema-decoding fallback, repeatability and resume qualification | `reference/batch-generation.md` |
 | **Derived Training Images** | Immutable package-overlay planning, capture, diagnostic reporting, and live launch verification | `reference/derived-training-images.md` |
 | **Nexus Note Snapshot** | Read-only, explicit private-note snapshots for config-driven analysis | `reference/nexus-note-snapshot.md` |
 | **Env Alignment Protocol** | Canonical SynthChat → SFT → merge/publish → KTO → env-GRPO flow | `protocols/environment-backed-alignment-pipeline.md` |

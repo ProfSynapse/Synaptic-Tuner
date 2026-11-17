@@ -152,10 +152,14 @@ def run_batch_generate(
         prompt_by_id[row_id] = r["prompt"]
     if json_schema is not None and not isinstance(json_schema, dict):
         raise ValueError("json_schema must be a JSON object")
-    if json_schema is not None and engine != "vllm":
-        raise ValueError("json_schema structured outputs require engine='vllm'")
-    if engine != "vllm" and structured_output_backend != "auto":
-        raise ValueError("structured_output_backend requires engine='vllm'")
+    if json_schema is not None and engine not in {"vllm", "hf-batched"}:
+        raise ValueError("json_schema structured outputs require vllm or hf-batched")
+    if engine != "vllm" and structured_output_backend != "auto" and not (
+        engine == "hf-batched" and json_schema is not None and structured_output_backend == "xgrammar"
+    ):
+        raise ValueError("structured_output_backend requires a supported schema-decoding engine")
+    if engine != "vllm" and structured_output_disable_any_whitespace:
+        raise ValueError("structured_output_disable_any_whitespace requires engine='vllm'")
     if suppress_tokens and engine != "vllm":
         raise ValueError("suppress_tokens require engine='vllm'")
     if engine != "vllm" and max_model_len is not None:
@@ -215,7 +219,7 @@ def run_batch_generate(
         "trust_remote_code": trust_remote_code,
         "json_schema_sha256": schema_hash,
         "structured_output_backend": (
-            structured_output_backend if engine == "vllm" else None
+            structured_output_backend if engine == "vllm" or json_schema is not None else None
         ),
         "structured_output_disable_any_whitespace": (
             structured_output_disable_any_whitespace if engine == "vllm" else None
@@ -307,6 +311,8 @@ def run_batch_generate(
             gpu_memory_utilization=gpu_memory_utilization,
             suppress_tokens=suppress_tokens,
         )
+    elif engine == "hf-batched" and json_schema is not None:
+        engine_kwargs.update(json_schema=json_schema, structured_output_backend=structured_output_backend)
     gen_engine = get_generate_engine(engine, **engine_kwargs)
     provenance = {
         "version": 1,

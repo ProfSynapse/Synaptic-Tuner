@@ -23,6 +23,7 @@ Padding discipline
 from __future__ import annotations
 
 import os
+import json
 from typing import Any, Callable, Dict, List, Optional
 
 from tuner.batch.engines.base import (
@@ -68,7 +69,8 @@ class _ModelBundle:
         tokenizer: Any = None,
     ):
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoTokenizer
+        from shared.utilities.text_model import load_text_generation_model
 
         self.torch = torch
         if device is None:
@@ -88,7 +90,7 @@ class _ModelBundle:
             torch_dtype = (
                 getattr(torch, dtype) if dtype else _select_dtype(torch, device)
             )
-            model = AutoModelForCausalLM.from_pretrained(
+            model = load_text_generation_model(
                 model_name,
                 revision=revision,
                 token=os.environ.get("HF_TOKEN") or None,
@@ -186,7 +188,25 @@ class HFBatchedGenerateEngine(GenerateEngine):
         trust_remote_code: bool = False,
         model: Any = None,
         tokenizer: Any = None,
+        json_schema: Optional[dict] = None,
+        structured_output_backend: str = "auto",
     ):
+        if structured_output_backend not in ("auto", "xgrammar"):
+            raise ValueError("HF structured output backend must be auto or xgrammar")
+        self._compiled_grammar = None
+        self._grammar_processor = None
+        self._xgrammar_version = None
+        if json_schema is not None:
+            if not isinstance(json_schema, dict):
+                raise ValueError("json_schema must be a JSON object")
+            try:
+                import xgrammar as xgr
+                from xgrammar.contrib.hf import LogitsProcessor
+            except ImportError as exc:
+                raise RuntimeError("HF JSON-schema decoding requires the optional xgrammar package") from exc
+            self._grammar_processor = LogitsProcessor
+            from importlib.metadata import version
+            self._xgrammar_version = version("xgrammar")
         self.bundle = _ModelBundle(
             model_name,
             device=device,
@@ -205,6 +225,18 @@ class HFBatchedGenerateEngine(GenerateEngine):
         self.seed = seed
         self.extra_eos_tokens = list(extra_eos_tokens) if extra_eos_tokens else []
         self.stop = list(stop) if stop else []
+        if json_schema is not None:
+            vocab_size = int(self.bundle.model.get_output_embeddings().weight.shape[0])
+            info = xgr.TokenizerInfo.from_huggingface(self.bundle.tokenizer, vocab_size=vocab_size)
+            self._compiled_grammar = xgr.GrammarCompiler(info).compile_json_schema(json.dumps(json_schema))
+
+    def provenance(self):
+        from importlib.metadata import version
+        return {"engine": "hf-batched", "transformers": version("transformers"),
+                "torch": self.bundle.torch.__version__, "device": self.bundle.device,
+                "model_class": type(self.bundle.model).__name__,
+                "structured_output_backend": "xgrammar" if self._compiled_grammar is not None else None,
+                "xgrammar": self._xgrammar_version}
 
     def generate(
         self,
@@ -263,6 +295,10 @@ class HFBatchedGenerateEngine(GenerateEngine):
         if self.do_sample:
             gen_kwargs["temperature"] = self.temperature
             gen_kwargs["top_p"] = self.top_p
+        if self._compiled_grammar is not None:
+            # A matcher is stateful: start fresh for every independent batch,
+            # including an OOM retry. Never carry its state between requests.
+            gen_kwargs["logits_processor"] = [self._grammar_processor(self._compiled_grammar)]
 
         with torch.no_grad():
             out = model.generate(

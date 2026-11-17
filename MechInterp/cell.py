@@ -74,8 +74,20 @@ def compute_config_sha(config: SteerCellConfig | DoseCalibrationConfig) -> str:
     """
     payload = config.model_dump(mode="json")
     payload.get("surface", {}).pop("expected_config_sha", None)
+    # An absent weight patch must hash exactly as it did before the field
+    # existed, so historical config shas and recorded smokes stay valid.
+    if payload.get("surface", {}).get("weight_patch") is None:
+        payload.get("surface", {}).pop("weight_patch", None)
     canon = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()
+
+
+def _surface_dump(config: SteerCellConfig | DoseCalibrationConfig) -> dict:
+    """Surface block for manifests; an absent weight_patch is omitted entirely."""
+    surface = config.surface.model_dump(mode="json")
+    if surface.get("weight_patch") is None:
+        surface.pop("weight_patch", None)
+    return surface
 
 
 def _active_keys_for_arm(arm: ArmConfig, rows: list[dict]) -> list[str]:
@@ -374,6 +386,7 @@ def write_dose_manifest(
     config: DoseCalibrationConfig,
     config_sha: str,
     run_summaries: dict,
+    weight_patch: dict | None = None,
 ) -> Path:
     """Write a dose-calibration manifest next to the checkpoint JSONL."""
     p = Path(output_path)
@@ -383,9 +396,11 @@ def write_dose_manifest(
         "law": config.law.model_dump(mode="json"),
         "readouts": [r.model_dump(mode="json") for r in config.readouts],
         "calibration": config.calibration.model_dump(mode="json"),
-        "surface": config.surface.model_dump(mode="json"),
+        "surface": _surface_dump(config),
         "runs": run_summaries,
     }
+    if weight_patch is not None:
+        manifest["weight_patch"] = weight_patch
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
     return manifest_path
@@ -401,8 +416,16 @@ def smoke_state_path(output_path: str | Path) -> Path:
     return p.with_suffix(p.suffix + ".smoke_ok.json")
 
 
-def smoke_passed(output_path: str | Path, config_sha: str) -> bool:
-    """True if a smoke pass for this exact config sha has been recorded."""
+def smoke_passed(
+    output_path: str | Path, config_sha: str, patch_digest: str | None = None
+) -> bool:
+    """True if a smoke pass for this exact config sha has been recorded.
+
+    ``patch_digest`` is the applied weight patch's lineage digest (None when no
+    patch is applied). The recorded smoke must have been taken under the same
+    patch; a state file that predates patches records none, which matches
+    ``None`` exactly as before.
+    """
     sp = smoke_state_path(output_path)
     if not sp.exists():
         return False
@@ -411,15 +434,92 @@ def smoke_passed(output_path: str | Path, config_sha: str) -> bool:
             state = json.load(f)
     except (json.JSONDecodeError, OSError):
         return False
-    return bool(state.get("passed")) and state.get("config_sha") == config_sha
+    return (
+        bool(state.get("passed"))
+        and state.get("config_sha") == config_sha
+        and state.get("weight_patch_digest") == patch_digest
+    )
 
 
-def record_smoke(output_path: str | Path, config_sha: str, readback: dict) -> None:
+def record_smoke(
+    output_path: str | Path,
+    config_sha: str,
+    readback: dict,
+    patch_digest: str | None = None,
+) -> None:
     sp = smoke_state_path(output_path)
     sp.parent.mkdir(parents=True, exist_ok=True)
+    state = {
+        "passed": bool(readback.get("passed")),
+        "config_sha": config_sha,
+        "readback": readback,
+    }
+    if patch_digest is not None:
+        state["weight_patch_digest"] = patch_digest
     with open(sp, "w") as f:
+        json.dump(state, f, indent=2)
+
+
+# --------------------------------------------------------------------------
+# Weight-patch resume lineage
+# --------------------------------------------------------------------------
+
+
+class WeightPatchLineageError(ValueError):
+    """Existing output rows were produced under a different weight-patch lineage."""
+
+
+def weight_patch_lineage_path(output_path: str | Path) -> Path:
+    p = Path(output_path)
+    return p.with_suffix(p.suffix + ".weight_patch.json")
+
+
+def enforce_weight_patch_lineage(
+    output_path: str | Path, receipt: dict | None
+) -> None:
+    """Bind a per-row output JSONL to the weight patch that produced it.
+
+    - No patch and no lineage file: nothing to do (historical behavior).
+    - Patch, output absent/empty: create-only lineage record before any row.
+    - Otherwise the recorded ``patch_digest`` must equal the current one; a patch
+      appearing, disappearing or changing under existing rows is refused, so a
+      resume can never splice rows from a different patched model.
+
+    The digest covers the spec bytes, payload bytes, declared revision and the
+    exact before/after bytes of every targeted tensor, so a changed patch file or
+    a different base source both change it.
+    """
+    out = Path(output_path)
+    lineage = weight_patch_lineage_path(out)
+    has_rows = out.exists() and out.stat().st_size > 0
+    recorded = None
+    if lineage.exists():
+        try:
+            with open(lineage) as f:
+                recorded = json.load(f).get("patch_digest")
+        except (json.JSONDecodeError, OSError, AttributeError):
+            raise WeightPatchLineageError(
+                f"unreadable weight-patch lineage record {lineage.name}; refusing to resume"
+            ) from None
+    current = receipt["patch_digest"] if receipt is not None else None
+    if current is None and recorded is None:
+        return
+    if has_rows or recorded is not None:
+        if recorded != current:
+            raise WeightPatchLineageError(
+                "existing output rows were produced under weight-patch lineage "
+                f"{recorded!r} but this run uses {current!r}; use a fresh output path"
+            )
+        return
+    lineage.parent.mkdir(parents=True, exist_ok=True)
+    with open(lineage, "x") as f:
         json.dump(
-            {"passed": bool(readback.get("passed")), "config_sha": config_sha, "readback": readback},
+            {
+                "patch_digest": current,
+                "spec_sha256": receipt["spec_sha256"],
+                "payload_sha256": receipt["payload_sha256"],
+                "revision": receipt["revision"],
+            },
             f,
             indent=2,
         )
@@ -461,6 +561,7 @@ def write_manifest(
     config: SteerCellConfig,
     config_sha: str,
     arm_summaries: dict,
+    weight_patch: dict | None = None,
 ) -> Path:
     """Write a run manifest next to the output JSONL."""
     p = Path(output_path)
@@ -470,8 +571,10 @@ def write_manifest(
         "law": config.law.model_dump(mode="json"),
         "readouts": [r.model_dump(mode="json") for r in config.readouts],
         "arms": arm_summaries,
-        "surface": config.surface.model_dump(mode="json"),
+        "surface": _surface_dump(config),
     }
+    if weight_patch is not None:
+        manifest["weight_patch"] = weight_patch
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
     return manifest_path

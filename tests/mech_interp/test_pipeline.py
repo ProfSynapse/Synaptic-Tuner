@@ -159,7 +159,7 @@ def test_host_pipeline_splits_engine_executable_from_project_workdir(tmp_path):
 
     assert Path(cfg.runtime.workdir) == project
     assert Path(cfg.stages[0].config) == recipe.parent / "probe.yaml"
-    assert Path(plan["stages"][0]["command"][1]) == engine / "tuner.py"
+    assert plan["stages"][0]["command"][1:4] == ["-m", "tuner", "mechinterp"]
     assert Path(plan["stages"][0]["workdir"]) == project
 
 
